@@ -302,6 +302,7 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
             conn.execute("DELETE FROM extracted_facts WHERE run_id=%s", (run["run_id"],))
             conn.execute("DELETE FROM event_relations WHERE run_id=%s", (run["run_id"],))
             conn.execute("DELETE FROM medical_events WHERE run_id=%s", (run["run_id"],))
+            conn.execute("DELETE FROM review_tasks WHERE run_id=%s AND status='pending'", (run["run_id"],))
             conn.execute("DELETE FROM insights WHERE run_id=%s", (run["run_id"],))
             for document, pages in parsed_documents:
                 for page in pages:
@@ -407,6 +408,15 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
                      item["review_required"], item["review_status"], item["judgment_status"],
                      item["rule_version"], json.dumps(item["knowledge_refs"])),
                 )
+                if item["review_required"]:
+                    conn.execute(
+                        """INSERT INTO review_tasks
+                           (review_id,case_id,run_id,target_type,target_id,target_version,status,reason)
+                           VALUES (%s,%s,%s,'insight',%s,1,'pending',%s)
+                           ON CONFLICT (target_type,target_id,target_version) DO NOTHING""",
+                        (uuid4(), run["case_id"], run["run_id"], item["insight_id"],
+                         "clinical_or_indeterminate_insight_requires_review"),
+                    )
             for fact in facts:
                 conn.execute(
                     """INSERT INTO extracted_facts

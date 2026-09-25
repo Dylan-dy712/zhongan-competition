@@ -4,7 +4,7 @@ import hashlib
 import os
 import tempfile
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID, uuid4
 
 import psycopg
@@ -16,12 +16,16 @@ from pydantic import Field
 from .contracts.core import (
     AnalysisRun, Case, Contract, DataOrigin, Document, DocumentVersionRef,
     Evidence, EventBundle, ExternalRef, ExtractedFact, Insight,
+    ReviewCorrection, ReviewDecision, ReviewTask,
 )
 from .repository import (
     AccessDenied, IdempotencyConflict, actor_for_token, connect, create_case,
     create_analysis_run, get_analysis_run, get_case, get_document, get_evidence, get_events, get_facts,
     get_insights,
     register_document,
+)
+from .review_repository import (
+    ReviewAccessDenied, ReviewNotFound, StaleReview, decide_review, list_reviews,
 )
 
 app = FastAPI(title="众安·暖愈智护", version="0.1.0")
@@ -64,6 +68,13 @@ class CreateRun(Contract):
     document_versions: list[DocumentVersionRef] = Field(min_length=1, max_length=100)
     pipeline_version: str = Field(min_length=1, max_length=100)
     force_new: bool = False
+
+
+class DecideReview(Contract):
+    expected_version: int = Field(ge=1)
+    decision: Literal["approve", "correct", "reject"]
+    reason: str = Field(min_length=1, max_length=2000)
+    corrections: list[ReviewCorrection] = Field(default_factory=list, max_length=20)
 
 
 DOCUMENT_POLICY_VERSION = "document-policy-v1"
@@ -133,7 +144,7 @@ def current_actor(authorization: str | None = Header(default=None), conn=Depends
 
 @app.get("/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "scope": "req05_evidence_bound_insights"}
+    return {"status": "ok", "scope": "req06_versioned_medical_review"}
 
 
 @app.post("/v1/cases", response_model=Case, status_code=201)
@@ -307,3 +318,33 @@ def read_insights(case_id: UUID, run_id: UUID = Query(),
     if items is None:
         raise HTTPException(status_code=404, detail="Run not found")
     return items
+
+
+@app.get("/v1/reviews", response_model=list[ReviewTask])
+def read_reviews(status: Literal["pending", "decided", "cancelled"] = "pending",
+                 limit: Annotated[int, Query(ge=1, le=100)] = 20,
+                 cursor: UUID | None = None,
+                 actor_id: UUID = Depends(current_actor), conn=Depends(database)) -> list[ReviewTask]:
+    try:
+        return list_reviews(conn, actor_id=actor_id, status=status, limit=limit, cursor=cursor)
+    except ReviewAccessDenied:
+        raise HTTPException(status_code=403, detail="Medical reviewer role required") from None
+
+
+@app.post("/v1/reviews/{review_id}/decision", response_model=ReviewDecision)
+def post_review_decision(review_id: UUID, body: DecideReview,
+                         actor_id: UUID = Depends(current_actor),
+                         conn=Depends(database)) -> ReviewDecision:
+    try:
+        return decide_review(conn, actor_id=actor_id, review_id=review_id,
+                             expected_version=body.expected_version,
+                             decision=body.decision, reason=body.reason,
+                             corrections=body.corrections)
+    except ReviewNotFound:
+        raise HTTPException(status_code=404, detail="Review not found") from None
+    except ReviewAccessDenied:
+        raise HTTPException(status_code=403, detail="Medical reviewer role required") from None
+    except StaleReview:
+        raise HTTPException(status_code=409, detail="Review target has a newer version or is already decided") from None
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None

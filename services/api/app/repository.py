@@ -355,9 +355,10 @@ def get_events(conn, *, actor_id: UUID, case_id: UUID, run_id: UUID) -> EventBun
 
 def get_insights(conn, *, actor_id: UUID, case_id: UUID, run_id: UUID) -> list[Insight] | None:
     allowed = conn.execute(
-        """SELECT 1 FROM analysis_runs r JOIN cases c ON c.case_id=r.case_id
+        """SELECT ac.role FROM analysis_runs r JOIN cases c ON c.case_id=r.case_id
+           JOIN actors ac ON ac.actor_id=%s AND ac.active=true
            JOIN actor_subject_access a ON a.subject_id=c.subject_id
-             AND a.actor_id=%s AND a.can_read_case=true
+             AND a.actor_id=ac.actor_id AND a.can_read_case=true
            JOIN consent_purposes p ON p.consent_id=c.consent_id
              AND p.purpose='case_guidance' AND p.status='active'
              AND (p.expires_at IS NULL OR p.expires_at > now())
@@ -365,9 +366,10 @@ def get_insights(conn, *, actor_id: UUID, case_id: UUID, run_id: UUID) -> list[I
     ).fetchone()
     if not allowed:
         return None
+    patient_filter = " AND review_status IN ('approved','corrected')" if allowed["role"] == "patient" else ""
     rows = conn.execute(
-        "SELECT * FROM insights WHERE case_id=%s AND run_id=%s ORDER BY category,label,created_at",
-        (case_id, run_id),
+        "SELECT * FROM insights WHERE case_id=%s AND run_id=%s" + patient_filter +
+        " ORDER BY category,label,created_at", (case_id, run_id),
     ).fetchall()
     return [Insight(
         insight_id=r["insight_id"], case_id=r["case_id"], run_id=r["run_id"],

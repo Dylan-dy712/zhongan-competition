@@ -195,13 +195,44 @@ class Insight(Contract):
 
     @model_validator(mode="after")
     def validate_review_semantics(self):
-        if self.category == InsightCategory.clinical and (
-            not self.review_required or self.review_status == "not_required"
-        ):
+        if self.category == InsightCategory.clinical and self.review_status == "not_required":
             raise ValueError("clinical insight candidates require review")
         if self.confidence is not None and not self.confidence_method:
             raise ValueError("confidence_method required with confidence")
         return self
+
+
+class ReviewCorrection(Contract):
+    field_or_claim_id: str = Field(pattern=r"^(severity|rationale|uncertainty|suggested_action|judgment_status|knowledge_refs)$")
+    replacement: object
+    source_refs: list[UUID] = Field(default_factory=list)
+    reason: str = Field(min_length=1, max_length=1000)
+
+
+class ReviewTask(Contract):
+    review_id: UUID
+    case_id: UUID
+    run_id: UUID
+    target_type: str = Field(pattern=r"^insight$")
+    target_id: UUID
+    target_version: int = Field(ge=1)
+    status: str = Field(pattern=r"^(pending|decided|cancelled)$")
+    reason: str
+    target: Insight
+    created_at: datetime
+
+
+class ReviewDecision(Contract):
+    decision_id: UUID
+    review_id: UUID
+    target_type: str
+    target_id: UUID
+    target_version: int
+    decision: str = Field(pattern=r"^(approve|correct|reject)$")
+    reason: str
+    corrections: list[ReviewCorrection] = Field(default_factory=list)
+    reviewer_id: UUID
+    decided_at: datetime
 
 
 class ExternalRef(Contract):
