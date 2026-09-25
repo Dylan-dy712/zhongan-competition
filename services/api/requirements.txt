@@ -6,4 +6,5 @@ python-multipart==0.0.22
 pypdf==6.6.2
 pypdfium2==5.13.0
 Pillow==12.2.0
+PyYAML==6.0.3
 tencentcloud-sdk-python-ocr==3.1.179
