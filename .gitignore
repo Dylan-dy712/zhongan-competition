@@ -6,3 +6,6 @@ __pycache__/
 .secrets/
 /2
 /-p/
+node_modules/
+dist/
+*.tsbuildinfo

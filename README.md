@@ -17,6 +17,24 @@ python -m uvicorn services.api.app.main:app --reload
 python -m unittest discover -s tests -v
 ```
 
+## 温馨响应式前端
+
+患者端位于 `apps/web`，使用 React、TypeScript 与 Vite，同一套页面适配手机和电脑。手机端使用底部导航与证据抽屉；电脑端使用左侧导航和宽版内容区。页面提供明确标记的合成演示模式，也可以在“我的”中用访问令牌、案件 ID 和报告版本连接真实 API。真实接口报错会直接展示，不会用演示数据替代。
+
+```powershell
+cd apps/web
+npm install
+npm run dev
+```
+
+生产构建：
+
+```powershell
+npm run build
+```
+
+构建产物在 `apps/web/dist`。Nginx 配置 `deploy/nginx-zhongan-api.conf` 将静态站点作为 `/`，并继续把 `/v1`、`/health`、API 文档转发到 FastAPI。
+
 ## PostgreSQL 开发库配置（Windows）
 
 安装 PostgreSQL 16 Server 与命令行工具 `psql`，安装时设置管理员 `postgres` 密码。项目本机、腾讯云 CVM 与后续腾讯云数据库统一使用 PostgreSQL 16。若 `psql` 不在 PATH，可使用安装目录里的 `bin\psql.exe`。在项目根目录打开 PowerShell：
