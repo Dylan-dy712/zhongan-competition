@@ -27,6 +27,7 @@ from .repository import (
 from .review_repository import (
     ReviewAccessDenied, ReviewNotFound, StaleReview, decide_review, list_reviews,
 )
+from .care_assistant import AssistantAnswer, answer_question
 
 app = FastAPI(title="众安·暖愈智护", version="0.1.0")
 
@@ -75,6 +76,11 @@ class DecideReview(Contract):
     decision: Literal["approve", "correct", "reject"]
     reason: str = Field(min_length=1, max_length=2000)
     corrections: list[ReviewCorrection] = Field(default_factory=list, max_length=20)
+
+
+class AskAssistant(Contract):
+    question: str = Field(min_length=1, max_length=1000)
+    report_version: int = Field(ge=1)
 
 
 DOCUMENT_POLICY_VERSION = "document-policy-v1"
@@ -357,3 +363,15 @@ def read_report(case_id: UUID, version: Annotated[int, ApiPath(ge=1)],
     if report is None:
         raise HTTPException(status_code=404, detail="Report not found")
     return report
+
+
+@app.post("/v1/cases/{case_id}/assistant/messages", response_model=AssistantAnswer)
+def post_assistant_message(body: AskAssistant, case_id: UUID,
+                           actor_id: UUID = Depends(current_actor), conn=Depends(database)) -> AssistantAnswer:
+    report = get_report(conn, actor_id=actor_id, case_id=case_id, version=body.report_version)
+    if report is None:
+        raise HTTPException(status_code=404, detail="Published report not found")
+    try:
+        return answer_question(report, body.question)
+    except RuntimeError:
+        raise HTTPException(status_code=503, detail="Care assistant is temporarily unavailable") from None

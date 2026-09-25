@@ -1,106 +1,63 @@
-import { useMemo, useState, type ReactNode } from "react";
-import { ApiError, getEvidence, getReport } from "./api";
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { ApiError, askAssistant, getEvidence, getReport } from "./api";
 import { demoEvidence, demoReport } from "./demo";
-import type { Evidence, Report, ReportSection } from "./types";
+import type { AssistantAnswer, Evidence, Report, ReportSection } from "./types";
 
-type View = "home" | "report" | "actions" | "profile";
-type IconName = "home" | "file" | "heart" | "user" | "shield" | "spark" | "arrow" | "check" | "source" | "close" | "settings";
+type View = "assistant" | "report" | "actions" | "profile";
+type IconName = "chat"|"file"|"check"|"user"|"shield"|"spark"|"send"|"source"|"close"|"arrow"|"plus"|"heart"|"menu";
+type Message = { id:string; role:"assistant"|"user"; text:string; citations?:AssistantAnswer["citations"]; uncertainty?:string|null };
 
-const sectionMeta: Record<ReportSection["section_type"], { title: string; hint: string; icon: string }> = {
-  diagnosis_explanation: { title: "这次生病怎么回事", hint: "诊断与通俗解释", icon: "听" },
-  treatment_review: { title: "医院做了哪些治疗", hint: "诊疗过程回顾", icon: "疗" },
-  cost_explanation: { title: "费用花在哪里", hint: "费用与结算说明", icon: "费" },
-  recovery_plan: { title: "回家后怎么恢复", hint: "康复与日常照护", icon: "养" },
-  emotional_support: { title: "给你的一点安心", hint: "情绪与陪伴支持", icon: "暖" },
-  next_visit_advice: { title: "什么时候需要复诊", hint: "复诊与危险信号", icon: "诊" }
-};
+const sectionNames:Record<ReportSection["section_type"],string>={diagnosis_explanation:"病情说明",treatment_review:"治疗回顾",cost_explanation:"费用解读",recovery_plan:"康复计划",emotional_support:"情绪关怀",next_visit_advice:"复诊提醒"};
+const nav:{key:View;label:string;icon:IconName}[]=[{key:"assistant",label:"问暖暖",icon:"chat"},{key:"report",label:"关怀报告",icon:"file"},{key:"actions",label:"行动计划",icon:"check"},{key:"profile",label:"我的",icon:"user"}];
 
-function Icon({ name, size = 22 }: { name: IconName; size?: number }) {
-  const paths: Record<IconName, ReactNode> = {
-    home: <><path d="m3 10 9-7 9 7"/><path d="M5 9v11h14V9M9 20v-6h6v6"/></>,
-    file: <><path d="M6 2h8l4 4v16H6z"/><path d="M14 2v5h5M9 12h6M9 16h6"/></>,
-    heart: <path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1.1-1.1a5.5 5.5 0 0 0-7.8 7.8l1.1 1.1L12 21l7.8-7.5 1.1-1.1a5.5 5.5 0 0 0-.1-7.8Z"/>,
-    user: <><circle cx="12" cy="8" r="4"/><path d="M4 22a8 8 0 0 1 16 0"/></>,
-    shield: <><path d="M12 2 4 5v6c0 5 3.4 9.4 8 11 4.6-1.6 8-6 8-11V5z"/><path d="m9 12 2 2 4-5"/></>,
-    spark: <><path d="m12 3 1.4 4.1L17.5 9l-4.1 1.5L12 15l-1.5-4.5L6.5 9l4-1.9z"/><path d="m19 15 .7 2.1L22 18l-2.3.9L19 21l-.9-2.1L16 18l2.1-.9z"/></>,
-    arrow: <path d="m9 18 6-6-6-6"/>, check: <path d="m5 12 4 4L19 6"/>,
-    source: <><path d="M5 3h14v18H5z"/><path d="M8 8h8M8 12h8M8 16h5"/></>,
-    close: <path d="M5 5l14 14M19 5 5 19"/>, settings: <><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.9 4.9 7 7M17 17l2.1 2.1M2 12h3M19 12h3M4.9 19.1 7 17M17 7l2.1-2.1"/></>
-  };
-  return <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">{paths[name]}</svg>;
+function Icon({name,size=22}:{name:IconName;size?:number}){
+ const p:Record<IconName,ReactNode>={
+  chat:<><path d="M5 18.5 3 21l.7-4A8 8 0 1 1 7 20"/><path d="M8 11h.01M12 11h.01M16 11h.01"/></>,
+  file:<><path d="M6 2h8l4 4v16H6z"/><path d="M14 2v5h5M9 12h6M9 16h6"/></>,
+  check:<path d="m5 12 4 4L19 6"/>,user:<><circle cx="12" cy="8" r="4"/><path d="M4 22a8 8 0 0 1 16 0"/></>,
+  shield:<><path d="M12 2 4 5v6c0 5 3.4 9.4 8 11 4.6-1.6 8-6 8-11V5z"/><path d="m9 12 2 2 4-5"/></>,
+  spark:<><path d="m12 3 1.5 4.5L17 9l-4.5 1.5L11 15l-1.5-4.5L5 9l4.5-1.5z"/><path d="m19 15 .8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/></>,
+  send:<><path d="m22 2-7 20-4-9-9-4z"/><path d="M22 2 11 13"/></>,source:<><path d="M5 3h14v18H5z"/><path d="M8 8h8M8 12h8M8 16h5"/></>,
+  close:<path d="M5 5l14 14M19 5 5 19"/>,arrow:<path d="m9 18 6-6-6-6"/>,plus:<path d="M12 5v14M5 12h14"/>,
+  heart:<path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1.1-1.1a5.5 5.5 0 0 0-7.8 7.8L12 21l8.9-8.6a5.5 5.5 0 0 0-.1-7.8Z"/>,menu:<path d="M4 7h16M4 12h16M4 17h16"/>
+ };
+ return <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">{p[name]}</svg>
 }
 
-function StatusPill({ status }: { status: string }) {
-  const published = status === "published";
-  return <span className={`status ${published ? "status-ready" : "status-wait"}`}><span />{published ? "已完成专业审核" : "等待专业审核"}</span>;
+const welcome:Message={id:"welcome",role:"assistant",text:"你好，我是暖暖。我已经读完这份关怀报告。你可以直接告诉我最担心的事情，我会先查报告和原始依据，再用容易理解的话回答你。"};
+const suggestions=["这次到底得了什么病？","回家后最需要注意什么？","这笔费用是怎么构成的？"];
+function demoAnswer(q:string):AssistantAnswer{
+ if(q.includes("费"))return{answer:"报告记录的医疗总费用是 8,426.37 元。现有材料没有拆分医保结算与个人自付，因此这两项需要以正式结算票据为准。",citations:[{claim_id:"c4",evidence_refs:["2f6580ce-8ed4-4d22-88f8-aeeef82adab6"]}],uncertainty:"医保报销和自付明细尚未出现在材料中。",model_id:"demo",prompt_version:"demo"};
+ if(/注意|回家|恢复/.test(q))return{answer:"回家后先做好三件事：早晚记录体温、保证休息和适量饮水、联系医院确认复诊时间。活动量可以根据身体耐受逐步增加。",citations:[{claim_id:"c1",evidence_refs:["5bdcfedd-ef76-4740-a096-3d665e5a4d43"]}],uncertainty:"报告没有明确复诊日期，需要向原就诊机构确认。",model_id:"demo",prompt_version:"demo"};
+ return{answer:"材料记录的主要诊断是社区获得性肺炎。简单说，就是肺部受到感染。本次住院进行了抗感染和对症治疗，出院记录显示病情好转、生命体征平稳。",citations:[{claim_id:"c1",evidence_refs:["5bdcfedd-ef76-4740-a096-3d665e5a4d43"]}],uncertainty:null,model_id:"demo",prompt_version:"demo"};
 }
 
-function EvidencePanel({ evidence, onClose }: { evidence: Evidence | null; onClose: () => void }) {
-  return <aside className={`evidence-panel ${evidence ? "is-open" : ""}`} aria-hidden={!evidence}>
-    <div className="evidence-head"><div><span className="eyebrow">原始材料</span><h2>证据来源</h2></div><button className="icon-button" onClick={onClose} aria-label="关闭证据"><Icon name="close" /></button></div>
-    {evidence ? <div className="evidence-body">
-      <div className="source-paper"><span className="paper-tab">第 {(evidence.page_index ?? 0) + 1} 页</span><blockquote>{evidence.text_span?.text || "该证据没有可展示的文字片段，请打开原始材料核对。"}</blockquote></div>
-      <dl className="meta-list"><div><dt>提取方式</dt><dd>{evidence.extraction_method === "native_pdf_text" ? "原生 PDF 文本" : evidence.extraction_method}</dd></div><div><dt>材料版本</dt><dd>第 {evidence.document_version} 版</dd></div></dl>
-      <p className="privacy-note"><Icon name="shield" size={18}/> 只展示与当前结论直接相关的原文片段。</p>
-    </div> : <div className="evidence-empty"><Icon name="source" size={30}/><p>点击报告中的“查看依据”后，原文会显示在这里。</p></div>}
-  </aside>;
+function AssistantView({report,mode,token,onEvidence}:{report:Report;mode:"demo"|"live";token:string;onEvidence:(id:string)=>void}){
+ const[messages,setMessages]=useState<Message[]>([welcome]),[input,setInput]=useState(""),[stage,setStage]=useState<string|null>(null),[error,setError]=useState("");const end=useRef<HTMLDivElement>(null);
+ useEffect(()=>{ end.current?.scrollIntoView({behavior:"smooth"}); },[messages,stage]);
+ const send=async(text=input)=>{const q=text.trim();if(!q||stage)return;setInput("");setError("");setMessages(v=>[...v,{id:crypto.randomUUID(),role:"user",text:q}]);
+  try{setStage("正在读取已发布报告");await new Promise(r=>setTimeout(r,300));setStage("正在核对结论与证据");await new Promise(r=>setTimeout(r,360));setStage("正在组织回答");
+   const a=mode==="demo"?await new Promise<AssistantAnswer>(r=>setTimeout(()=>r(demoAnswer(q)),560)):await askAssistant(report.case_id,report.report_version,q,token);
+   setMessages(v=>[...v,{id:crypto.randomUUID(),role:"assistant",text:a.answer,citations:a.citations,uncertainty:a.uncertainty}])
+  }catch(e){setError(e instanceof ApiError?e.message:"暂时无法回答，请稍后再试。")}finally{setStage(null)}
+ };
+ const submit=(e:FormEvent)=>{e.preventDefault();void send()};
+ return <main className="assistant-page"><header className="assistant-head"><div><span className="live-dot"/><b>暖暖在线</b><small>基于已审核报告回答</small></div><span className="case-tag">报告 v{report.report_version}</span></header>
+  <div className="conversation"><section className="conversation-intro"><div className="ai-orb"><Icon name="spark" size={30}/><i/><i/></div><p>AI 关怀助手</p><h1>有什么担心，<em>慢慢说给我听</em></h1><span>我会先查材料，再回答你</span></section>
+   <div className="messages">{messages.map(m=><div className={"message-row "+m.role} key={m.id}>{m.role==="assistant"&&<div className="avatar"><Icon name="spark" size={17}/></div>}<div className="message-bubble"><p>{m.text}</p>{m.uncertainty&&<div className="uncertainty"><strong>还需要确认</strong>{m.uncertainty}</div>}{m.citations?.flatMap(c=>c.evidence_refs).map((id,i)=><button className="citation" key={id+i} onClick={()=>onEvidence(id)}><Icon name="source" size={15}/>查看原始依据 <Icon name="arrow" size={14}/></button>)}</div></div>)}
+    {stage&&<div className="message-row assistant"><div className="avatar thinking"><Icon name="spark" size={17}/></div><div className="process-card"><div><span>{stage}</span><b><i/><i/><i/></b></div><section><i/><i/><i/></section><small>只使用你有权查看的内容</small></div></div>}{error&&<div className="chat-error">{error}</div>}<div ref={end}/>
+   </div>
+  </div>
+  <div className="composer-wrap">{messages.length===1&&<div className="suggestions">{suggestions.map(s=><button onClick={()=>void send(s)} key={s}>{s}<Icon name="arrow" size={14}/></button>)}</div>}<form className="composer" onSubmit={submit}><button type="button" className="add-button" aria-label="添加材料"><Icon name="plus"/></button><textarea value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();void send()}}} placeholder="问问暖暖，例如：回家后要注意什么？" rows={1}/><button className="send-button" disabled={!input.trim()||!!stage} aria-label="发送"><Icon name="send"/></button></form><p className="composer-note"><Icon name="shield" size={13}/> AI 回答用于关怀解释，不能替代医生诊疗</p></div>
+ </main>
 }
 
-function ReportView({ report, onEvidence }: { report: Report; onEvidence: (id: string) => void }) {
-  const [open, setOpen] = useState<string[]>(["diagnosis_explanation", "recovery_plan"]);
-  const toggle = (key: string) => setOpen(v => v.includes(key) ? v.filter(x => x !== key) : [...v, key]);
-  return <main className="page report-page">
-    <header className="page-heading"><div><span className="eyebrow">关怀报告 · 第 {report.report_version} 版</span><h1>把复杂的病历，讲成你能看懂的话</h1><p>每条内容都能回到材料出处；无法确定的地方会明确告诉你。</p></div><StatusPill status={report.status}/></header>
-    <div className="gentle-banner"><span className="banner-icon"><Icon name="heart"/></span><div><strong>先慢慢看，不必一次记住所有内容</strong><p>最需要做的事情已经整理在“优先行动”里。</p></div></div>
-    <section className="section-list" aria-label="六段关怀报告">
-      {report.sections.map(section => {
-        const meta = sectionMeta[section.section_type]; const expanded = open.includes(section.section_type);
-        return <article className={`report-section ${expanded ? "expanded" : ""}`} key={section.section_type}>
-          <button className="section-toggle" onClick={() => toggle(section.section_type)} aria-expanded={expanded}>
-            <span className="section-mark">{meta.icon}</span><span className="section-title"><strong>{meta.title}</strong><small>{meta.hint}</small></span><span className="chevron"><Icon name="arrow"/></span>
-          </button>
-          {expanded && <div className="section-content">{section.claims.map(c => <div className="claim" key={c.claim_id}><p>{c.text}</p><div className="claim-foot"><span className={`claim-kind ${c.claim_type}`}>{c.claim_type === "case_fact" ? "来自本次材料" : c.claim_type === "to_confirm" ? "需要确认" : c.claim_type === "professional_explanation" ? "专业知识说明" : "关怀建议"}</span>{c.evidence_refs.map(id => <button className="source-link" key={id} onClick={() => onEvidence(id)}><Icon name="source" size={16}/>查看依据</button>)}</div></div>)}</div>}
-        </article>;
-      })}
-    </section>
-  </main>;
-}
+function EvidenceDrawer({evidence,onClose}:{evidence:Evidence|null;onClose:()=>void}){return <>{evidence&&<button className="drawer-mask" onClick={onClose} aria-label="关闭"/>}<aside className={"evidence-drawer "+(evidence?"open":"")}><header><div><span>原始材料</span><h2>这句话从哪里来</h2></div><button onClick={onClose}><Icon name="close"/></button></header>{evidence&&<><div className="paper"><b>第 {(evidence.page_index??0)+1} 页</b><p>{evidence.text_span?.text||"当前证据没有可展示的文字片段。"}</p></div><div className="evidence-meta"><span><Icon name="shield" size={16}/>已核对材料版本 {evidence.document_version}</span><small>{evidence.extraction_method==="native_pdf_text"?"原生 PDF 文字":"结构化材料"}</small></div></>}</aside></>}
+function ReportView({report,onEvidence}:{report:Report;onEvidence:(id:string)=>void}){return <main className="content-page"><header className="title-block"><span>CARE REPORT · V{report.report_version}</span><h1>你的关怀报告</h1><p>六个部分都来自材料、专业知识或明确的待确认项。</p></header><div className="report-grid">{report.sections.map((s,i)=><article key={s.section_type} className="report-tile"><div className="tile-index">0{i+1}</div><h2>{sectionNames[s.section_type]}</h2>{s.claims.slice(0,1).map(c=><div key={c.claim_id}><p>{c.text}</p><div className="tile-foot"><span>{c.claim_type==="case_fact"?"本次材料":"关怀解释"}</span>{c.evidence_refs.map(id=><button onClick={()=>onEvidence(id)} key={id}>查看依据</button>)}</div></div>)}</article>)}</div></main>}
+function ActionsView({report}:{report:Report}){const[done,setDone]=useState<string[]>([]);return <main className="content-page"><header className="title-block"><span>NEXT STEPS</span><h1>先做好这三件事</h1><p>把复杂的恢复计划，变成今天能完成的小事。</p></header><div className="action-list">{report.actions.map((a,i)=><button key={a.action_id} className={done.includes(a.action_id)?"done":""} onClick={()=>setDone(v=>v.includes(a.action_id)?v.filter(x=>x!==a.action_id):[...v,a.action_id])}><b>{String(i+1).padStart(2,"0")}</b><span><strong>{a.action_text}</strong><small>{a.rationale}</small></span><i><Icon name="check"/></i></button>)}</div></main>}
+function ProfileView({mode,setMode,onLoad,loading,error}:{mode:"demo"|"live";setMode:(m:"demo"|"live")=>void;onLoad:(v:{token:string;caseId:string;version:number})=>void;loading:boolean;error:string}){const[t,setT]=useState(localStorage.getItem("zhongan_token")||""),[c,setC]=useState(""),[v,setV]=useState(1);return <main className="content-page"><header className="title-block"><span>PRIVACY & DATA</span><h1>数据与隐私</h1><p>真实模式只读取当前令牌获准访问的报告。</p></header><section className="mode-panel"><div className="mode-tabs"><button className={mode==="demo"?"active":""} onClick={()=>setMode("demo")}>合成演示</button><button className={mode==="live"?"active":""} onClick={()=>setMode("live")}>连接真实报告</button></div>{mode==="demo"?<div className="demo-info"><Icon name="shield"/><div><strong>当前是合成案例</strong><p>所有病情和金额均为虚构，只用于展示产品流程。</p></div></div>:<form onSubmit={e=>{e.preventDefault();localStorage.setItem("zhongan_token",t);onLoad({token:t,caseId:c,version:v})}}><label>访问令牌<input type="password" value={t} onChange={e=>setT(e.target.value)} required/></label><label>案件 ID<input value={c} onChange={e=>setC(e.target.value)} required/></label><label>报告版本<input type="number" min="1" value={v} onChange={e=>setV(+e.target.value)}/></label><button>{loading?"正在读取…":"进入关怀空间"}</button>{error&&<p className="form-error">{error}</p>}</form>}</section></main>}
 
-function ActionsView({ report }: { report: Report }) {
-  const [done, setDone] = useState<string[]>([]);
-  return <main className="page"><header className="page-heading"><div><span className="eyebrow">优先行动</span><h1>接下来，先做好这三件事</h1><p>数量少一点，行动更容易。完成后可以在这里打勾。</p></div></header>
-    <div className="action-grid">{report.actions.map((a, i) => <article className={`action-card ${done.includes(a.action_id) ? "done" : ""}`} key={a.action_id}><span className="action-number">0{i + 1}</span><div className="action-copy"><h2>{a.action_text}</h2><p>{a.rationale}</p><span>{a.owner_role === "caregiver" ? "建议家属协助" : "建议本人完成"}</span></div><button className="round-check" aria-label={done.includes(a.action_id) ? "标记为未完成" : "标记为已完成"} onClick={() => setDone(v => v.includes(a.action_id) ? v.filter(x => x !== a.action_id) : [...v, a.action_id])}><Icon name="check"/></button></article>)}</div>
-    <div className="safety-card"><div className="safety-symbol">!</div><div><h2>出现这些情况，请及时就医</h2><p>呼吸困难明显加重、口唇发紫、意识不清或持续高热。内容来自通用知识，具体情况请听从专业人员判断。</p></div></div>
-  </main>;
-}
-
-function HomeView({ report, navigate }: { report: Report; navigate: (v: View) => void }) {
-  return <main className="page home-page"><section className="welcome"><div><span className="eyebrow">下午好</span><h1>恢复的每一步<br/><em>都值得被温柔看见</em></h1><p>我们把材料里的重要信息整理好了，你可以从最关心的地方开始。</p><button className="primary-button" onClick={() => navigate("report")}>查看关怀报告 <Icon name="arrow" size={18}/></button></div><div className="warm-visual" aria-hidden="true"><div className="sun"/><div className="hill hill-one"/><div className="hill hill-two"/><div className="plant"><i/><i/><b/></div><span className="float-heart">♡</span></div></section>
-    <section className="overview"><div className="section-label"><div><span className="eyebrow">今日概览</span><h2>你的关怀进度</h2></div><span className="date">9月25日 · 周五</span></div><div className="overview-grid"><button className="overview-card report-card" onClick={() => navigate("report")}><span className="card-icon peach"><Icon name="file"/></span><span><small>关怀报告</small><strong>6 个部分已整理</strong><em><Icon name="shield" size={15}/> 内容可追溯</em></span><Icon name="arrow"/></button><button className="overview-card" onClick={() => navigate("actions")}><span className="card-icon green"><Icon name="check"/></span><span><small>优先行动</small><strong>{report.actions.length} 件事等你完成</strong><em>从简单的一件开始</em></span><Icon name="arrow"/></button></div></section>
-    <section className="care-note"><Icon name="spark"/><div><strong>给今天的你</strong><p>康复有快有慢，不需要拿自己的进度和别人比较。今天照顾好自己，就是很重要的一步。</p></div></section>
-  </main>;
-}
-
-function ProfileView({ mode, setMode, onLoad, loading, error }: { mode: "demo" | "live"; setMode: (m: "demo" | "live") => void; onLoad: (values: { token: string; caseId: string; version: number }) => void; loading: boolean; error: string }) {
-  const [token, setToken] = useState(localStorage.getItem("zhongan_token") || ""); const [caseId, setCaseId] = useState(""); const [version, setVersion] = useState(1);
-  return <main className="page"><header className="page-heading"><div><span className="eyebrow">我的</span><h1>阅读与数据设置</h1><p>演示数据有清晰标记；真实模式只显示服务器实际返回的内容。</p></div></header>
-    <section className="settings-card"><div className="settings-row"><div><strong>当前数据</strong><p>{mode === "demo" ? "合成演示案例，不含真实个人信息" : "连接真实 API"}</p></div><div className="segmented"><button className={mode === "demo" ? "active" : ""} onClick={() => setMode("demo")}>合成演示</button><button className={mode === "live" ? "active" : ""} onClick={() => setMode("live")}>真实接口</button></div></div>{mode === "live" && <form className="connection-form" onSubmit={e => { e.preventDefault(); localStorage.setItem("zhongan_token", token); onLoad({ token, caseId, version }); }}><label>访问令牌<input type="password" value={token} onChange={e => setToken(e.target.value)} required autoComplete="off" placeholder="仅保存在本机浏览器"/></label><label>案件 ID<input value={caseId} onChange={e => setCaseId(e.target.value)} required placeholder="UUID"/></label><label>报告版本<input type="number" min="1" value={version} onChange={e => setVersion(Number(e.target.value))}/></label><button className="primary-button" disabled={loading}>{loading ? "正在连接…" : "读取报告"}</button>{error && <p className="form-error" role="alert">{error}</p>}</form>}</section>
-    <section className="privacy-card"><Icon name="shield"/><div><strong>你的材料如何被使用</strong><p>报告只展示当前授权范围内的案件内容。引用原文时仅显示与结论相关的片段。</p></div></section>
-  </main>;
-}
-
-export default function App() {
-  const [view, setView] = useState<View>("home"); const [mode, setModeState] = useState<"demo" | "live">("demo"); const [report, setReport] = useState<Report>(demoReport); const [evidence, setEvidence] = useState<Evidence | null>(null); const [token, setToken] = useState(""); const [loading, setLoading] = useState(false); const [error, setError] = useState("");
-  const nav = useMemo(() => [{ key: "home", label: "首页", icon: "home" }, { key: "report", label: "关怀报告", icon: "file" }, { key: "actions", label: "行动", icon: "heart" }, { key: "profile", label: "我的", icon: "user" }] as {key: View; label: string; icon: IconName}[], []);
-  const setMode = (m: "demo" | "live") => { setModeState(m); setError(""); if (m === "demo") setReport(demoReport); };
-  const load = async ({ token: value, caseId, version }: { token: string; caseId: string; version: number }) => { setLoading(true); setError(""); try { const next = await getReport(caseId, version, value); setReport(next); setToken(value); setView("report"); } catch (e) { setError(e instanceof ApiError ? `${e.message}${e.traceId ? ` · 追踪号 ${e.traceId}` : ""}` : "暂时无法连接服务器，请稍后再试。"); } finally { setLoading(false); } };
-  const showEvidence = async (id: string) => { if (mode === "demo") { setEvidence(demoEvidence[id] || null); return; } try { setEvidence(await getEvidence(id, token)); } catch (e) { setError(e instanceof Error ? e.message : "证据读取失败"); } };
-  return <div className="app-shell">
-    <aside className="side-nav"><a className="brand" href="#" onClick={e => { e.preventDefault(); setView("home"); }}><span className="brand-symbol"><Icon name="heart"/></span><span><strong>暖愈智护</strong><small>让康复更有温度</small></span></a><nav>{nav.map(n => <button key={n.key} className={view === n.key ? "active" : ""} onClick={() => setView(n.key)}><Icon name={n.icon}/><span>{n.label}</span>{n.key === "report" && <i>6</i>}</button>)}</nav><div className="nav-foot"><Icon name="shield"/><span>隐私安全守护中</span></div></aside>
-    <div className="content-shell"><div className="mobile-top"><a className="brand" href="#" onClick={e => { e.preventDefault(); setView("home"); }}><span className="brand-symbol"><Icon name="heart"/></span><strong>暖愈智护</strong></a><button className="icon-button" onClick={() => setView("profile")} aria-label="设置"><Icon name="settings"/></button></div>{mode === "demo" && <div className="demo-ribbon"><span>合成演示</span> 页面内容用于功能展示，不含真实个人信息</div>}
-      {view === "home" && <HomeView report={report} navigate={setView}/>} {view === "report" && <ReportView report={report} onEvidence={showEvidence}/>} {view === "actions" && <ActionsView report={report}/>} {view === "profile" && <ProfileView mode={mode} setMode={setMode} onLoad={load} loading={loading} error={error}/>} 
-    </div>
-    <EvidencePanel evidence={evidence} onClose={() => setEvidence(null)}/>{evidence && <button className="drawer-backdrop" onClick={() => setEvidence(null)} aria-label="关闭证据"/>}
-    <nav className="bottom-nav">{nav.map(n => <button key={n.key} className={view === n.key ? "active" : ""} onClick={() => setView(n.key)}><Icon name={n.icon}/><span>{n.label}</span></button>)}</nav>
-  </div>;
-}
+export default function App(){const[view,setView]=useState<View>("assistant"),[mode,setMode]=useState<"demo"|"live">("demo"),[report,setReport]=useState(demoReport),[token,setToken]=useState(""),[evidence,setEvidence]=useState<Evidence|null>(null),[loading,setLoading]=useState(false),[error,setError]=useState("");
+ const showEvidence=async(id:string)=>{if(mode==="demo"){setEvidence(demoEvidence[id]||null);return}try{setEvidence(await getEvidence(id,token))}catch(e){setError(e instanceof Error?e.message:"证据读取失败")}};
+ const load=async({token:t,caseId,version}:{token:string;caseId:string;version:number})=>{setLoading(true);setError("");try{const r=await getReport(caseId,version,t);setReport(r);setToken(t);setView("assistant")}catch(e){setError(e instanceof ApiError?e.message:"连接失败")}finally{setLoading(false)}};
+ return <div className="shell"><aside className="rail"><div className="logo"><span><Icon name="heart"/></span><div><strong>暖愈</strong><small>AI CARE</small></div></div><nav>{nav.map(n=><button key={n.key} className={view===n.key?"active":""} onClick={()=>setView(n.key)}><Icon name={n.icon}/><span>{n.label}</span></button>)}</nav><div className="rail-status"><span/><div><strong>{mode==="demo"?"合成演示":"安全连接"}</strong><small>{mode==="demo"?"不含真实个人信息":"数据已授权"}</small></div></div></aside><section className="workspace"><div className="mobile-bar"><div className="logo"><span><Icon name="heart"/></span><strong>暖愈</strong></div><button onClick={()=>setView("profile")}><Icon name="menu"/></button></div>{mode==="demo"&&<div className="demo-badge">DEMO · 合成案例</div>}{view==="assistant"&&<AssistantView report={report} mode={mode} token={token} onEvidence={showEvidence}/>} {view==="report"&&<ReportView report={report} onEvidence={showEvidence}/>} {view==="actions"&&<ActionsView report={report}/>} {view==="profile"&&<ProfileView mode={mode} setMode={m=>{setMode(m);if(m==="demo")setReport(demoReport)}} onLoad={load} loading={loading} error={error}/>}</section><EvidenceDrawer evidence={evidence} onClose={()=>setEvidence(null)}/><nav className="mobile-nav">{nav.map(n=><button key={n.key} className={view===n.key?"active":""} onClick={()=>setView(n.key)}><Icon name={n.icon}/><span>{n.label}</span></button>)}</nav></div>}

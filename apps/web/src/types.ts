@@ -47,3 +47,11 @@ export interface Evidence {
   text_span: { text: string; start: number; end: number } | null;
   extraction_method: string;
 }
+
+export interface AssistantAnswer {
+  answer: string;
+  citations: { claim_id: string; evidence_refs: string[] }[];
+  uncertainty: string | null;
+  model_id: string;
+  prompt_version: string;
+}
