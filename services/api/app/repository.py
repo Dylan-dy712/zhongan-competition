@@ -11,7 +11,8 @@ from psycopg.rows import dict_row
 
 from .contracts.core import (
     AnalysisRun, Case, DataOrigin, Document, DocumentVersionRef, Evidence,
-    ExecutionMode, ExternalRef, ExtractedFact, TextSpan,
+    EventBundle, EventRelation, ExecutionMode, ExternalRef, ExtractedFact,
+    MedicalEvent, TextSpan,
 )
 
 
@@ -313,6 +314,43 @@ def get_facts(conn, *, actor_id: UUID, case_id: UUID, run_id: UUID) -> list[Extr
         unit=row["unit"], derivation=row["derivation"], alternatives=row["alternatives"],
         missing_reason=row["missing_reason"], extractor_version=row["extractor_version"],
     ) for row in rows]
+
+
+def get_events(conn, *, actor_id: UUID, case_id: UUID, run_id: UUID) -> EventBundle | None:
+    allowed = conn.execute(
+        """SELECT 1 FROM analysis_runs r JOIN cases c ON c.case_id=r.case_id
+           JOIN actor_subject_access a ON a.subject_id=c.subject_id
+             AND a.actor_id=%s AND a.can_read_case=true
+           JOIN consent_purposes p ON p.consent_id=c.consent_id
+             AND p.purpose='case_guidance' AND p.status='active'
+             AND (p.expires_at IS NULL OR p.expires_at > now())
+           WHERE c.case_id=%s AND r.run_id=%s""",
+        (actor_id, case_id, run_id),
+    ).fetchone()
+    if not allowed:
+        return None
+    event_rows = conn.execute(
+        "SELECT * FROM medical_events WHERE case_id=%s AND run_id=%s ORDER BY event_type",
+        (case_id, run_id),
+    ).fetchall()
+    relation_rows = conn.execute(
+        "SELECT * FROM event_relations WHERE case_id=%s AND run_id=%s ORDER BY relation_type,from_event_id",
+        (case_id, run_id),
+    ).fetchall()
+    builder_version = event_rows[0]["builder_version"] if event_rows else "medical-event-builder-v1"
+    events = [MedicalEvent(
+        event_id=row["event_id"], case_id=row["case_id"], encounter_id=row["encounter_id"],
+        event_type=row["event_type"], assertion=row["assertion"], occurred_at=row["occurred_at"],
+        time_precision=row["time_precision"], attributes=row["attributes"],
+        evidence_ids=row["evidence_ids"], confidence_score=row["confidence_score"],
+        related_event_ids=[],
+    ) for row in event_rows]
+    relations = [EventRelation(
+        from_event_id=row["from_event_id"], relation_type=row["relation_type"],
+        to_ref=row["to_ref"], evidence_ids=row["evidence_ids"], status=row["status"],
+    ) for row in relation_rows]
+    return EventBundle(case_id=case_id, run_id=run_id, events=events,
+                       relations=relations, builder_version=builder_version)
 
 
 def _to_case(row: dict) -> Case:

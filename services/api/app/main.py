@@ -15,11 +15,11 @@ from pydantic import Field
 
 from .contracts.core import (
     AnalysisRun, Case, Contract, DataOrigin, Document, DocumentVersionRef,
-    Evidence, ExternalRef, ExtractedFact,
+    Evidence, EventBundle, ExternalRef, ExtractedFact,
 )
 from .repository import (
     AccessDenied, IdempotencyConflict, actor_for_token, connect, create_case,
-    create_analysis_run, get_analysis_run, get_case, get_document, get_evidence, get_facts,
+    create_analysis_run, get_analysis_run, get_case, get_document, get_evidence, get_events, get_facts,
     register_document,
 )
 
@@ -132,7 +132,7 @@ def current_actor(authorization: str | None = Header(default=None), conn=Depends
 
 @app.get("/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "scope": "req03_deepseek_v4_1_flash_live"}
+    return {"status": "ok", "scope": "req04_medical_event_reconstruction"}
 
 
 @app.post("/v1/cases", response_model=Case, status_code=201)
@@ -290,6 +290,10 @@ def read_facts(case_id: UUID, run_id: UUID = Query(),
     return facts
 
 
-@app.get("/v1/cases/{case_id}/events")
-def get_events(case_id: UUID, actor_id: UUID = Depends(current_actor)):
-    raise HTTPException(status_code=503, detail="Event extraction is not implemented")
+@app.get("/v1/cases/{case_id}/events", response_model=EventBundle)
+def read_events(case_id: UUID, run_id: UUID = Query(),
+                actor_id: UUID = Depends(current_actor), conn=Depends(database)) -> EventBundle:
+    bundle = get_events(conn, actor_id=actor_id, case_id=case_id, run_id=run_id)
+    if bundle is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    return bundle

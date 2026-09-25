@@ -169,6 +169,15 @@ def main() -> None:
     assert facts_by_type["stay_days"]["value"] == 7
     assert facts_by_type["total_cost"]["value"]["amount_minor"] == 123456
     assert all(item["evidence_ids"] for item in facts)
+    status, event_bundle = call("GET", f"/v1/cases/{case_id}/events?run_id={run['run_id']}")
+    assert status == 200
+    assert len(event_bundle["events"]) == 5 and len(event_bundle["relations"]) == 5
+    assert len({item["encounter_id"] for item in event_bundle["events"]}) == 1
+    assert all(item["occurred_at"] is None and item["time_precision"] == "unknown"
+               for item in event_bundle["events"])
+    diagnosis_event = next(item for item in event_bundle["events"] if item["event_type"] == "diagnosis")
+    assert diagnosis_event["assertion"] == "suspected"
+    assert all(item["relation_type"] == "belongs_to_encounter" for item in event_bundle["relations"])
 
     status, error = upload(case_id, b"not a pdf", "application/pdf")
     assert status == 415 and error["code"] == "UNSUPPORTED_MEDIA_TYPE"
@@ -257,7 +266,7 @@ def main() -> None:
                 (CONSENT_ID,),
             )
 
-    print("REQ-01/02/03 integration passed: auth, parsing, OCR, evidence-bound facts")
+    print("REQ-01/02/03/04 integration passed: auth, parsing, OCR, facts, events")
 
 
 if __name__ == "__main__":

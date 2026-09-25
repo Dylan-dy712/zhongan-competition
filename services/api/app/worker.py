@@ -16,6 +16,7 @@ from pypdf import PdfReader
 
 from .repository import connect
 from .fact_extractor import EXTRACTOR_VERSION, extract_facts, merge_model_candidates
+from .event_builder import BUILDER_VERSION, build_events
 from .llm_extractor import PROMPT_VERSION, SCHEMA_VERSION as MODEL_SCHEMA_VERSION, OpenAiCompatibleExtractor, validate_evidence_quotes
 from .tencent_ocr import OCR_METHOD, OCR_VERSION, TencentOcr
 
@@ -272,6 +273,8 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
             conn.execute("DELETE FROM evidence WHERE run_id=%s", (run["run_id"],))
             conn.execute("DELETE FROM page_blocks WHERE run_id=%s", (run["run_id"],))
             conn.execute("DELETE FROM extracted_facts WHERE run_id=%s", (run["run_id"],))
+            conn.execute("DELETE FROM event_relations WHERE run_id=%s", (run["run_id"],))
+            conn.execute("DELETE FROM medical_events WHERE run_id=%s", (run["run_id"],))
             for document, pages in parsed_documents:
                 for page in pages:
                     routing.append({
@@ -368,6 +371,29 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
                      json.dumps(fact["derivation"]), json.dumps(fact["alternatives"]),
                      fact["missing_reason"], fact["extractor_version"]),
                 )
+            encounter_id, events, relations = build_events(run["run_id"], facts)
+            for event in events:
+                conn.execute(
+                    """INSERT INTO medical_events
+                       (event_id,run_id,case_id,encounter_id,event_type,assertion,occurred_at,
+                        time_precision,attributes,evidence_ids,confidence_score,builder_version)
+                       VALUES (%s,%s,%s,%s,%s,%s,%s::jsonb,%s,%s::jsonb,%s::jsonb,%s,%s)""",
+                    (event["event_id"], run["run_id"], run["case_id"], event["encounter_id"],
+                     event["event_type"], event["assertion"], json.dumps(event["occurred_at"]),
+                     event["time_precision"], json.dumps(event["attributes"], ensure_ascii=False),
+                     json.dumps(event["evidence_ids"]), event["confidence_score"], BUILDER_VERSION),
+                )
+            for relation in relations:
+                conn.execute(
+                    """INSERT INTO event_relations
+                       (relation_id,run_id,case_id,from_event_id,relation_type,to_ref,
+                        evidence_ids,status,builder_version)
+                       VALUES (%s,%s,%s,%s,%s,%s::jsonb,%s::jsonb,%s,%s)""",
+                    (relation["relation_id"], run["run_id"], run["case_id"],
+                     relation["from_event_id"], relation["relation_type"],
+                     json.dumps(relation["to_ref"]), json.dumps(relation["evidence_ids"]),
+                     relation["status"], BUILDER_VERSION),
+                )
             conn.execute(
                 """INSERT INTO model_extractions
                    (extraction_id, run_id, case_id, provider, model_id, prompt_version,
@@ -395,6 +421,10 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
                 "observed_count": sum(fact["status"] == "observed" for fact in facts),
                 "model_status": model_result["status"], "model_id": model_id,
                 "prompt_version": PROMPT_VERSION,
+            }, "reconcile": {
+                "status": "completed", "builder_version": BUILDER_VERSION,
+                "encounter_id": str(encounter_id), "event_count": len(events),
+                "relation_count": len(relations),
             }}
             conn.execute(
                 """UPDATE analysis_runs SET status=%s, current_stage='validate', stage_results=%s::jsonb,

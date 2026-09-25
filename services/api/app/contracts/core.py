@@ -158,6 +158,15 @@ class MedicalEvent(Contract):
     schema_version: str = "0.1.0"
 
 
+class EventBundle(Contract):
+    case_id: UUID
+    run_id: UUID
+    events: list[MedicalEvent]
+    relations: list[EventRelation]
+    builder_version: str
+    schema_version: str = "0.1.0"
+
+
 class ExternalRef(Contract):
     source_system: str
     external_id: str
