@@ -8,7 +8,7 @@ from typing import Annotated, Literal
 from uuid import UUID, uuid4
 
 import psycopg
-from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Query, Request, Response, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Path as ApiPath, Query, Request, Response, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import Field
@@ -16,12 +16,12 @@ from pydantic import Field
 from .contracts.core import (
     AnalysisRun, Case, Contract, DataOrigin, Document, DocumentVersionRef,
     Evidence, EventBundle, ExternalRef, ExtractedFact, Insight,
-    ReviewCorrection, ReviewDecision, ReviewTask,
+    Report, ReviewCorrection, ReviewDecision, ReviewTask,
 )
 from .repository import (
     AccessDenied, IdempotencyConflict, actor_for_token, connect, create_case,
     create_analysis_run, get_analysis_run, get_case, get_document, get_evidence, get_events, get_facts,
-    get_insights,
+    get_insights, get_report,
     register_document,
 )
 from .review_repository import (
@@ -144,7 +144,7 @@ def current_actor(authorization: str | None = Header(default=None), conn=Depends
 
 @app.get("/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "scope": "req06_versioned_medical_review"}
+    return {"status": "ok", "scope": "req07_evidence_bound_care_report"}
 
 
 @app.post("/v1/cases", response_model=Case, status_code=201)
@@ -348,3 +348,12 @@ def post_review_decision(review_id: UUID, body: DecideReview,
         raise HTTPException(status_code=409, detail="Review target has a newer version or is already decided") from None
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from None
+
+
+@app.get("/v1/cases/{case_id}/reports/{version}", response_model=Report)
+def read_report(case_id: UUID, version: Annotated[int, ApiPath(ge=1)],
+                actor_id: UUID = Depends(current_actor), conn=Depends(database)) -> Report:
+    report = get_report(conn, actor_id=actor_id, case_id=case_id, version=version)
+    if report is None:
+        raise HTTPException(status_code=404, detail="Report not found")
+    return report

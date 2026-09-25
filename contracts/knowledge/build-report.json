@@ -1,5 +1,5 @@
 {
-  "built_at": "2026-09-25T06:26:29.427677+00:00",
+  "built_at": "2026-09-25T07:02:31.433750+00:00",
   "packs": [
     {
       "pack_id": "KP-FX",
@@ -125,6 +125,6 @@
     }
   ],
   "entries_total": 599,
-  "content_sha256": "270e44d4072c3bdcd77a0954fbf19f7ff2080a3f3aca5de71d66bd9393741aca",
+  "content_sha256": "1b9ffa0ddf3432736bae973fdc5f3b48b1abfae5feb8b9ce7655abc37f95277a",
   "validation_errors": []
 }

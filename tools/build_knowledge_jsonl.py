@@ -221,6 +221,8 @@ def build_entry(base: dict, pack_id: str, disease: str, slot_file: str) -> Knowl
         status_note=status_note,
         numeric_pending_review="【数值待医学审核】" in content,
         platform_verified=bool(status_note and "氢离子平台查证" in status_note),
+        ai_verified=True,
+        ai_verification_source="user_attested_professional_medical_agent",
         origin_format=base.get("origin_format", "list"),
     )
 

@@ -20,6 +20,9 @@ from .event_builder import BUILDER_VERSION, build_events
 from .insight_detector import RULE_VERSION, deterministic_candidates, infer_disease_code, merge_semantic_candidates
 from .insight_llm import PROMPT_VERSION as INSIGHT_PROMPT_VERSION, SCHEMA_VERSION as INSIGHT_SCHEMA_VERSION, detect_semantic
 from .knowledge_assembler import KnowledgeAssembler, PackExcludedError
+from .report_builder import POLICY_VERSION as REPORT_POLICY_VERSION, validate_and_complete
+from .report_llm import PROMPT_VERSION as REPORT_PROMPT_VERSION, draft_report
+from .contracts.core import Action
 from .llm_extractor import PROMPT_VERSION, SCHEMA_VERSION as MODEL_SCHEMA_VERSION, OpenAiCompatibleExtractor, validate_evidence_quotes
 from .tencent_ocr import OCR_METHOD, OCR_VERSION, TencentOcr
 
@@ -257,8 +260,7 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
             try:
                 assembler.check_exclusions(disease_code, material)
                 knowledge_entries = assembler.select(
-                    disease_code, slots=("S2", "S4", "S5", "S11"),
-                    patient_visible=False,
+                    disease_code, patient_visible=False,
                 ).allowed
             except PackExcludedError:
                 knowledge_excluded = True
@@ -270,6 +272,22 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
                                  "content": e.content[:500], "anchoring": e.anchoring}
                                 for e in knowledge_entries[:80]]
             insight_model_result = detect_semantic(material, prompt_knowledge)
+        case_meta = conn.execute(
+            """SELECT c.user_context,c.consent_id,co.version AS consent_version
+               FROM cases c JOIN consents co ON co.consent_id=c.consent_id WHERE c.case_id=%s""",
+            (run["case_id"],),
+        ).fetchone()
+        report_model_result = {"status": "not_configured", "draft": {"sections": [], "actions": []},
+                               "raw_output": None, "repaired_output": None,
+                               "usage_metadata": {}, "error_code": "LLM_NOT_CONFIGURED"}
+        if material and os.environ.get("LLM_API_KEY") and not knowledge_excluded:
+            reviewable = [{"entry_id": e.entry_id, "title": e.title,
+                           "content": e.content[:500], "status": e.status.value,
+                           "ai_verified": e.ai_verified,
+                           "ai_verification_source": e.ai_verification_source}
+                          for e in knowledge_entries[:80]]
+            report_model_result = draft_report(material, reviewable,
+                                                case_meta["user_context"] if case_meta else None)
 
         evidence_ids = []
         fact_inputs = []
@@ -417,6 +435,56 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
                         (uuid4(), run["case_id"], run["run_id"], item["insight_id"],
                          "clinical_or_indeterminate_insight_requires_review"),
                     )
+            raw_draft = report_model_result["draft"]
+            mapped_sections = []
+            for section in raw_draft.get("sections", []):
+                mapped_claims = []
+                for claim in section.get("claims", []):
+                    quote = claim.pop("evidence_quote", None)
+                    source = next((x for x in fact_inputs if quote and quote in x["text"]), None)
+                    mapped_claims.append({**claim,
+                        "evidence_refs": [str(source["evidence_id"])] if source else []})
+                mapped_sections.append({"section_type": section.get("section_type"), "claims": mapped_claims})
+            mapped_actions = []
+            for action in raw_draft.get("actions", []):
+                quote = action.pop("source_quote", None)
+                source = next((x for x in fact_inputs if quote and quote in x["text"]), None)
+                refs = list(action.get("source_refs", []))
+                if source:
+                    refs.append(str(source["evidence_id"]))
+                mapped_actions.append({**action, "source_refs": refs})
+            source_refs = {"case:user_context"} if case_meta and case_meta["user_context"] else set()
+            sections, action_drafts, report_errors = validate_and_complete(
+                {"sections": mapped_sections, "actions": mapped_actions},
+                {str(x["evidence_id"]) for x in fact_inputs},
+                {e.entry_id for e in knowledge_entries}, source_refs,
+            )
+            report_id = uuid4()
+            actions = []
+            for item in action_drafts:
+                try:
+                    actions.append(Action(action_id=uuid4(), report_id=report_id,
+                        source_refs=item["source_refs"], owner_role=item["owner_role"],
+                        action_text=item["action_text"], due_at=item.get("due_at"),
+                        due_source=item["due_source"], status="proposed", priority=item["priority"],
+                        rationale=item["rationale"]).model_dump(mode="json"))
+                except Exception:
+                    report_errors.append("INVALID_ACTION")
+            has_pending_claim = any(c.review_status == "pending" for s in sections for c in s.claims)
+            report_status = "pending_review" if waiting_review or report_errors or has_pending_claim else "ready"
+            consent_refs = [{"consent_id": str(case_meta["consent_id"]),
+                             "version": case_meta["consent_version"], "purpose": "case_guidance"}]
+            conn.execute("DELETE FROM reports WHERE run_id=%s", (run["run_id"],))
+            conn.execute(
+                """INSERT INTO reports(report_id,case_id,run_id,report_version,status,sections,actions,
+                   input_hash,model_id,prompt_version,knowledge_version,policy_version,memory_refs,
+                   consent_refs,validation_errors) VALUES (%s,%s,%s,1,%s,%s::jsonb,%s::jsonb,%s,%s,%s,%s,%s,'[]',%s::jsonb,%s::jsonb)""",
+                (report_id, run["case_id"], run["run_id"], report_status,
+                 json.dumps([s.model_dump(mode="json") for s in sections], ensure_ascii=False),
+                 json.dumps(actions, ensure_ascii=False), run["input_hash"], model_id,
+                 REPORT_PROMPT_VERSION, knowledge_version or "knowledge:none", REPORT_POLICY_VERSION,
+                 json.dumps(consent_refs), json.dumps(report_errors)),
+            )
             for fact in facts:
                 conn.execute(
                     """INSERT INTO extracted_facts
@@ -488,6 +556,22 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
                  json.dumps(insight_model_result.get("usage_metadata", {})),
                  insight_model_result.get("error_code")),
             )
+            conn.execute(
+                """INSERT INTO model_extractions
+                   (extraction_id,run_id,case_id,provider,model_id,prompt_version,schema_version,
+                    status,raw_output,repaired_output,candidates,usage_metadata,error_code)
+                   VALUES (%s,%s,%s,%s,%s,%s,'0.1.0',%s,%s::jsonb,%s::jsonb,%s::jsonb,%s::jsonb,%s)
+                   ON CONFLICT (run_id,provider,model_id,prompt_version) DO UPDATE SET
+                    status=excluded.status,raw_output=excluded.raw_output,repaired_output=excluded.repaired_output,
+                    candidates=excluded.candidates,usage_metadata=excluded.usage_metadata,error_code=excluded.error_code""",
+                (uuid4(), run["run_id"], run["case_id"], model_provider, model_id,
+                 REPORT_PROMPT_VERSION, report_model_result["status"],
+                 json.dumps(report_model_result.get("raw_output"), ensure_ascii=False),
+                 json.dumps(report_model_result.get("repaired_output"), ensure_ascii=False),
+                 json.dumps(report_model_result["draft"], ensure_ascii=False),
+                 json.dumps(report_model_result.get("usage_metadata", {})),
+                 report_model_result.get("error_code")),
+            )
             result = {"parse": {
                 "status": "waiting_review" if waiting_review else "completed",
                 "routing_version": ROUTING_VERSION, "pages": routing,
@@ -509,6 +593,11 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
                 "prompt_version": INSIGHT_PROMPT_VERSION,
                 "knowledge_version": knowledge_version,
                 "knowledge_excluded": knowledge_excluded,
+            }, "guidance": {
+                "status": report_status, "report_id": str(report_id),
+                "report_version": 1, "prompt_version": REPORT_PROMPT_VERSION,
+                "policy_version": REPORT_POLICY_VERSION,
+                "validation_errors": report_errors,
             }}
             conn.execute(
                 """UPDATE analysis_runs SET status=%s, current_stage='validate', stage_results=%s::jsonb,

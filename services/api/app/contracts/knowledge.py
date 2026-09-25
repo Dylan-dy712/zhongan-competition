@@ -71,6 +71,11 @@ class KnowledgeEntry(Contract):
         default=False,
         description="status_note 标注经氢离子平台查证（辅助核对线索，非医学审核）",
     )
+    ai_verified: bool = Field(
+        default=False,
+        description="是否完成专业医疗智能体核验；不等同于真人医学审核批准",
+    )
+    ai_verification_source: str | None = None
     origin_format: Literal["list", "table"] = "list"
 
     @model_validator(mode="after")
@@ -83,6 +88,8 @@ class KnowledgeEntry(Contract):
             self.reviewed_by or self.reviewed_at
         ):
             raise ValueError("draft knowledge cannot carry approval metadata")
+        if self.ai_verified and not self.ai_verification_source:
+            raise ValueError("ai_verified knowledge requires ai_verification_source")
         return self
 
 

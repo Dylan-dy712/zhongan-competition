@@ -12,7 +12,7 @@ from psycopg.rows import dict_row
 from .contracts.core import (
     AnalysisRun, Case, DataOrigin, Document, DocumentVersionRef, Evidence,
     EventBundle, EventRelation, ExecutionMode, ExternalRef, ExtractedFact,
-    Insight, MedicalEvent, TextSpan,
+    Insight, MedicalEvent, Report, TextSpan,
 )
 
 
@@ -381,6 +381,28 @@ def get_insights(conn, *, actor_id: UUID, case_id: UUID, run_id: UUID) -> list[I
         judgment_status=r["judgment_status"], rule_version=r["rule_version"],
         knowledge_refs=r["knowledge_refs"],
     ) for r in rows]
+
+
+def get_report(conn, *, actor_id: UUID, case_id: UUID, version: int) -> Report | None:
+    row = conn.execute(
+        """SELECT r.*,ac.role FROM reports r JOIN cases c ON c.case_id=r.case_id
+           JOIN actors ac ON ac.actor_id=%s AND ac.active=true
+           JOIN actor_subject_access a ON a.subject_id=c.subject_id
+             AND a.actor_id=ac.actor_id AND a.can_read_case=true
+           JOIN consent_purposes p ON p.consent_id=c.consent_id
+             AND p.purpose='case_guidance' AND p.status='active'
+             AND (p.expires_at IS NULL OR p.expires_at>now())
+           WHERE r.case_id=%s AND r.report_version=%s""", (actor_id, case_id, version),
+    ).fetchone()
+    if not row or (row["role"] == "patient" and row["status"] != "published"):
+        return None
+    return Report(report_id=row["report_id"], case_id=row["case_id"], run_id=row["run_id"],
+        report_version=row["report_version"], status=row["status"], sections=row["sections"],
+        actions=row["actions"], input_hash=row["input_hash"], model_id=row["model_id"],
+        prompt_version=row["prompt_version"], knowledge_version=row["knowledge_version"],
+        policy_version=row["policy_version"], memory_refs=row["memory_refs"],
+        consent_refs=row["consent_refs"], validation_errors=row["validation_errors"],
+        created_at=row["created_at"])
 
 
 def _to_case(row: dict) -> Case:
