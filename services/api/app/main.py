@@ -132,7 +132,7 @@ def current_actor(authorization: str | None = Header(default=None), conn=Depends
 
 @app.get("/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "scope": "req03_llm_adapter_unconfigured"}
+    return {"status": "ok", "scope": "req03_deepseek_v4_1_flash_live"}
 
 
 @app.post("/v1/cases", response_model=Case, status_code=201)

@@ -27,6 +27,24 @@ def clean_value(raw: str) -> str:
     return raw.strip().strip("。；;,， ")
 
 
+def normalize_value(fact_type: str, value):
+    if fact_type == "diagnosis" and isinstance(value, str):
+        return re.sub(r"^(?:疑似|考虑|待排|可能)\s*", "", clean_value(value))
+    if fact_type in {"surgery", "medication"} and isinstance(value, str):
+        return clean_value(value)
+    if fact_type == "stay_days":
+        match = re.search(r"\d+", str(value))
+        return int(match.group()) if match else value
+    if fact_type == "total_cost":
+        if isinstance(value, dict) and "amount_minor" in value:
+            return {"amount_minor": int(value["amount_minor"]), "currency": value.get("currency", "CNY")}
+        match = re.search(r"[0-9][0-9,]*(?:\.\d{1,2})?", str(value))
+        if match:
+            amount_minor = int((Decimal(match.group().replace(",", "")) * 100).quantize(Decimal("1")))
+            return {"amount_minor": amount_minor, "currency": "CNY"}
+    return value
+
+
 def candidate(fact_type: str, value, raw: str, evidence_id, *, unit=None, confidence=0.72):
     return {
         "fact_id": uuid4(), "fact_type": fact_type, "value": value,
@@ -46,7 +64,7 @@ def extract_facts(evidence_rows):
             if match and fact_type not in found:
                 raw, value = clean_value(match.group(0)), clean_value(match.group(1))
                 if value:
-                    found[fact_type] = candidate(fact_type, value, raw, evidence_id)
+                    found[fact_type] = candidate(fact_type, normalize_value(fact_type, value), raw, evidence_id)
         stay = re.search(r"住院\s*(?:共|时长|天数)?\s*[:：]?\s*(\d{1,4})\s*天", text)
         if stay and "stay_days" not in found:
             found["stay_days"] = candidate("stay_days", int(stay.group(1)), clean_value(stay.group(0)), evidence_id, unit="day", confidence=0.9)
@@ -77,7 +95,7 @@ def merge_model_candidates(rule_facts, model_candidates, evidence_rows):
         if source is None:
             continue
         fact_type = candidate_item["fact_type"]
-        model_value = candidate_item["normalized_value"]
+        model_value = normalize_value(fact_type, candidate_item["normalized_value"])
         model_evidence = [str(source["evidence_id"])]
         current = facts[fact_type]
         if current["status"] == "missing":
