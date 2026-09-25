@@ -1,0 +1,25 @@
+[Unit]
+Description=Zhongan Care API
+After=network.target postgresql.service
+Requires=postgresql.service
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/zhongan-app
+EnvironmentFile=/home/ubuntu/.config/zhongan/database.env
+Environment=PYTHONUNBUFFERED=1
+Environment=ZHONGAN_STORAGE_ROOT=/home/ubuntu/zhongan-data/documents
+Environment=ZHONGAN_MAX_DOCUMENT_BYTES=10485760
+ExecStart=/home/ubuntu/zhongan-app/.venv/bin/uvicorn services.api.app.main:app --host 127.0.0.1 --port 8000 --proxy-headers --forwarded-allow-ips=127.0.0.1
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/ubuntu/zhongan-app /home/ubuntu/zhongan-data
+
+[Install]
+WantedBy=multi-user.target

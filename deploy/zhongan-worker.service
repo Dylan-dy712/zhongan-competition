@@ -1,0 +1,25 @@
+[Unit]
+Description=Zhongan Care Parser Worker
+After=network.target postgresql.service
+Requires=postgresql.service
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/zhongan-app
+EnvironmentFile=/home/ubuntu/.config/zhongan/database.env
+EnvironmentFile=-/home/ubuntu/.config/zhongan/tencent-ocr.env
+Environment=PYTHONUNBUFFERED=1
+Environment=ZHONGAN_STORAGE_ROOT=/home/ubuntu/zhongan-data/documents
+ExecStart=/home/ubuntu/zhongan-app/.venv/bin/python -m services.api.app.worker
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/ubuntu/zhongan-data
+
+[Install]
+WantedBy=multi-user.target
