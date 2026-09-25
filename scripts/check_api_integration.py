@@ -148,12 +148,13 @@ def main() -> None:
     run_body = {
         "document_versions": [{"document_id": document_id, "document_version": 1}],
         "pipeline_version": "document-parser-v1",
-        "force_new": False,
+        "force_new": True,
     }
     status, run = call("POST", f"/v1/cases/{case_id}/runs", run_body)
     assert status in {200, 202}, (status, run)
     run = wait_for_run(run["run_id"])
     assert run["status"] == "completed" and run["execution_mode"] == "live"
+    assert run["stage_results"]["extract"]["model_status"] in {"completed", "not_configured"}
     evidence_ids = run["stage_results"]["parse"]["evidence_ids"]
     assert evidence_ids
     status, evidence = call("GET", f"/v1/evidence/{evidence_ids[0]}")

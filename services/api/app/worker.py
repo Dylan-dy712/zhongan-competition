@@ -15,7 +15,8 @@ from PIL import Image
 from pypdf import PdfReader
 
 from .repository import connect
-from .fact_extractor import EXTRACTOR_VERSION, extract_facts
+from .fact_extractor import EXTRACTOR_VERSION, extract_facts, merge_model_candidates
+from .llm_extractor import PROMPT_VERSION, SCHEMA_VERSION as MODEL_SCHEMA_VERSION, OpenAiCompatibleExtractor, validate_evidence_quotes
 from .tencent_ocr import OCR_METHOD, OCR_VERSION, TencentOcr
 
 
@@ -229,6 +230,19 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
             pages = route_document(document, path, run["pipeline_version"])
             parsed_documents.append((document, pages))
 
+        material = "\n\n".join(
+            page["text"] for _document, pages in parsed_documents for page in pages if page["text"]
+        )
+        model_result = {"status": "not_configured", "raw_output": None,
+                        "repaired_output": None, "candidates": {"candidates": []},
+                        "usage_metadata": {}, "error_code": "LLM_NOT_CONFIGURED"}
+        model_provider = os.environ.get("LLM_PROVIDER", "openai_compatible")
+        model_id = os.environ.get("LLM_MODEL_ID", "unconfigured")
+        if material and os.environ.get("LLM_API_KEY"):
+            extractor = OpenAiCompatibleExtractor()
+            model_provider, model_id = extractor.provider, extractor.model_id
+            model_result = validate_evidence_quotes(extractor.extract(material), material)
+
         evidence_ids = []
         fact_inputs = []
         routing = []
@@ -336,6 +350,9 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
                     (document_status, len(pages), document["document_id"]),
                 )
             facts = extract_facts(fact_inputs)
+            facts = merge_model_candidates(
+                facts, model_result["candidates"].get("candidates", []), fact_inputs
+            )
             for fact in facts:
                 conn.execute(
                     """INSERT INTO extracted_facts
@@ -351,6 +368,23 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
                      json.dumps(fact["derivation"]), json.dumps(fact["alternatives"]),
                      fact["missing_reason"], fact["extractor_version"]),
                 )
+            conn.execute(
+                """INSERT INTO model_extractions
+                   (extraction_id, run_id, case_id, provider, model_id, prompt_version,
+                    schema_version, status, raw_output, repaired_output, candidates,
+                    usage_metadata, error_code)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s::jsonb,%s::jsonb,%s::jsonb,%s)
+                   ON CONFLICT (run_id, provider, model_id, prompt_version) DO UPDATE SET
+                    status=excluded.status, raw_output=excluded.raw_output,
+                    repaired_output=excluded.repaired_output, candidates=excluded.candidates,
+                    usage_metadata=excluded.usage_metadata, error_code=excluded.error_code""",
+                (uuid4(), run["run_id"], run["case_id"], model_provider, model_id,
+                 PROMPT_VERSION, MODEL_SCHEMA_VERSION, model_result["status"],
+                 json.dumps(model_result.get("raw_output"), ensure_ascii=False),
+                 json.dumps(model_result.get("repaired_output"), ensure_ascii=False),
+                 json.dumps(model_result["candidates"].get("candidates", []), ensure_ascii=False),
+                 json.dumps(model_result.get("usage_metadata", {})), model_result.get("error_code")),
+            )
             result = {"parse": {
                 "status": "waiting_review" if waiting_review else "completed",
                 "routing_version": ROUTING_VERSION, "pages": routing,
@@ -359,6 +393,8 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
                 "status": "completed", "extractor_version": EXTRACTOR_VERSION,
                 "fact_count": len(facts),
                 "observed_count": sum(fact["status"] == "observed" for fact in facts),
+                "model_status": model_result["status"], "model_id": model_id,
+                "prompt_version": PROMPT_VERSION,
             }}
             conn.execute(
                 """UPDATE analysis_runs SET status=%s, current_stage='validate', stage_results=%s::jsonb,

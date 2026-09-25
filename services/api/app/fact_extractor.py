@@ -67,3 +67,35 @@ def extract_facts(evidence_rows):
                 "missing_reason": "not_documented_in_parsed_materials", "extractor_version": EXTRACTOR_VERSION,
             }
     return [found[fact_type] for fact_type in FIELD_TYPES]
+
+
+def merge_model_candidates(rule_facts, model_candidates, evidence_rows):
+    facts = {item["fact_type"]: item for item in rule_facts}
+    for candidate_item in model_candidates:
+        quote = candidate_item["evidence_quote"]
+        source = next((row for row in evidence_rows if quote in row["text"]), None)
+        if source is None:
+            continue
+        fact_type = candidate_item["fact_type"]
+        model_value = candidate_item["normalized_value"]
+        model_evidence = [str(source["evidence_id"])]
+        current = facts[fact_type]
+        if current["status"] == "missing":
+            facts[fact_type] = candidate(
+                fact_type, model_value, candidate_item["raw_value"], source["evidence_id"],
+                unit="day" if fact_type == "stay_days" else ("CNY" if fact_type == "total_cost" else None),
+                confidence=candidate_item.get("confidence_score"),
+            )
+            facts[fact_type]["assertion"] = candidate_item["assertion"]
+            facts[fact_type]["confidence_method"] = "llm-reported-uncalibrated-v1" if candidate_item.get("confidence_score") is not None else None
+        elif current["value"] != model_value:
+            facts[fact_type] = {
+                **current, "value": None, "raw_value": None, "status": "conflict",
+                "assertion": "unknown", "evidence_ids": [], "confidence_score": None,
+                "confidence_method": None, "unit": None,
+                "alternatives": [
+                    {"value": current["value"], "evidence_ids": current["evidence_ids"]},
+                    {"value": model_value, "evidence_ids": model_evidence},
+                ], "missing_reason": None,
+            }
+    return [facts[fact_type] for fact_type in FIELD_TYPES]

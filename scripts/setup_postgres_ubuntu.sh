@@ -66,6 +66,10 @@ if [[ -f /tmp/005_extracted_facts.sql ]]; then
   PGPASSWORD="${db_password}" psql -h 127.0.0.1 -U zhongan_app -d zhongan_dev \
     --set=ON_ERROR_STOP=1 -f /tmp/005_extracted_facts.sql
 fi
+if [[ -f /tmp/006_model_extractions.sql ]]; then
+  PGPASSWORD="${db_password}" psql -h 127.0.0.1 -U zhongan_app -d zhongan_dev \
+    --set=ON_ERROR_STOP=1 -f /tmp/006_model_extractions.sql
+fi
 
 PGPASSWORD="${db_password}" psql -h 127.0.0.1 -U zhongan_app -d zhongan_dev \
   --tuples-only --no-align --command \

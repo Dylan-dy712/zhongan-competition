@@ -43,7 +43,7 @@ python scripts/bootstrap_dev.py
 
 初始化脚本只建立合成主体、用途授权及高熵开发令牌；令牌仅在终端显示一次。不要将其写入仓库、日志或截图。使用输出的 `subject_id`、`consent_id` 和 `bearer_token` 调用 `/v1/cases`，请求须带 `Authorization: Bearer <token>` 与 `Idempotency-Key`，且 `data_origin` 为 `synthetic`。启动 API 前保持同一个 PowerShell 会话中的 `ZHONGAN_DATABASE_URL`。
 
-当前 API 仅接受合成案件，未配置数据库时返回 503。材料隔离存储、受控文本解析、原生 PDF 文字提取、腾讯云高精度 OCR，以及五类证据绑定字段候选已经实现；图表视觉理解及 LLM 语义抽取尚未接入。不得向此原型上传真实医疗数据。
+当前 API 仅接受合成案件，未配置数据库时返回 503。材料隔离存储、受控文本解析、原生 PDF 文字提取、腾讯云高精度 OCR，以及五类证据绑定字段候选已经实现。LLM 结构化抽取适配器、Schema 校验、一次修复预算和冲突合并已经部署，但服务器尚未配置模型凭证；图表视觉理解尚未接入。不得向此原型上传真实医疗数据。
 
 数据库 API 联调至少验证：有效令牌和授权创建返回 201；同一幂等键与相同内容返回 200 和同一案件；同键不同内容返回 409；跨主体读取返回 404；撤回 `case_guidance` 后读取与重试创建均被拒绝。
 
@@ -60,3 +60,5 @@ python scripts/bootstrap_dev.py
 - 材料存储：`/home/ubuntu/zhongan-data/documents`；按案件与文档分目录保存，文件权限为 `600`，不通过响应暴露服务器路径。
 
 部署脚本为 `scripts/install_api_ubuntu.sh`；数据库、API、Parser Worker 与 Nginx 均已设置为开机启动。REQ-01～03 的认证、隔离、授权撤回、按页解析、扫描页 OCR、Evidence，以及诊断、手术、用药、住院天数、医疗总费用五类字段候选已通过真实 PostgreSQL 与腾讯云 OCR 集成检查。字段保留原值、规范值、状态、断言、置信度、单位和来源；缺少材料时显式返回 missing。当前抽取版本 `evidence-pattern-candidate-v1` 是保守规则候选，不代表模型语义抽取或官方效果达标。当前公网入口仍是 HTTP；配置域名和证书前不得传输真实或敏感数据。
+
+LLM 使用服务器端 `/home/ubuntu/.config/zhongan/llm.env` 注入：`LLM_PROVIDER`、`LLM_BASE_URL`、`LLM_API_KEY`、`LLM_MODEL_ID`。未配置时运行结果明确记录 `model_status=not_configured`；不会回放固定模型结果。模型输出、修复输出、候选、用量、模型 ID、Prompt 版本和错误状态分别写入 PostgreSQL。
