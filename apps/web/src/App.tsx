@@ -26,6 +26,7 @@ function Icon({name,size=22}:{name:IconName;size?:number}){
 
 const welcome:Message={id:"welcome",role:"assistant",text:"你好，我是暖暖。我已经读完这份关怀报告。你可以直接告诉我最担心的事情，我会先查报告和原始依据，再用容易理解的话回答你。"};
 const suggestions=["这次到底得了什么病？","回家后最需要注意什么？","这笔费用是怎么构成的？"];
+const messageId=()=>`${Date.now()}-${Math.random().toString(36).slice(2)}`;
 function demoAnswer(q:string):AssistantAnswer{
  if(q.includes("费"))return{answer:"报告记录的医疗总费用是 8,426.37 元。现有材料没有拆分医保结算与个人自付，因此这两项需要以正式结算票据为准。",citations:[{claim_id:"c4",evidence_refs:["2f6580ce-8ed4-4d22-88f8-aeeef82adab6"]}],uncertainty:"医保报销和自付明细尚未出现在材料中。",model_id:"demo",prompt_version:"demo"};
  if(/注意|回家|恢复/.test(q))return{answer:"回家后先做好三件事：早晚记录体温、保证休息和适量饮水、联系医院确认复诊时间。活动量可以根据身体耐受逐步增加。",citations:[{claim_id:"c1",evidence_refs:["5bdcfedd-ef76-4740-a096-3d665e5a4d43"]}],uncertainty:"报告没有明确复诊日期，需要向原就诊机构确认。",model_id:"demo",prompt_version:"demo"};
@@ -35,10 +36,10 @@ function demoAnswer(q:string):AssistantAnswer{
 function AssistantView({report,mode,token,onEvidence}:{report:Report;mode:"demo"|"live";token:string;onEvidence:(id:string)=>void}){
  const[messages,setMessages]=useState<Message[]>([welcome]),[input,setInput]=useState(""),[stage,setStage]=useState<string|null>(null),[error,setError]=useState("");const end=useRef<HTMLDivElement>(null);
  useEffect(()=>{ end.current?.scrollIntoView({behavior:"smooth"}); },[messages,stage]);
- const send=async(text=input)=>{const q=text.trim();if(!q||stage)return;setInput("");setError("");setMessages(v=>[...v,{id:crypto.randomUUID(),role:"user",text:q}]);
+ const send=async(text=input)=>{const q=text.trim();if(!q||stage)return;setInput("");setError("");setMessages(v=>[...v,{id:messageId(),role:"user",text:q}]);
   try{setStage("正在读取已发布报告");await new Promise(r=>setTimeout(r,300));setStage("正在核对结论与证据");await new Promise(r=>setTimeout(r,360));setStage("正在组织回答");
    const a=mode==="demo"?await new Promise<AssistantAnswer>(r=>setTimeout(()=>r(demoAnswer(q)),560)):await askAssistant(report.case_id,report.report_version,q,token);
-   setMessages(v=>[...v,{id:crypto.randomUUID(),role:"assistant",text:a.answer,citations:a.citations,uncertainty:a.uncertainty}])
+   setMessages(v=>[...v,{id:messageId(),role:"assistant",text:a.answer,citations:a.citations,uncertainty:a.uncertainty}])
   }catch(e){setError(e instanceof ApiError?e.message:"暂时无法回答，请稍后再试。")}finally{setStage(null)}
  };
  const submit=(e:FormEvent)=>{e.preventDefault();void send()};
