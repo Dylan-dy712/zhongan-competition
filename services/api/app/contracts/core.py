@@ -167,6 +167,43 @@ class EventBundle(Contract):
     schema_version: str = "0.1.0"
 
 
+class InsightCategory(str, Enum):
+    clinical = "clinical"
+    cost = "cost"
+    experience = "experience"
+
+
+class Insight(Contract):
+    insight_id: UUID
+    case_id: UUID
+    run_id: UUID
+    category: InsightCategory
+    label: str
+    severity: str = Field(pattern=r"^(low|medium|high|undetermined)$")
+    confidence: float | None = Field(default=None, ge=0, le=1)
+    confidence_method: str | None = None
+    evidence_ids: list[UUID] = Field(min_length=1)
+    rationale: str
+    uncertainty: str | None = None
+    suggested_action: str
+    review_required: bool
+    review_status: str = Field(pattern=r"^(not_required|pending|approved|corrected|rejected)$")
+    judgment_status: str = Field(pattern=r"^(candidate|supported|indeterminate|rejected)$")
+    rule_version: str
+    knowledge_refs: list[str] = Field(default_factory=list)
+    schema_version: str = "0.1.0"
+
+    @model_validator(mode="after")
+    def validate_review_semantics(self):
+        if self.category == InsightCategory.clinical and (
+            not self.review_required or self.review_status == "not_required"
+        ):
+            raise ValueError("clinical insight candidates require review")
+        if self.confidence is not None and not self.confidence_method:
+            raise ValueError("confidence_method required with confidence")
+        return self
+
+
 class ExternalRef(Contract):
     source_system: str
     external_id: str

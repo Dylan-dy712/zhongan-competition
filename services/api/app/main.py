@@ -15,11 +15,12 @@ from pydantic import Field
 
 from .contracts.core import (
     AnalysisRun, Case, Contract, DataOrigin, Document, DocumentVersionRef,
-    Evidence, EventBundle, ExternalRef, ExtractedFact,
+    Evidence, EventBundle, ExternalRef, ExtractedFact, Insight,
 )
 from .repository import (
     AccessDenied, IdempotencyConflict, actor_for_token, connect, create_case,
     create_analysis_run, get_analysis_run, get_case, get_document, get_evidence, get_events, get_facts,
+    get_insights,
     register_document,
 )
 
@@ -132,7 +133,7 @@ def current_actor(authorization: str | None = Header(default=None), conn=Depends
 
 @app.get("/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "scope": "req04_medical_event_reconstruction"}
+    return {"status": "ok", "scope": "req05_evidence_bound_insights"}
 
 
 @app.post("/v1/cases", response_model=Case, status_code=201)
@@ -297,3 +298,12 @@ def read_events(case_id: UUID, run_id: UUID = Query(),
     if bundle is None:
         raise HTTPException(status_code=404, detail="Run not found")
     return bundle
+
+
+@app.get("/v1/cases/{case_id}/insights", response_model=list[Insight])
+def read_insights(case_id: UUID, run_id: UUID = Query(),
+                  actor_id: UUID = Depends(current_actor), conn=Depends(database)) -> list[Insight]:
+    items = get_insights(conn, actor_id=actor_id, case_id=case_id, run_id=run_id)
+    if items is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    return items

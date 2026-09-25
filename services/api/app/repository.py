@@ -12,7 +12,7 @@ from psycopg.rows import dict_row
 from .contracts.core import (
     AnalysisRun, Case, DataOrigin, Document, DocumentVersionRef, Evidence,
     EventBundle, EventRelation, ExecutionMode, ExternalRef, ExtractedFact,
-    MedicalEvent, TextSpan,
+    Insight, MedicalEvent, TextSpan,
 )
 
 
@@ -351,6 +351,34 @@ def get_events(conn, *, actor_id: UUID, case_id: UUID, run_id: UUID) -> EventBun
     ) for row in relation_rows]
     return EventBundle(case_id=case_id, run_id=run_id, events=events,
                        relations=relations, builder_version=builder_version)
+
+
+def get_insights(conn, *, actor_id: UUID, case_id: UUID, run_id: UUID) -> list[Insight] | None:
+    allowed = conn.execute(
+        """SELECT 1 FROM analysis_runs r JOIN cases c ON c.case_id=r.case_id
+           JOIN actor_subject_access a ON a.subject_id=c.subject_id
+             AND a.actor_id=%s AND a.can_read_case=true
+           JOIN consent_purposes p ON p.consent_id=c.consent_id
+             AND p.purpose='case_guidance' AND p.status='active'
+             AND (p.expires_at IS NULL OR p.expires_at > now())
+           WHERE c.case_id=%s AND r.run_id=%s""", (actor_id, case_id, run_id),
+    ).fetchone()
+    if not allowed:
+        return None
+    rows = conn.execute(
+        "SELECT * FROM insights WHERE case_id=%s AND run_id=%s ORDER BY category,label,created_at",
+        (case_id, run_id),
+    ).fetchall()
+    return [Insight(
+        insight_id=r["insight_id"], case_id=r["case_id"], run_id=r["run_id"],
+        category=r["category"], label=r["label"], severity=r["severity"],
+        confidence=r["confidence"], confidence_method=r["confidence_method"],
+        evidence_ids=r["evidence_ids"], rationale=r["rationale"],
+        uncertainty=r["uncertainty"], suggested_action=r["suggested_action"],
+        review_required=r["review_required"], review_status=r["review_status"],
+        judgment_status=r["judgment_status"], rule_version=r["rule_version"],
+        knowledge_refs=r["knowledge_refs"],
+    ) for r in rows]
 
 
 def _to_case(row: dict) -> Case:

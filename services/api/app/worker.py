@@ -17,6 +17,9 @@ from pypdf import PdfReader
 from .repository import connect
 from .fact_extractor import EXTRACTOR_VERSION, extract_facts, merge_model_candidates
 from .event_builder import BUILDER_VERSION, build_events
+from .insight_detector import RULE_VERSION, deterministic_candidates, infer_disease_code, merge_semantic_candidates
+from .insight_llm import PROMPT_VERSION as INSIGHT_PROMPT_VERSION, SCHEMA_VERSION as INSIGHT_SCHEMA_VERSION, detect_semantic
+from .knowledge_assembler import KnowledgeAssembler, PackExcludedError
 from .llm_extractor import PROMPT_VERSION, SCHEMA_VERSION as MODEL_SCHEMA_VERSION, OpenAiCompatibleExtractor, validate_evidence_quotes
 from .tencent_ocr import OCR_METHOD, OCR_VERSION, TencentOcr
 
@@ -244,6 +247,30 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
             model_provider, model_id = extractor.provider, extractor.model_id
             model_result = validate_evidence_quotes(extractor.extract(material), material)
 
+        knowledge_entries = []
+        knowledge_version = None
+        knowledge_excluded = False
+        disease_code = infer_disease_code(material)
+        if disease_code is not None:
+            assembler = KnowledgeAssembler()
+            knowledge_version = assembler.knowledge_version
+            try:
+                assembler.check_exclusions(disease_code, material)
+                knowledge_entries = assembler.select(
+                    disease_code, slots=("S2", "S4", "S5", "S11"),
+                    patient_visible=False,
+                ).allowed
+            except PackExcludedError:
+                knowledge_excluded = True
+        insight_model_result = {"status": "not_configured", "candidates": [],
+                                "raw_output": None, "usage_metadata": {},
+                                "error_code": "LLM_NOT_CONFIGURED"}
+        if material and os.environ.get("LLM_API_KEY") and not knowledge_excluded:
+            prompt_knowledge = [{"entry_id": e.entry_id, "title": e.title,
+                                 "content": e.content[:500], "anchoring": e.anchoring}
+                                for e in knowledge_entries[:80]]
+            insight_model_result = detect_semantic(material, prompt_knowledge)
+
         evidence_ids = []
         fact_inputs = []
         routing = []
@@ -275,6 +302,7 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
             conn.execute("DELETE FROM extracted_facts WHERE run_id=%s", (run["run_id"],))
             conn.execute("DELETE FROM event_relations WHERE run_id=%s", (run["run_id"],))
             conn.execute("DELETE FROM medical_events WHERE run_id=%s", (run["run_id"],))
+            conn.execute("DELETE FROM insights WHERE run_id=%s", (run["run_id"],))
             for document, pages in parsed_documents:
                 for page in pages:
                     routing.append({
@@ -356,6 +384,29 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
             facts = merge_model_candidates(
                 facts, model_result["candidates"].get("candidates", []), fact_inputs
             )
+            rule_insights = deterministic_candidates(fact_inputs, knowledge_entries)
+            insights = merge_semantic_candidates(
+                rule_insights, insight_model_result["candidates"], fact_inputs,
+                {e.entry_id for e in knowledge_entries},
+            )
+            if knowledge_excluded:
+                waiting_review = True
+            if any(item["review_required"] for item in insights):
+                waiting_review = True
+            for item in insights:
+                conn.execute(
+                    """INSERT INTO insights
+                       (insight_id,run_id,case_id,category,label,severity,confidence,
+                        confidence_method,evidence_ids,rationale,uncertainty,suggested_action,
+                        review_required,review_status,judgment_status,rule_version,knowledge_refs)
+                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s,%s,%s,%s,%s,%s,%s,%s::jsonb)""",
+                    (item["insight_id"], run["run_id"], run["case_id"], item["category"],
+                     item["label"], item["severity"], item["confidence"],
+                     item["confidence_method"], json.dumps(item["evidence_ids"]),
+                     item["rationale"], item["uncertainty"], item["suggested_action"],
+                     item["review_required"], item["review_status"], item["judgment_status"],
+                     item["rule_version"], json.dumps(item["knowledge_refs"])),
+                )
             for fact in facts:
                 conn.execute(
                     """INSERT INTO extracted_facts
@@ -411,6 +462,22 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
                  json.dumps(model_result["candidates"].get("candidates", []), ensure_ascii=False),
                  json.dumps(model_result.get("usage_metadata", {})), model_result.get("error_code")),
             )
+            conn.execute(
+                """INSERT INTO model_extractions
+                   (extraction_id,run_id,case_id,provider,model_id,prompt_version,
+                    schema_version,status,raw_output,repaired_output,candidates,usage_metadata,error_code)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,NULL,%s::jsonb,%s::jsonb,%s)
+                   ON CONFLICT (run_id,provider,model_id,prompt_version) DO UPDATE SET
+                    status=excluded.status,raw_output=excluded.raw_output,
+                    candidates=excluded.candidates,usage_metadata=excluded.usage_metadata,
+                    error_code=excluded.error_code""",
+                (uuid4(), run["run_id"], run["case_id"], model_provider, model_id,
+                 INSIGHT_PROMPT_VERSION, INSIGHT_SCHEMA_VERSION, insight_model_result["status"],
+                 json.dumps(insight_model_result.get("raw_output"), ensure_ascii=False),
+                 json.dumps(insight_model_result["candidates"], ensure_ascii=False),
+                 json.dumps(insight_model_result.get("usage_metadata", {})),
+                 insight_model_result.get("error_code")),
+            )
             result = {"parse": {
                 "status": "waiting_review" if waiting_review else "completed",
                 "routing_version": ROUTING_VERSION, "pages": routing,
@@ -425,6 +492,13 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
                 "status": "completed", "builder_version": BUILDER_VERSION,
                 "encounter_id": str(encounter_id), "event_count": len(events),
                 "relation_count": len(relations),
+            }, "insights": {
+                "status": "waiting_review" if any(i["review_required"] for i in insights) or knowledge_excluded else "completed",
+                "rule_version": RULE_VERSION, "insight_count": len(insights),
+                "model_status": insight_model_result["status"],
+                "prompt_version": INSIGHT_PROMPT_VERSION,
+                "knowledge_version": knowledge_version,
+                "knowledge_excluded": knowledge_excluded,
             }}
             conn.execute(
                 """UPDATE analysis_runs SET status=%s, current_stage='validate', stage_results=%s::jsonb,

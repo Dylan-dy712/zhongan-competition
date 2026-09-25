@@ -22,6 +22,9 @@ install -d -m 755 -o ubuntu -g ubuntu "${app_dir}"
 install -d -m 700 -o ubuntu -g ubuntu /home/ubuntu/zhongan-data/documents
 cp -a "${release_dir}/services" "${app_dir}/"
 cp -a "${release_dir}/scripts" "${app_dir}/"
+install -d -m 755 "${app_dir}/contracts" "${app_dir}/docs/medical"
+cp -a "${release_dir}/contracts/knowledge" "${app_dir}/contracts/"
+cp -a "${release_dir}/docs/medical/knowledge" "${app_dir}/docs/medical/"
 chown -R ubuntu:ubuntu "${app_dir}"
 
 if [[ ! -x "${app_dir}/.venv/bin/python" ]]; then
