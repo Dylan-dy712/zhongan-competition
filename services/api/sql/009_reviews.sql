@@ -1,6 +1,11 @@
 ALTER TABLE actors ADD COLUMN IF NOT EXISTS role text NOT NULL DEFAULT 'patient'
     CHECK (role IN ('patient','medical_reviewer','customer_service','evaluator','system'));
 
+ALTER TABLE insights DROP CONSTRAINT IF EXISTS insights_check1;
+ALTER TABLE insights DROP CONSTRAINT IF EXISTS insights_clinical_review_state_chk;
+ALTER TABLE insights ADD CONSTRAINT insights_clinical_review_state_chk
+    CHECK (category <> 'clinical' OR review_status <> 'not_required');
+
 CREATE TABLE IF NOT EXISTS review_tasks (
     review_id uuid PRIMARY KEY,
     case_id uuid NOT NULL REFERENCES cases(case_id),
