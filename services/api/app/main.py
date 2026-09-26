@@ -1,13 +1,15 @@
-"""REQ-01/02 API slice. Medical extraction remains unavailable until implemented."""
+"""Authorized care cases, document analysis, review and persistent agent conversations."""
 
 import hashlib
+import json
 import os
 import tempfile
 from pathlib import Path
 from typing import Annotated, Literal
-from uuid import UUID, uuid4
+from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 import psycopg
+import requests
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Path as ApiPath, Query, Request, Response, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
@@ -28,6 +30,8 @@ from .review_repository import (
     ReviewAccessDenied, ReviewNotFound, StaleReview, decide_review, list_reviews,
 )
 from .care_assistant import AssistantAnswer, answer_question
+from . import conversation_repository as chats
+from .conversation_agent import CareTools, run_agent
 
 app = FastAPI(title="众安·暖愈智护", version="0.1.0")
 
@@ -81,6 +85,23 @@ class DecideReview(Contract):
 class AskAssistant(Contract):
     question: str = Field(min_length=1, max_length=1000)
     report_version: int = Field(ge=1)
+
+
+class NewConversation(Contract):
+    conversation_id: UUID
+    case_id: UUID | None = None
+    subject_id: UUID | None = None
+    recall_enabled: bool = True
+
+
+class ChatMessage(Contract):
+    request_id: UUID
+    message: str = Field(min_length=1, max_length=4000)
+    document_ids: list[UUID] = Field(default_factory=list, max_length=20)
+
+
+class RecallSetting(Contract):
+    enabled: bool
 
 
 DOCUMENT_POLICY_VERSION = "document-policy-v1"
@@ -150,7 +171,7 @@ def current_actor(authorization: str | None = Header(default=None), conn=Depends
 
 @app.get("/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "scope": "req07_evidence_bound_care_report"}
+    return {"status": "ok", "scope": "conversation_agent_v1"}
 
 
 @app.post("/v1/cases", response_model=Case, status_code=201)
@@ -375,3 +396,138 @@ def post_assistant_message(body: AskAssistant, case_id: UUID,
         return answer_question(report, body.question)
     except RuntimeError:
         raise HTTPException(status_code=503, detail="Care assistant is temporarily unavailable") from None
+
+
+@app.exception_handler(AccessDenied)
+async def chat_access_error(request: Request, exc: AccessDenied):
+    return await business_error(request, HTTPException(404, '对话或材料不可访问'))
+
+
+@app.exception_handler(IdempotencyConflict)
+async def chat_conflict_error(request: Request, exc: IdempotencyConflict):
+    return await business_error(request, HTTPException(409, '请求标识已用于不同内容'))
+
+
+@app.exception_handler(chats.TurnBusy)
+async def chat_busy_error(request: Request, exc: chats.TurnBusy):
+    return await business_error(request, HTTPException(409, '上一条消息仍在处理，请稍后查看或重试'))
+
+
+@app.get('/v1/chat/subjects')
+def chat_subjects(actor_id: UUID = Depends(current_actor), conn=Depends(database)):
+    return chats.available_subjects(conn, actor_id)
+
+
+@app.get('/v1/conversations')
+def conversations(actor_id: UUID = Depends(current_actor), conn=Depends(database)):
+    return chats.list_conversations(conn, actor_id)
+
+
+@app.post('/v1/conversations', status_code=201)
+def new_conversation(body: NewConversation, actor_id: UUID = Depends(current_actor), conn=Depends(database)):
+    try:
+        return chats.create_conversation(conn, actor_id, body.conversation_id,
+            body.case_id, body.subject_id, body.recall_enabled)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from None
+
+
+@app.get('/v1/conversations/{conversation_id}')
+def conversation_detail(conversation_id: UUID, actor_id: UUID = Depends(current_actor), conn=Depends(database)):
+    conversation = chats.require_conversation(conn, actor_id, conversation_id)
+    tools = CareTools(conn, actor_id, conversation_id)
+    return {'conversation': conversation, 'turns': chats.get_turns(conn, actor_id, conversation_id),
+            'analysis': tools.execute('analysis_status', '{}'),
+            'report': tools.execute('read_report', '{}')}
+
+
+@app.get('/v1/conversations/{conversation_id}/turns')
+def conversation_history(conversation_id: UUID, before: UUID | None = None,
+                         actor_id: UUID = Depends(current_actor), conn=Depends(database)):
+    return chats.get_turns(conn, actor_id, conversation_id, before)
+
+
+@app.patch('/v1/conversations/{conversation_id}/recall')
+def conversation_recall(conversation_id: UUID, body: RecallSetting,
+                        actor_id: UUID = Depends(current_actor), conn=Depends(database)):
+    chats.require_conversation(conn, actor_id, conversation_id)
+    conn.execute('UPDATE conversations SET recall_enabled=%s WHERE conversation_id=%s', (body.enabled, conversation_id))
+    return {'recall_enabled': body.enabled}
+
+
+@app.post('/v1/conversations/{conversation_id}/documents', response_model=Document, status_code=201)
+async def chat_upload(conversation_id: UUID, response: Response, file: Annotated[UploadFile, File()],
+                      actor_id: UUID = Depends(current_actor), conn=Depends(database),
+                      storage_root: Path = Depends(document_storage_root)):
+    conversation = chats.require_conversation(conn, actor_id, conversation_id)
+    # File names are untrusted metadata, never used as storage paths.
+    name = (file.filename or '上传材料').replace('\\', '/').rsplit('/', 1)[-1][:200]
+    return await post_document(case_id=conversation['case_id'], response=response, file=file,
+        source_ref=name, document_type=None, actor_id=actor_id, conn=conn, storage_root=storage_root)
+
+
+@app.post('/v1/conversations/{conversation_id}/messages')
+def chat_message(conversation_id: UUID, body: ChatMessage,
+                 actor_id: UUID = Depends(current_actor), conn=Depends(database)):
+    return process_chat_message(conversation_id, body, actor_id, conn)
+
+
+def process_chat_message(conversation_id, body, actor_id, conn, input_kind='user'):
+    question = body.message.strip()
+    if not question:
+        raise HTTPException(422, '消息不能为空')
+    turn = chats.begin_turn(conn, actor_id, conversation_id, body.request_id, question, body.document_ids, input_kind)
+    # Persist the input before a slow provider call; interrupted turns can be retried with the same ID.
+    conn.commit()
+    if turn['status'] == 'completed':
+        return {'turn_id': turn['turn_id'], 'answer': turn['answer'], 'tool_events': turn['tool_events']}
+    history = [t for t in chats.get_turns(conn, actor_id, conversation_id) if t['turn_id'] != turn['turn_id']]
+    tools = CareTools(conn, actor_id, conversation_id)
+    events = []
+
+    def progress(current_events):
+        events[:] = current_events
+        chats.require_conversation(conn, actor_id, conversation_id)
+        conn.execute('''UPDATE conversation_turns SET tool_events=%s::jsonb
+            WHERE turn_id=%s AND lease_token=%s AND status='running' ''',
+            (json.dumps(events), turn['turn_id'], turn['lease_token']))
+        conn.commit()
+
+    try:
+        answer, events = run_agent(history, question, turn['attachments'], tools, on_event=progress)
+        chats.finish_turn(conn, actor_id, conversation_id, turn, answer=answer, events=events)
+        conn.commit()
+        return {'turn_id': turn['turn_id'], 'answer': answer, 'tool_events': events}
+    except (RuntimeError, ValueError, KeyError, TypeError, requests.RequestException) as exc:
+        # Log only safe classifications, never provider bodies, prompts or credentials.
+        import logging
+        provider_response = getattr(exc, 'response', None)
+        logging.getLogger(__name__).warning('Chat generation failed: type=%s provider_status=%s',
+            type(exc).__name__, getattr(provider_response, 'status_code', None))
+        chats.finish_turn(conn, actor_id, conversation_id, turn, events=events, error='AGENT_UNAVAILABLE')
+        conn.commit()
+        raise HTTPException(503, '暂时无法完成回答，消息已保存，可以重试。') from None
+
+
+@app.post('/v1/conversations/{conversation_id}/analyses/{run_id}/continue')
+def continue_analysis(conversation_id: UUID, run_id: UUID,
+                      actor_id: UUID = Depends(current_actor), conn=Depends(database)):
+    conversation = chats.require_conversation(conn, actor_id, conversation_id)
+    run = get_analysis_run(conn, actor_id=actor_id, run_id=run_id)
+    if not run or run.case_id != conversation['case_id']:
+        raise HTTPException(404, '分析任务不存在')
+    if run.status not in ('completed', 'waiting_review'):
+        raise HTTPException(409, '分析尚未完成')
+    initiated = conn.execute('''SELECT 1 FROM conversation_turns WHERE conversation_id=%s
+        AND status='completed' AND tool_events @> %s::jsonb LIMIT 1''',
+        (conversation_id, json.dumps([{'tool': 'start_analysis', 'run_id': str(run_id)}]))).fetchone()
+    if not initiated:
+        raise HTTPException(409, '此任务不是在当前对话中发起的')
+    latest = conn.execute('''SELECT run_id FROM analysis_runs WHERE case_id=%s
+        ORDER BY created_at DESC,run_id DESC LIMIT 1''', (run.case_id,)).fetchone()
+    if latest['run_id'] != run_id:
+        raise HTTPException(409, '已有更新的分析任务')
+    request_id = uuid5(NAMESPACE_URL, f'zhongan:analysis-continuation:{conversation_id}:{run_id}')
+    return process_chat_message(conversation_id, ChatMessage(request_id=request_id,
+        message='材料分析已结束，请结合我刚才关注的问题，读取本次材料和可用报告继续解释；待复核内容请明确说明。'),
+        actor_id=actor_id, conn=conn, input_kind='analysis_ready')

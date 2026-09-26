@@ -9,6 +9,7 @@ User=ubuntu
 Group=ubuntu
 WorkingDirectory=/home/ubuntu/zhongan-app
 EnvironmentFile=/home/ubuntu/.config/zhongan/database.env
+EnvironmentFile=-/home/ubuntu/.config/zhongan/llm.env
 Environment=PYTHONUNBUFFERED=1
 Environment=ZHONGAN_STORAGE_ROOT=/home/ubuntu/zhongan-data/documents
 Environment=ZHONGAN_MAX_DOCUMENT_BYTES=10485760

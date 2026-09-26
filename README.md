@@ -17,9 +17,21 @@ python -m uvicorn services.api.app.main:app --reload
 python -m unittest discover -s tests -v
 ```
 
-## 温馨响应式前端
+## 持续对话与材料分析
 
-患者端位于 `apps/web`，使用 React、TypeScript 与 Vite，同一套页面适配手机和电脑。手机端使用底部导航与证据抽屉；电脑端使用左侧导航和宽版内容区。页面提供明确标记的合成演示模式，也可以在“我的”中用访问令牌、案件 ID 和报告版本连接真实 API。真实接口报错会直接展示，不会用演示数据替代。
+患者端位于 `apps/web`，使用 React、TypeScript 与 Vite。新的入口是持续聊天：连接访问令牌后可直接开始，不需要预先输入报告版本。支持聊天内上传 PDF/图片/UTF-8 文本、恢复历史会话、补充材料和查看证据；可另开对话接续同次就医，也可开始新的就医案件。
+
+模型通过原生 `tool_calls` 按需求选择查看材料、启动分析、查询状态、读取原文、读取已发布报告或检索历史。每轮最多 5 次模型调用、6 次工具执行。上传的材料由现有 Worker 处理；页面轮询真实状态，分析结束后使用幂等请求继续回答。不存在按关键词返回固定回答或演示回退。
+
+聊天和工具事件写入 PostgreSQL。近期聊天进入上下文，较早聊天通过同一用户、同一关怀对象的关键词检索查找；关闭“允许新对话回忆”后，该会话不再作为历史检索来源。此版本是可追溯历史检索，不含自动偏好提炼、向量语义检索或物理删除能力。授权撤回后不再允许读取相关对话。尚未发布的报告不会通过聊天绕过审核。
+
+启动新版 API 前，先在目标开发数据库执行迁移（从项目根目录运行）：
+
+```powershell
+python -m scripts.migrate_database
+```
+
+迁移命令读取 `ZHONGAN_DATABASE_URL`，依次执行 SQL 并记录版本哈希。旧库尚无迁移记录时会执行已有幂等迁移；应先备份目标库。新增表见 `services/api/sql/011_conversations.sql`。模型仍使用 `LLM_BASE_URL`、`LLM_API_KEY`、`LLM_MODEL_ID`，供应方必须支持 OpenAI-compatible 工具调用。缺模型配置时明确报错并保存失败消息，可用原请求 ID 重试。前端访问令牌仅存在当前浏览器会话存储中。
 
 ```powershell
 cd apps/web
@@ -34,6 +46,8 @@ npm run build
 ```
 
 构建产物在 `apps/web/dist`。Nginx 配置 `deploy/nginx-zhongan-api.conf` 将静态站点作为 `/`，并继续把 `/v1`、`/health`、API 文档转发到 FastAPI。
+
+会话改造说明及验收范围见 [持续对话智能体改造](docs/reviews/conversation-agent.md)。
 
 ## PostgreSQL 开发库配置（Windows）
 

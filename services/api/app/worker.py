@@ -297,6 +297,8 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
             for _document, pages in parsed_documents for page in pages
         )
         with conn.transaction():
+            conn.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s,0))",
+                         (f"case-report:{run['case_id']}",))
             authorized = conn.execute(
                 """SELECT 1 FROM analysis_runs r JOIN cases c ON c.case_id=r.case_id
                    JOIN consent_purposes p ON p.consent_id=c.consent_id
@@ -475,11 +477,17 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
             consent_refs = [{"consent_id": str(case_meta["consent_id"]),
                              "version": case_meta["consent_version"], "purpose": "case_guidance"}]
             conn.execute("DELETE FROM reports WHERE run_id=%s", (run["run_id"],))
+            # New material must create a new case-level report version, not collide with v1.
+            conn.execute("SELECT case_id FROM cases WHERE case_id=%s FOR UPDATE", (run["case_id"],))
+            report_version = conn.execute(
+                "SELECT COALESCE(MAX(report_version),0)+1 AS next_version FROM reports WHERE case_id=%s",
+                (run["case_id"],),
+            ).fetchone()["next_version"]
             conn.execute(
                 """INSERT INTO reports(report_id,case_id,run_id,report_version,status,sections,actions,
                    input_hash,model_id,prompt_version,knowledge_version,policy_version,memory_refs,
-                   consent_refs,validation_errors) VALUES (%s,%s,%s,1,%s,%s::jsonb,%s::jsonb,%s,%s,%s,%s,%s,'[]',%s::jsonb,%s::jsonb)""",
-                (report_id, run["case_id"], run["run_id"], report_status,
+                   consent_refs,validation_errors) VALUES (%s,%s,%s,%s,%s,%s::jsonb,%s::jsonb,%s,%s,%s,%s,%s,'[]',%s::jsonb,%s::jsonb)""",
+                (report_id, run["case_id"], run["run_id"], report_version, report_status,
                  json.dumps([s.model_dump(mode="json") for s in sections], ensure_ascii=False),
                  json.dumps(actions, ensure_ascii=False), run["input_hash"], model_id,
                  REPORT_PROMPT_VERSION, knowledge_version or "knowledge:none", REPORT_POLICY_VERSION,
@@ -595,7 +603,7 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
                 "knowledge_excluded": knowledge_excluded,
             }, "guidance": {
                 "status": report_status, "report_id": str(report_id),
-                "report_version": 1, "prompt_version": REPORT_PROMPT_VERSION,
+                "report_version": report_version, "prompt_version": REPORT_PROMPT_VERSION,
                 "policy_version": REPORT_POLICY_VERSION,
                 "validation_errors": report_errors,
             }}

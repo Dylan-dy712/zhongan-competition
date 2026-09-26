@@ -1,0 +1,7 @@
+{
+  "name": "zhongan-chat-local-sql-checks",
+  "private": true,
+  "type": "module",
+  "scripts": {"start": "pglite-server --host=127.0.0.1 --port=55439 --max-connections=8"},
+  "devDependencies": {"@electric-sql/pglite": "0.5.8", "@electric-sql/pglite-socket": "0.2.11"}
+}

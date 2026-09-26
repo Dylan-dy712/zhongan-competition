@@ -55,3 +55,23 @@ export interface AssistantAnswer {
   model_id: string;
   prompt_version: string;
 }
+
+export interface Conversation {
+  conversation_id: string; case_id: string; title: string; recall_enabled: boolean;
+  created_at: string; updated_at: string;
+}
+export interface ChatAnswer {text: string; evidence_refs: string[]; history_refs: string[]}
+export interface ToolEvent {tool: string; status: string; run_id?: string}
+export interface ChatTurn {
+  turn_id: string; request_id: string; question: string;
+  input_kind: 'user'|'analysis_ready';
+  attachments: {document_id:string; name:string}[];
+  status: 'running'|'completed'|'failed'; answer: ChatAnswer|null;
+  tool_events: ToolEvent[]; created_at: string; error_code: string|null;
+}
+export interface ChatSnapshot {
+  conversation: Conversation; turns: ChatTurn[];
+  analysis: {status:string; run_id?:string; stage?:string; error?:unknown};
+  report: {status:string; report_version?:number; sections?:ReportSection[]; actions?:CareAction[]};
+}
+export interface ChatSubject {subject_id:string; consent_id:string}

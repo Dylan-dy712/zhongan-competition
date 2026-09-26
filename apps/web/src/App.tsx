@@ -1,64 +1,274 @@
-import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
-import { ApiError, askAssistant, getEvidence, getReport } from "./api";
-import { demoEvidence, demoReport } from "./demo";
-import type { AssistantAnswer, Evidence, Report, ReportSection } from "./types";
+import {useCallback, useEffect, useRef, useState, type FormEvent} from 'react';
+import {ApiError, continueAnalysis, createConversation, getConversation, getEvidence, getOlderTurns,
+  listConversations, listSubjects, sendChatMessage, setRecall, uploadChatDocument} from './api';
+import type {ChatSnapshot, ChatSubject, ChatTurn, Conversation, Evidence, ToolEvent} from './types';
+import './chat.css';
 
-type View = "assistant" | "report" | "actions" | "profile";
-type IconName = "chat"|"file"|"check"|"user"|"shield"|"spark"|"send"|"source"|"close"|"arrow"|"plus"|"heart"|"menu";
-type Message = { id:string; role:"assistant"|"user"; text:string; citations?:AssistantAnswer["citations"]; uncertainty?:string|null };
+// randomUUID requires HTTPS in some browsers; retain a cryptographic HTTP development fallback.
+function requestId() {
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  bytes[6] = (bytes[6] & 15) | 64; bytes[8] = (bytes[8] & 63) | 128;
+  const hex = Array.from(bytes, x => x.toString(16).padStart(2, '0')).join('');
+  return `${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20)}`;
+}
+const toolLabels: Record<string,string> = {list_materials:'查看上传材料',start_analysis:'提交材料分析',
+  analysis_status:'查询分析进度',read_materials:'查阅原始依据',read_report:'读取分析报告',search_history:'查找以前的对话'};
+const statusLabels: Record<string,string> = {not_started:'尚未分析',queued:'材料已排队',running:'正在分析材料',
+  waiting_review:'材料已解析，部分结论待专业复核',completed:'材料分析已完成',failed:'材料分析失败',cancelled:'分析已取消',
+  found:'已找到',empty:'暂无记录',available:'可读取',needs_materials:'需要补充材料',not_generated:'尚无报告',
+  disabled:'历史回忆已关闭',published:'已发布',ready:'报告待发布',pending_review:'等待复核'};
+const sectionLabels: Record<string,string> = {diagnosis_explanation:'病情说明',treatment_review:'治疗回顾',
+  cost_explanation:'费用解读',recovery_plan:'康复计划',emotional_support:'情绪关怀',next_visit_advice:'复诊提醒'};
+const errorText = (e:unknown) => e instanceof Error ? e.message : '连接失败，请稍后重试。';
 
-const sectionNames:Record<ReportSection["section_type"],string>={diagnosis_explanation:"病情说明",treatment_review:"治疗回顾",cost_explanation:"费用解读",recovery_plan:"康复计划",emotional_support:"情绪关怀",next_visit_advice:"复诊提醒"};
-const nav:{key:View;label:string;icon:IconName}[]=[{key:"assistant",label:"问暖暖",icon:"chat"},{key:"report",label:"关怀报告",icon:"file"},{key:"actions",label:"行动计划",icon:"check"},{key:"profile",label:"我的",icon:"user"}];
-
-function Icon({name,size=22}:{name:IconName;size?:number}){
- const p:Record<IconName,ReactNode>={
-  chat:<><path d="M5 18.5 3 21l.7-4A8 8 0 1 1 7 20"/><path d="M8 11h.01M12 11h.01M16 11h.01"/></>,
-  file:<><path d="M6 2h8l4 4v16H6z"/><path d="M14 2v5h5M9 12h6M9 16h6"/></>,
-  check:<path d="m5 12 4 4L19 6"/>,user:<><circle cx="12" cy="8" r="4"/><path d="M4 22a8 8 0 0 1 16 0"/></>,
-  shield:<><path d="M12 2 4 5v6c0 5 3.4 9.4 8 11 4.6-1.6 8-6 8-11V5z"/><path d="m9 12 2 2 4-5"/></>,
-  spark:<><path d="m12 3 1.5 4.5L17 9l-4.5 1.5L11 15l-1.5-4.5L5 9l4.5-1.5z"/><path d="m19 15 .8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/></>,
-  send:<><path d="m22 2-7 20-4-9-9-4z"/><path d="M22 2 11 13"/></>,source:<><path d="M5 3h14v18H5z"/><path d="M8 8h8M8 12h8M8 16h5"/></>,
-  close:<path d="M5 5l14 14M19 5 5 19"/>,arrow:<path d="m9 18 6-6-6-6"/>,plus:<path d="M12 5v14M5 12h14"/>,
-  heart:<path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1.1-1.1a5.5 5.5 0 0 0-7.8 7.8L12 21l8.9-8.6a5.5 5.5 0 0 0-.1-7.8Z"/>,menu:<path d="M4 7h16M4 12h16M4 17h16"/>
- };
- return <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">{p[name]}</svg>
+function ToolActivity({events}:{events:ToolEvent[]}) {
+  return events.length > 0 ? <details className="tool-activity"><summary>已执行 {events.length} 项操作</summary>
+    {events.map((e,i)=><div key={i}>{toolLabels[e.tool] || '处理请求'} · {statusLabels[e.status] || '操作已返回'}</div>)}
+  </details> : null;
 }
 
-const welcome:Message={id:"welcome",role:"assistant",text:"你好，我是暖暖。我已经读完这份关怀报告。你可以直接告诉我最担心的事情，我会先查报告和原始依据，再用容易理解的话回答你。"};
-const suggestions=["这次到底得了什么病？","回家后最需要注意什么？","这笔费用是怎么构成的？"];
-const messageId=()=>`${Date.now()}-${Math.random().toString(36).slice(2)}`;
-function demoAnswer(q:string):AssistantAnswer{
- if(q.includes("费"))return{answer:"报告记录的医疗总费用是 8,426.37 元。现有材料没有拆分医保结算与个人自付，因此这两项需要以正式结算票据为准。",citations:[{claim_id:"c4",evidence_refs:["2f6580ce-8ed4-4d22-88f8-aeeef82adab6"]}],uncertainty:"医保报销和自付明细尚未出现在材料中。",model_id:"demo",prompt_version:"demo"};
- if(/注意|回家|恢复/.test(q))return{answer:"回家后先做好三件事：早晚记录体温、保证休息和适量饮水、联系医院确认复诊时间。活动量可以根据身体耐受逐步增加。",citations:[{claim_id:"c1",evidence_refs:["5bdcfedd-ef76-4740-a096-3d665e5a4d43"]}],uncertainty:"报告没有明确复诊日期，需要向原就诊机构确认。",model_id:"demo",prompt_version:"demo"};
- return{answer:"材料记录的主要诊断是社区获得性肺炎。简单说，就是肺部受到感染。本次住院进行了抗感染和对症治疗，出院记录显示病情好转、生命体征平稳。",citations:[{claim_id:"c1",evidence_refs:["5bdcfedd-ef76-4740-a096-3d665e5a4d43"]}],uncertainty:null,model_id:"demo",prompt_version:"demo"};
+export default function App() {
+  const [token,setToken] = useState(()=>sessionStorage.getItem('zhongan_chat_token') || '');
+  const [tokenInput,setTokenInput] = useState('');
+  const [connected,setConnected] = useState(false);
+  const [conversations,setConversations] = useState<Conversation[]>([]);
+  const [subjects,setSubjects] = useState<ChatSubject[]>([]);
+  const [subject,setSubject] = useState('');
+  const [caseInput,setCaseInput] = useState('');
+  const [snapshot,setSnapshot] = useState<ChatSnapshot|null>(null);
+  const [older,setOlder] = useState<ChatTurn[]>([]);
+  const [hasOlder,setHasOlder] = useState(false);
+  const [input,setInput] = useState('');
+  const [attachments,setAttachments] = useState<{document_id:string; name:string}[]>([]);
+  const [busy,setBusy] = useState(false);
+  const [uploading,setUploading] = useState(false);
+  const [error,setError] = useState('');
+  const [evidence,setEvidence] = useState<Evidence|null>(null);
+  const [panel,setPanel] = useState<'chat'|'report'>('chat');
+  const [historyOpen,setHistoryOpen] = useState(false);
+  const active = useRef('');
+  const epoch = useRef(0);
+  const busyRef = useRef(false);
+  const initialized = useRef(false);
+  const olderExhausted = useRef(false);
+  const resumed = useRef(new Set<string>());
+  const uploadInput = useRef<HTMLInputElement>(null);
+  const bottom = useRef<HTMLDivElement>(null);
+  const pendingSend = useRef<{id:string; text:string; docs:string[]}|null>(null);
+
+  const refresh = useCallback(async (id:string, auth:string, generation:number) => {
+    let state:ChatSnapshot;
+    try {state = await getConversation(auth,id);}
+    catch(e) {
+      if(epoch.current===generation && active.current===id && e instanceof ApiError && [401,404].includes(e.status)) {
+        active.current='';setSnapshot(null);setOlder([]);setEvidence(null);setAttachments([]);
+      }
+      throw e;
+    }
+    if (epoch.current === generation && active.current === id) {
+      setSnapshot(state);
+      setHasOlder(state.turns.length === 50 && !olderExhausted.current);
+    }
+    return state;
+  },[]);
+
+  const openConversation = useCallback(async (id:string, auth=token) => {
+    const generation = ++epoch.current;
+    active.current = id;
+    olderExhausted.current = false;
+    setSnapshot(null); setOlder([]); setAttachments([]); setInput(''); setEvidence(null); setError('');
+    setPanel('chat'); setHistoryOpen(false); pendingSend.current = null;
+    try {
+      await refresh(id,auth,generation);
+      if (epoch.current===generation) localStorage.setItem('zhongan_last_conversation',id);
+    } catch(e) {if(epoch.current===generation) setError(errorText(e));}
+  },[refresh,token]);
+
+  const connect = useCallback(async (auth:string) => {
+    if (!auth.trim()) return;
+    setBusy(true); setError('');
+    try {
+      const [items,allowed] = await Promise.all([listConversations(auth),listSubjects(auth)]);
+      sessionStorage.setItem('zhongan_chat_token',auth); setToken(auth); setConnected(true);
+      setConversations(items); setSubjects(allowed); setSubject(allowed[0]?.subject_id || '');
+      const last = localStorage.getItem('zhongan_last_conversation');
+      const chosen = items.find(x=>x.conversation_id===last) || items[0];
+      if(chosen) await openConversation(chosen.conversation_id,auth);
+    } catch(e) {setError(errorText(e));setConnected(false);sessionStorage.removeItem('zhongan_chat_token');}
+    finally {setBusy(false);}
+  },[openConversation]);
+
+  useEffect(()=>{if(!initialized.current){initialized.current=true;if(token) void connect(token);}},[connect,token]);
+  useEffect(()=>{bottom.current?.scrollIntoView({behavior:'smooth'});},[snapshot?.turns.length,busy,panel]);
+
+  const newChat = async (sameCase=false) => {
+    if (busyRef.current || busy || uploading) return;
+    setBusy(true); setError('');
+    try {
+      const item = await createConversation(token,requestId(),subject,
+        sameCase ? snapshot?.conversation.case_id : caseInput.trim() || undefined);
+      setConversations(await listConversations(token));
+      await openConversation(item.conversation_id);
+      setCaseInput('');
+    } catch(e) {setError(errorText(e));} finally {setBusy(false);}
+  };
+
+  const prepareNewChat = () => {
+    ++epoch.current;active.current='';olderExhausted.current=false;
+    setSnapshot(null);setOlder([]);setAttachments([]);setInput('');setEvidence(null);setError('');
+    setHistoryOpen(false);pendingSend.current=null;
+  };
+
+  // Processing labels come from persisted backend events, never timed animations.
+  useEffect(()=>{
+    if(!connected || !active.current) return;
+    const id=active.current, generation=epoch.current;
+    let stopped=false, timer:ReturnType<typeof setTimeout>;
+    const tick=async()=>{
+      try {
+        const state=await refresh(id,token,generation);
+        if(stopped || epoch.current!==generation) return;
+        const run=state.analysis;
+        const shouldContinue=run.run_id && ['completed','waiting_review'].includes(run.status)
+          && state.turns.some(t=>t.status==='completed' && t.tool_events.some(e=>e.tool==='start_analysis' && e.run_id===run.run_id));
+        const key=`${id}:${run.run_id}`;
+        if(shouldContinue && !busyRef.current && !state.turns.some(t=>t.status==='running') && !resumed.current.has(key)) {
+          resumed.current.add(key);busyRef.current=true;setBusy(true);
+          try {await continueAnalysis(token,id,run.run_id!);await refresh(id,token,generation);}
+          catch(e){if(epoch.current===generation)setError(errorText(e));}
+          finally{busyRef.current=false;if(epoch.current===generation)setBusy(false);}
+        }
+      } catch(e) {if(!stopped && epoch.current===generation)setError(errorText(e));}
+      if(!stopped)timer=setTimeout(tick,3500);
+    };
+    timer=setTimeout(tick,1500);
+    return()=>{stopped=true;clearTimeout(timer);};
+  },[connected,snapshot?.conversation.conversation_id,token,refresh]);
+
+  const send = async (retry?:ChatTurn) => {
+    const id=active.current, generation=epoch.current;
+    if(!id || busyRef.current || busy || uploading) return;
+    const text=retry?.question || input.trim() || (attachments.length ? '请帮我分析这些材料。' : '');
+    if(!text)return;
+    const docs=retry ? retry.attachments.map(x=>x.document_id) : attachments.map(x=>x.document_id);
+    const previous=pendingSend.current;
+    const req=retry?.request_id || (previous && previous.text===text && JSON.stringify(previous.docs)===JSON.stringify(docs) ? previous.id : requestId());
+    pendingSend.current={id:req,text,docs};busyRef.current=true;setBusy(true);setError('');
+    try {
+      if(retry?.input_kind==='analysis_ready' && snapshot?.analysis.run_id) {
+        await continueAnalysis(token,id,snapshot.analysis.run_id);
+      } else {
+        await sendChatMessage(token,id,req,text,docs);
+      }
+      if(epoch.current===generation){setInput('');setAttachments([]);pendingSend.current=null;}
+    } catch(e){if(epoch.current===generation)setError(errorText(e));}
+    finally {
+      try {await refresh(id,token,generation);if(epoch.current===generation)setConversations(await listConversations(token));}
+      catch(e){if(epoch.current===generation)setError(errorText(e));}
+      busyRef.current=false;if(epoch.current===generation)setBusy(false);
+    }
+  };
+
+  const upload = async(files:FileList|null) => {
+    if(!files || !active.current || busyRef.current || busy || uploading)return;
+    const id=active.current,generation=epoch.current;setUploading(true);setError('');
+    try {
+      if(files.length+attachments.length>20)throw new Error('一次最多附加20份材料。');
+      for(const file of Array.from(files)) {
+        if(file.size>10*1024*1024)throw new Error(`${file.name} 超过10MB，请拆分后上传。`);
+        const doc=await uploadChatDocument(token,id,file);
+        if(epoch.current===generation)setAttachments(v=>v.some(x=>x.document_id===doc.document_id)?v:[...v,{document_id:doc.document_id,name:file.name}]);
+      }
+    } catch(e){if(epoch.current===generation)setError(errorText(e));}
+    finally {setUploading(false);if(uploadInput.current)uploadInput.current.value='';}
+  };
+
+  const showEvidence = async(id:string) => {
+    const generation=epoch.current;setError('');
+    try {const result=await getEvidence(id,token);if(epoch.current===generation)setEvidence(result);}
+    catch(e){if(epoch.current===generation)setError(errorText(e));}
+  };
+  const loadOlder = async()=>{
+    if(!snapshot)return;
+    const id=active.current,generation=epoch.current,first=older[0] || snapshot.turns[0];
+    try {const rows=await getOlderTurns(token,id,first.turn_id);if(epoch.current===generation){setOlder(v=>[...rows,...v]);olderExhausted.current=rows.length<50;setHasOlder(rows.length===50);}}
+    catch(e){if(epoch.current===generation)setError(errorText(e));}
+  };
+  const logout = ()=>{
+    ++epoch.current;active.current='';sessionStorage.removeItem('zhongan_chat_token');
+    setToken('');setTokenInput('');setConnected(false);setConversations([]);setSnapshot(null);
+    setOlder([]);setAttachments([]);setEvidence(null);setError('');setHistoryOpen(false);pendingSend.current=null;
+  };
+  const toggleRecall=async()=>{
+    if(!snapshot)return;
+    const id=active.current,generation=epoch.current;
+    try {await setRecall(token,id,!snapshot.conversation.recall_enabled);await refresh(id,token,generation);}
+    catch(e){setError(errorText(e));}
+  };
+  const turns=[...older,...(snapshot?.turns || [])].filter((t,i,all)=>all.findIndex(x=>x.turn_id===t.turn_id)===i);
+  const working=busy || uploading || !!snapshot?.turns.some(t=>t.status==='running');
+  const submit=(e:FormEvent)=>{e.preventDefault();void send();};
+
+  return <div className="chat-shell">
+    <aside className={`chat-sidebar ${historyOpen?'is-open':''}`}>
+      <div className="brand"><span>暖</span><div><strong>暖愈</strong><small>每一次关怀，都能接着聊</small></div></div>
+      {connected && <><button className="new-chat" disabled={working} onClick={prepareNewChat}>＋ 新的关怀对话</button>
+        <div className="history-list"><p>以前的对话</p>{conversations.map(c=><button disabled={working} key={c.conversation_id}
+          className={active.current===c.conversation_id?'selected':''} onClick={()=>void openConversation(c.conversation_id)}>
+          <strong>{c.title}</strong><small>{new Date(c.updated_at).toLocaleDateString('zh-CN')}</small></button>)}</div>
+        <button className="quiet-button" disabled={working} onClick={logout}>退出连接</button></>}
+    </aside>
+    <section className="chat-workspace">
+      <header className="chat-header"><button className="history-toggle" onClick={()=>setHistoryOpen(v=>!v)} aria-label="打开历史对话">☰</button>
+        <div><strong>暖暖</strong><span>{connected?'你的医护关怀助手':'从你最关心的事聊起'}</span></div>
+        {snapshot && <div className="chat-tabs"><button className={panel==='chat'?'selected':''} onClick={()=>setPanel('chat')}>对话</button>
+          <button className={panel==='report'?'selected':''} onClick={()=>setPanel('report')}>分析报告</button></div>}
+      </header>
+      {error && <div role="alert" className="chat-error persistent-error">{error}<button aria-label="关闭提示" onClick={()=>setError('')}>×</button></div>}
+      {!connected ? <main className="start-screen"><div className="welcome-symbol">✦</div><h1>有什么担心，慢慢说</h1>
+        <p>把病历、检查单或发票放进对话。我们一起看清楚发生了什么，下一步可以做什么。</p>
+        <form className="connect-form" onSubmit={e=>{e.preventDefault();void connect(tokenInput.trim());}}>
+          <label htmlFor="access-token">访问令牌</label><input id="access-token" type="password" autoComplete="off" value={tokenInput} onChange={e=>setTokenInput(e.target.value)} placeholder="输入你的开发访问令牌" required/>
+          <button disabled={busy}>{busy?'正在连接…':'开始对话'}</button>
+          <small>当前开发环境仅接收合成材料。聊天保存在你的授权空间，重新连接后可以继续。</small>
+        </form></main>
+      : !snapshot ? <main className="start-screen"><div className="welcome-symbol">✦</div><h1>你好，我是暖暖</h1><p>可以先聊聊，也可以上传材料。没有报告也能开始。</p>
+        <div className="connect-form">{subjects.length>1 && <label>关怀对象<select value={subject} onChange={e=>setSubject(e.target.value)}>
+          {Array.from(new Map(subjects.map(s=>[s.subject_id,s])).values()).map((s,i)=><option key={s.subject_id} value={s.subject_id}>已授权对象 {i+1} · {s.subject_id.slice(0,8)}</option>)}</select></label>}
+          <details><summary>接续已有案件（可选）</summary><input aria-label="已有案件ID" placeholder="已有案件 ID，不需要报告版本" value={caseInput} onChange={e=>setCaseInput(e.target.value)}/></details>
+          <button disabled={busy || (!subjects.length && !caseInput)} onClick={()=>void newChat()}>{busy?'正在打开…':'开始新的对话'}</button>
+          {!subjects.length && !caseInput && <small>当前账号没有可新建案件的授权，可以填写已有案件ID。</small>}</div></main>
+      : panel==='report' ? <main className="chat-report"><h1>本次分析报告</h1>
+          {snapshot.report.sections ? <><p>第 {snapshot.report.report_version} 版 · 已发布</p><div className="report-grid">{snapshot.report.sections.map(s=><article className="report-tile" key={s.section_type}>
+            <h2>{sectionLabels[s.section_type] || s.section_type}</h2>{s.claims.map(c=><div key={c.claim_id}><p>{c.text}</p>{c.evidence_refs.map(id=><button className="citation" key={id} onClick={()=>void showEvidence(id)}>查看原始依据</button>)}</div>)}</article>)}</div></>
+          : <div className="empty-report"><p>{snapshot.report.status==='not_generated'?'还没有报告。你可以在对话中上传材料，让暖暖帮你分析。':'报告尚未发布，部分内容可能需要复核。你仍可以在对话中查阅材料、核对事实。'}</p>
+            <button onClick={()=>setPanel('chat')}>回到对话</button></div>}</main>
+      : <><main className="chat-scroll"><div className="conversation-intro"><div className="welcome-symbol">✦</div><h1>有什么担心，<em>慢慢说给我听</em></h1><span>你说的、材料写的，我们一起核对清楚</span></div>
+        {hasOlder && turns.length>0 && <button className="load-history" onClick={()=>void loadOlder()}>查看更早的聊天</button>}
+        <div className="messages">{turns.length===0 && <div className="message-row assistant"><div className="avatar">✦</div><div className="message-bubble"><p>你好，我是暖暖。你可以告诉我现在最关心什么，也可以直接上传病历或发票，我会结合材料帮你梳理。</p></div></div>}
+          {turns.map(t=><div className="chat-turn" key={t.turn_id} id={`turn-${t.turn_id}`}>
+            {t.input_kind==='analysis_ready' ? <p className="analysis-continuation">材料分析结束 · 暖暖继续为你解释</p> : <div className="message-row user"><div className="message-bubble"><p>{t.question}</p>
+            {t.attachments.map(a=><span className="attachment" key={a.document_id}>▤ {a.name}</span>)}</div></div>}
+            <div className="message-row assistant"><div className="avatar">✦</div><div className="message-bubble"><ToolActivity events={t.tool_events}/>
+              {t.answer ? <><p>{t.answer.text}</p><div className="citation-group">{t.answer.evidence_refs.map(id=><button className="citation" key={id} onClick={()=>void showEvidence(id)}>查看原始依据</button>)}</div>
+                {t.answer.history_refs.length>0 && <small className="history-reference">参考了 {t.answer.history_refs.length} 条你允许回忆的历史记录</small>}</>
+                : t.status==='failed' ? <><p>这次回答没有完成，你的消息已保存。</p><button disabled={working} onClick={()=>void send(t)}>重试这条消息</button></>
+                : <p role="status">正在结合对话处理你的请求…</p>}
+            </div></div></div>)}
+        </div><div ref={bottom}/></main>
+        <footer className="chat-footer">{snapshot.analysis.run_id && <div className="analysis-status" role="status">{statusLabels[snapshot.analysis.status] || snapshot.analysis.status}
+          {['completed','waiting_review'].includes(snapshot.analysis.status) && <button disabled={working} onClick={()=>{setInput('请查看最新分析，继续帮我解释。');}}>继续了解</button>}</div>}
+          <div className="upload-list">{attachments.map(a=><span className="attachment" key={a.document_id}>▤ {a.name} · 已上传</span>)}</div>
+          <form className="composer" onSubmit={submit}><input ref={uploadInput} hidden type="file" multiple accept=".pdf,.png,.jpg,.jpeg,.txt" onChange={e=>void upload(e.target.files)}/>
+            <button type="button" className="attach-button" title="上传病历或发票" aria-label="上传病历或发票" disabled={working} onClick={()=>uploadInput.current?.click()}>＋</button>
+            <textarea aria-label="给暖暖的消息" value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.nativeEvent.isComposing){e.preventDefault();void send();}}} rows={2} placeholder="聊聊你的情况，或上传病历、发票…"/>
+            <button className="send-button" disabled={working || (!input.trim()&&!attachments.length)}>{uploading?'上传中':busy?'处理中':'发送'}</button>
+          </form><div className="chat-options"><label><input type="checkbox" checked={snapshot.conversation.recall_enabled} disabled={working} onChange={()=>void toggleRecall()}/>允许新对话回忆本次聊天</label>
+            <button disabled={working} onClick={()=>void newChat(true)}>另开对话，接着聊这次就医</button></div>
+          <p className="chat-disclaimer">开发环境仅使用合成材料 · 解释与关怀不能替代医生诊疗</p>
+        </footer></>}
+    </section>
+    {evidence && <div className="evidence-overlay" role="dialog" aria-modal="true" aria-label="原始依据"><button className="evidence-backdrop" aria-label="关闭原始依据" onClick={()=>setEvidence(null)}/>
+      <article><button className="close-evidence" onClick={()=>setEvidence(null)}>关闭</button><h2>原始材料依据</h2><p>第 {(evidence.page_index??0)+1} 页 · 材料版本 {evidence.document_version}</p><blockquote>{evidence.text_span?.text || '此证据暂无文字片段。'}</blockquote></article></div>}
+  </div>;
 }
-
-function AssistantView({report,mode,token,onEvidence}:{report:Report;mode:"demo"|"live";token:string;onEvidence:(id:string)=>void}){
- const[messages,setMessages]=useState<Message[]>([welcome]),[input,setInput]=useState(""),[stage,setStage]=useState<string|null>(null),[error,setError]=useState("");const end=useRef<HTMLDivElement>(null);
- useEffect(()=>{ end.current?.scrollIntoView({behavior:"smooth"}); },[messages,stage]);
- const send=async(text=input)=>{const q=text.trim();if(!q||stage)return;setInput("");setError("");setMessages(v=>[...v,{id:messageId(),role:"user",text:q}]);
-  try{setStage("正在读取已发布报告");await new Promise(r=>setTimeout(r,300));setStage("正在核对结论与证据");await new Promise(r=>setTimeout(r,360));setStage("正在组织回答");
-   const a=mode==="demo"?await new Promise<AssistantAnswer>(r=>setTimeout(()=>r(demoAnswer(q)),560)):await askAssistant(report.case_id,report.report_version,q,token);
-   setMessages(v=>[...v,{id:messageId(),role:"assistant",text:a.answer,citations:a.citations,uncertainty:a.uncertainty}])
-  }catch(e){setError(e instanceof ApiError?e.message:"暂时无法回答，请稍后再试。")}finally{setStage(null)}
- };
- const submit=(e:FormEvent)=>{e.preventDefault();void send()};
- return <main className="assistant-page"><header className="assistant-head"><div><span className="live-dot"/><b>暖暖在线</b><small>基于已审核报告回答</small></div><span className="case-tag">报告 v{report.report_version}</span></header>
-  <div className="conversation"><section className="conversation-intro"><div className="ai-orb"><Icon name="spark" size={30}/><i/><i/></div><p>AI 关怀助手</p><h1>有什么担心，<em>慢慢说给我听</em></h1><span>我会先查材料，再回答你</span></section>
-   <div className="messages">{messages.map(m=><div className={"message-row "+m.role} key={m.id}>{m.role==="assistant"&&<div className="avatar"><Icon name="spark" size={17}/></div>}<div className="message-bubble"><p>{m.text}</p>{m.uncertainty&&<div className="uncertainty"><strong>还需要确认</strong>{m.uncertainty}</div>}{m.citations?.flatMap(c=>c.evidence_refs).map((id,i)=><button className="citation" key={id+i} onClick={()=>onEvidence(id)}><Icon name="source" size={15}/>查看原始依据 <Icon name="arrow" size={14}/></button>)}</div></div>)}
-    {stage&&<div className="message-row assistant"><div className="avatar thinking"><Icon name="spark" size={17}/></div><div className="process-card"><div><span>{stage}</span><b><i/><i/><i/></b></div><section><i/><i/><i/></section><small>只使用你有权查看的内容</small></div></div>}{error&&<div className="chat-error">{error}</div>}<div ref={end}/>
-   </div>
-  </div>
-  <div className="composer-wrap">{messages.length===1&&<div className="suggestions">{suggestions.map(s=><button type="button" onClick={()=>void send(s)} key={s}>{s}<Icon name="arrow" size={14}/></button>)}</div>}<form className="composer" onSubmit={submit}><textarea aria-label="向暖暖提问" value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey&&!e.nativeEvent.isComposing){e.preventDefault();void send()}}} placeholder="输入你想问的问题…" rows={1}/><button type="submit" className="send-button" disabled={!!stage} aria-label="发送消息"><span>发送</span><Icon name="send" size={17}/></button></form><p className="composer-note"><Icon name="shield" size={13}/> AI 回答用于关怀解释，不能替代医生诊疗</p></div>
- </main>
-}
-
-function EvidenceDrawer({evidence,onClose}:{evidence:Evidence|null;onClose:()=>void}){return <>{evidence&&<button className="drawer-mask" onClick={onClose} aria-label="关闭"/>}<aside className={"evidence-drawer "+(evidence?"open":"")}><header><div><span>原始材料</span><h2>这句话从哪里来</h2></div><button onClick={onClose}><Icon name="close"/></button></header>{evidence&&<><div className="paper"><b>第 {(evidence.page_index??0)+1} 页</b><p>{evidence.text_span?.text||"当前证据没有可展示的文字片段。"}</p></div><div className="evidence-meta"><span><Icon name="shield" size={16}/>已核对材料版本 {evidence.document_version}</span><small>{evidence.extraction_method==="native_pdf_text"?"原生 PDF 文字":"结构化材料"}</small></div></>}</aside></>}
-function ReportView({report,onEvidence}:{report:Report;onEvidence:(id:string)=>void}){return <main className="content-page"><header className="title-block"><span>CARE REPORT · V{report.report_version}</span><h1>你的关怀报告</h1><p>六个部分都来自材料、专业知识或明确的待确认项。</p></header><div className="report-grid">{report.sections.map((s,i)=><article key={s.section_type} className="report-tile"><div className="tile-index">0{i+1}</div><h2>{sectionNames[s.section_type]}</h2>{s.claims.slice(0,1).map(c=><div key={c.claim_id}><p>{c.text}</p><div className="tile-foot"><span>{c.claim_type==="case_fact"?"本次材料":"关怀解释"}</span>{c.evidence_refs.map(id=><button onClick={()=>onEvidence(id)} key={id}>查看依据</button>)}</div></div>)}</article>)}</div></main>}
-function ActionsView({report}:{report:Report}){const[done,setDone]=useState<string[]>([]);return <main className="content-page"><header className="title-block"><span>NEXT STEPS</span><h1>先做好这三件事</h1><p>把复杂的恢复计划，变成今天能完成的小事。</p></header><div className="action-list">{report.actions.map((a,i)=><button key={a.action_id} className={done.includes(a.action_id)?"done":""} onClick={()=>setDone(v=>v.includes(a.action_id)?v.filter(x=>x!==a.action_id):[...v,a.action_id])}><b>{String(i+1).padStart(2,"0")}</b><span><strong>{a.action_text}</strong><small>{a.rationale}</small></span><i><Icon name="check"/></i></button>)}</div></main>}
-function ProfileView({mode,setMode,onLoad,loading,error}:{mode:"demo"|"live";setMode:(m:"demo"|"live")=>void;onLoad:(v:{token:string;caseId:string;version:number})=>void;loading:boolean;error:string}){const[t,setT]=useState(localStorage.getItem("zhongan_token")||""),[c,setC]=useState(""),[v,setV]=useState(1);return <main className="content-page"><header className="title-block"><span>PRIVACY & DATA</span><h1>数据与隐私</h1><p>真实模式只读取当前令牌获准访问的报告。</p></header><section className="mode-panel"><div className="mode-tabs"><button className={mode==="demo"?"active":""} onClick={()=>setMode("demo")}>合成演示</button><button className={mode==="live"?"active":""} onClick={()=>setMode("live")}>连接真实报告</button></div>{mode==="demo"?<div className="demo-info"><Icon name="shield"/><div><strong>当前是合成案例</strong><p>所有病情和金额均为虚构，只用于展示产品流程。</p></div></div>:<form onSubmit={e=>{e.preventDefault();localStorage.setItem("zhongan_token",t);onLoad({token:t,caseId:c,version:v})}}><label>访问令牌<input type="password" value={t} onChange={e=>setT(e.target.value)} required/></label><label>案件 ID<input value={c} onChange={e=>setC(e.target.value)} required/></label><label>报告版本<input type="number" min="1" value={v} onChange={e=>setV(+e.target.value)}/></label><button>{loading?"正在读取…":"进入关怀空间"}</button>{error&&<p className="form-error">{error}</p>}</form>}</section></main>}
-
-export default function App(){const[view,setView]=useState<View>("assistant"),[mode,setMode]=useState<"demo"|"live">("demo"),[report,setReport]=useState(demoReport),[token,setToken]=useState(""),[evidence,setEvidence]=useState<Evidence|null>(null),[loading,setLoading]=useState(false),[error,setError]=useState("");
- const showEvidence=async(id:string)=>{if(mode==="demo"){setEvidence(demoEvidence[id]||null);return}try{setEvidence(await getEvidence(id,token))}catch(e){setError(e instanceof Error?e.message:"证据读取失败")}};
- const load=async({token:t,caseId,version}:{token:string;caseId:string;version:number})=>{setLoading(true);setError("");try{const r=await getReport(caseId,version,t);setReport(r);setToken(t);setView("assistant")}catch(e){setError(e instanceof ApiError?e.message:"连接失败")}finally{setLoading(false)}};
- return <div className="shell"><aside className="rail"><div className="logo"><span><Icon name="heart"/></span><div><strong>暖愈</strong><small>AI CARE</small></div></div><nav>{nav.map(n=><button key={n.key} className={view===n.key?"active":""} onClick={()=>setView(n.key)}><Icon name={n.icon}/><span>{n.label}</span></button>)}</nav><div className="rail-status"><span/><div><strong>{mode==="demo"?"合成演示":"安全连接"}</strong><small>{mode==="demo"?"不含真实个人信息":"数据已授权"}</small></div></div></aside><section className="workspace"><div className="mobile-bar"><div className="logo"><span><Icon name="heart"/></span><strong>暖愈</strong></div><button onClick={()=>setView("profile")}><Icon name="menu"/></button></div>{mode==="demo"&&<div className="demo-badge">DEMO · 合成案例</div>}{view==="assistant"&&<AssistantView report={report} mode={mode} token={token} onEvidence={showEvidence}/>} {view==="report"&&<ReportView report={report} onEvidence={showEvidence}/>} {view==="actions"&&<ActionsView report={report}/>} {view==="profile"&&<ProfileView mode={mode} setMode={m=>{setMode(m);if(m==="demo")setReport(demoReport)}} onLoad={load} loading={loading} error={error}/>}</section><EvidenceDrawer evidence={evidence} onClose={()=>setEvidence(null)}/><nav className="mobile-nav">{nav.map(n=><button key={n.key} className={view===n.key?"active":""} onClick={()=>setView(n.key)}><Icon name={n.icon}/><span>{n.label}</span></button>)}</nav></div>}
