@@ -26,7 +26,11 @@ def main():
         # Read committed blobs, not CRLF-converted Windows working-tree files.
         with tarfile.open(fileobj=io.BytesIO(committed),mode='r:') as source:
             for member in source:
-                archive.addfile(member, source.extractfile(member) if member.isfile() else None)
+                data = source.extractfile(member).read() if member.isfile() else None
+                if data is not None and member.name.endswith('.sh'):
+                    data = data.replace(b'\r\n', b'\n')
+                    member.size = len(data)
+                archive.addfile(member, io.BytesIO(data) if data is not None else None)
         for path in Path('apps/web/dist').rglob('*'):
             if path.is_file():
                 archive.add(path, arcname=path.as_posix())
