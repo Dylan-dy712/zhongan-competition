@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>暖愈智护 · 理赔后的医护关怀</title>
+<style>
+  :root {
+    --bg: #faf7f4;
+    --card: #ffffff;
+    --ink: #2d2a26;
+    --ink-2: #6b655c;
+    --ink-3: #9a9287;
+    --accent: #c96f4a;
+    --accent-soft: #f7e8e0;
+    --teal: #3d7a6f;
+    --teal-soft: #e3efec;
+    --amber-soft: #fdf3dd;
+    --rose-soft: #fbe9e7;
+    --line: #ece6de;
+    --radius: 14px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans SC", system-ui, sans-serif;
+    background: var(--bg); color: var(--ink); line-height: 1.65;
+  }
+  .layout { display: grid; grid-template-columns: 300px 1fr; min-height: 100vh; }
+
+  /* 侧栏 */
+  .sidebar { background: #f3ede6; border-right: 1px solid var(--line); padding: 20px 14px; overflow-y: auto; }
+  .brand { display: flex; align-items: center; gap: 10px; padding: 4px 8px 16px; }
+  .brand .logo { width: 38px; height: 38px; border-radius: 12px; background: linear-gradient(135deg,#c96f4a,#e0a37a);
+    display:flex; align-items:center; justify-content:center; color:#fff; font-size:19px; }
+  .brand h1 { font-size: 17px; font-weight: 700; }
+  .brand small { display:block; color: var(--ink-3); font-weight: 400; font-size: 11px; }
+  .case-item { padding: 11px 12px; border-radius: 11px; cursor: pointer; margin-bottom: 7px; border: 1px solid transparent; }
+  .case-item:hover { background: #ece4d9; }
+  .case-item.active { background: #fff; border-color: var(--line); box-shadow: 0 2px 8px rgba(60,40,20,.06); }
+  .case-item .cid { font-size: 12px; color: var(--ink-3); font-family: ui-monospace, monospace; }
+  .case-item .hosp { font-weight: 600; font-size: 13.5px; margin: 2px 0; }
+  .case-item .meta { font-size: 12px; color: var(--ink-2); }
+  .dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:5px; vertical-align: 1px; }
+  .dot.ok { background:#5c9e6e; } .dot.warn { background:#d9a441; }
+
+  /* 主区 */
+  .main { padding: 26px 34px 60px; max-width: 980px; }
+  .topbar { display:flex; justify-content: space-between; align-items:center; margin-bottom: 18px; gap: 12px; flex-wrap: wrap; }
+  .crumb { font-size: 13px; color: var(--ink-3); }
+  .mode-badge { font-size: 12px; padding: 4px 12px; border-radius: 99px; background: var(--teal-soft); color: var(--teal); font-weight:600; }
+  .mode-badge.mock { background: var(--amber-soft); color: #a07424; }
+
+  .hero { background: linear-gradient(135deg, #fff 0%, #fbf3ec 100%); border: 1px solid var(--line);
+    border-radius: var(--radius); padding: 22px 26px; margin-bottom: 18px; }
+  .hero h2 { font-size: 20px; margin-bottom: 4px; }
+  .hero .sub { color: var(--ink-2); font-size: 13.5px; }
+  .hero .facts-row { display: flex; gap: 26px; margin-top: 14px; flex-wrap: wrap; }
+  .hero .fitem { font-size: 13px; color: var(--ink-2); }
+  .hero .fitem b { display: block; font-size: 16px; color: var(--ink); font-weight: 650; }
+
+  .tabs { display: flex; gap: 6px; margin: 18px 0 14px; border-bottom: 1px solid var(--line); }
+  .tab { padding: 9px 16px; font-size: 14px; color: var(--ink-2); cursor: pointer; border-radius: 9px 9px 0 0; border-bottom: 2px solid transparent; }
+  .tab.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 650; }
+
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 20px 24px; margin-bottom: 14px; }
+  .card h3 { font-size: 15.5px; display:flex; align-items:center; gap:9px; margin-bottom: 9px; }
+  .card h3 .ico { width: 28px; height: 28px; border-radius: 9px; display:flex; align-items:center; justify-content:center; font-size:15px; }
+  .card p { font-size: 14px; color: #3d3a35; white-space: pre-wrap; }
+
+  .actions { margin: 16px 0; }
+  .action { display:flex; gap: 13px; background: var(--teal-soft); border: 1px solid #cfe2dd; padding: 14px 16px; border-radius: 12px; margin-bottom: 9px; align-items: flex-start; }
+  .action .n { min-width: 26px; height: 26px; border-radius: 50%; background: var(--teal); color:#fff; display:flex; align-items:center; justify-content:center; font-size: 13px; font-weight: 700; margin-top: 1px;}
+  .action .t { font-size: 14px; }
+  .action .why { font-size: 12.5px; color: var(--ink-2); }
+  .action .btns { margin-left: auto; display:flex; gap:6px; }
+  .chip-btn { border: 1px solid var(--teal); background: #fff; color: var(--teal); border-radius: 8px; padding: 3px 11px; font-size: 12px; cursor: pointer; }
+  .chip-btn:hover { background: var(--teal); color:#fff; }
+
+  .insight { display:flex; gap: 12px; padding: 13px 0; border-bottom: 1px dashed var(--line); }
+  .insight:last-child { border-bottom: 0; }
+  .insight .sev { min-width: 52px; text-align:center; font-size: 11.5px; padding: 3px 0; border-radius: 7px; font-weight: 600; height: fit-content; margin-top: 2px;}
+  .sev.high { background: var(--rose-soft); color: #b3543f; } .sev.medium { background: var(--amber-soft); color: #a07424; }
+  .sev.low { background: var(--teal-soft); color: var(--teal); } .sev.undetermined { background: #eee; color: #888; }
+  .insight .body { flex: 1; }
+  .insight .lbl { font-size: 12px; color: var(--ink-3); }
+  .insight .rat { font-size: 13.5px; }
+  .insight .unc { font-size: 12.5px; color: var(--ink-3); font-style: italic; }
+
+  table.facts { width: 100%; border-collapse: collapse; font-size: 13px; }
+  table.facts th { text-align: left; color: var(--ink-3); font-weight: 600; padding: 7px 10px; border-bottom: 1px solid var(--line); font-size: 12px; }
+  table.facts td { padding: 8px 10px; border-bottom: 1px dashed var(--line); vertical-align: top; }
+  .conf { display:inline-block; min-width: 40px; text-align:center; font-size: 11.5px; padding: 2px 7px; border-radius: 6px; background: #f0ece6; color: var(--ink-2); font-family: ui-monospace, monospace; }
+  .conf.hi { background: var(--teal-soft); color: var(--teal); }
+  .ev-link { color: var(--accent); cursor: pointer; font-size: 12px; text-decoration: underline dotted; }
+
+  .rec { border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; margin-bottom: 11px; background:#fff; }
+  .rec .head { display:flex; justify-content: space-between; align-items: baseline; }
+  .rec h4 { font-size: 14.5px; }
+  .rec .rank { font-size: 12px; color: var(--ink-3); }
+  .reason { display:flex; gap: 8px; font-size: 13px; padding: 5px 0; }
+  .reason .tick { color: var(--teal); font-weight: 700; }
+  .limit { font-size: 12px; color: var(--ink-3); margin-top: 6px; }
+  .norank { font-size: 12px; background: var(--amber-soft); color:#a07424; display:inline-block; padding: 2px 9px; border-radius: 7px; }
+
+  .ev-modal { position: fixed; inset: 0; background: rgba(40,30,20,.45); display:none; align-items:center; justify-content:center; z-index: 50; }
+  .ev-modal .box { background:#fff; border-radius: 14px; max-width: 640px; width: 92%; max-height: 80vh; overflow: auto; padding: 22px 26px; }
+  .ev-modal .quote { background: #faf6f0; border-left: 3px solid var(--accent); padding: 10px 14px; border-radius: 6px; font-size: 13.5px; margin-top: 8px; }
+  .ev-modal .meta-line { font-size: 12px; color: var(--ink-3); margin-top: 6px; }
+
+  .empty { color: var(--ink-3); padding: 60px 0; text-align: center; }
+  .loading { color: var(--ink-3); padding: 40px; text-align:center; }
+  .toast { position: fixed; bottom: 26px; left: 50%; transform: translateX(-50%); background: #3d3a35; color: #fff;
+    padding: 9px 20px; border-radius: 10px; font-size: 13px; opacity: 0; transition: opacity .3s; pointer-events: none; }
+  .toast.show { opacity: .92; }
+  .note-banner { background: var(--amber-soft); border: 1px solid #ecd9ae; color: #7c5b1e; font-size: 12.5px;
+    padding: 9px 14px; border-radius: 10px; margin-bottom: 16px; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="logo">暖</div>
+      <div><h1>暖愈智护<small>理赔即关怀 · 原型演示</small></h1></div>
+    </div>
+    <div id="case-list"><div class="loading">加载案件中…</div></div>
+  </aside>
+  <main class="main" id="main">
+    <div class="empty">← 从左侧选择一个理赔案件<br><span style="font-size:12.5px">数据：官方脱敏样例，仅用于原型演示</span></div>
+  </main>
+</div>
+
+<div class="ev-modal" id="ev-modal" onclick="if(event.target===this)this.style.display='none'">
+  <div class="box">
+    <h3 style="margin-bottom:6px">证据溯源</h3>
+    <div id="ev-body"></div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+const API = '';
+let CASES = [];
+let CURRENT = null;
+let CURRENT_RUN = null;
+let TAB = 'report';
+
+const SEV_ZH = {high:'高', medium:'中', low:'低', undetermined:'待定'};
+const LABEL_ZH = {
+  CLIN_MEDICATION_CONTEXT_REVIEW:'用药与诊疗情境需核实',
+  CLIN_EXAM_JUSTIFICATION_REVIEW:'检查适用性/重复性疑点',
+  COST_SELF_PAY_DEVIATION:'自付比例偏离',
+  COST_AMOUNT_RECONCILIATION:'总费用口径待核对',
+  EXP_TERMINOLOGY_BARRIER:'专业术语缺少通俗解释',
+  EXP_DISCHARGE_GUIDANCE_GAP:'出院指引书面缺项',
+};
+const SEC_ICO = {
+  diagnosis_explanation:['🩺','#e3efec'], treatment_review:['📋','#f7e8e0'],
+  cost_explanation:['💰','#fdf3dd'], recovery_plan:['🌱','#e3efec'],
+  emotional_support:['💬','#fbe9e7'], next_visit_advice:['🧭','#f0e6f6'],
+};
+const yuan = m => m==null ? '—' : (m/100).toLocaleString('zh-CN',{minimumFractionDigits:2});
+
+async function jget(url){ const r = await fetch(url); if(!r.ok) throw new Error(await r.text()); return r.json(); }
+
+async function loadCases(){
+  try { const d = await jget(API+'/v1/cases'); CASES = d.items; } catch(e){ CASES = []; }
+  renderCaseList();
+}
+function renderCaseList(){
+  const el = document.getElementById('case-list');
+  if(!CASES.length){ el.innerHTML = '<div class="empty" style="padding:30px 6px">暂无运行结果<br><span style="font-size:12px">先执行 scripts/run_offline.py</span></div>'; return; }
+  el.innerHTML = CASES.map(c=>`
+    <div class="case-item ${CURRENT===c.case_id?'active':''}" onclick="selectCase('${c.case_id}')">
+      <div class="cid">${c.case_id}</div>
+      <div class="hosp">${c.hospital||'未知医院'}</div>
+      <div class="meta"><span class="dot ${c.status==='completed'?'ok':'warn'}"></span>${c.admission_date||''} ~ ${c.discharge_date||''} · ${c.n_diagnoses||0} 项诊断</div>
+    </div>`).join('');
+}
+async function selectCase(cid){
+  CURRENT = cid; renderCaseList();
+  document.getElementById('main').innerHTML = '<div class="loading">加载案件数据…</div>';
+  try {
+    const [meta, facts, insights, report, recs] = await Promise.all([
+      jget(`${API}/v1/cases/${cid}`), jget(`${API}/v1/cases/${cid}/facts`),
+      jget(`${API}/v1/cases/${cid}/insights`), jget(`${API}/v1/cases/${cid}/reports/1`).catch(()=>null),
+      jget(`${API}/v1/cases/${cid}/recommendations`).catch(()=>({items:[]})),
+    ]);
+    CURRENT_RUN = {meta, facts, insights:insights.items, report, recs:recs.items};
+    renderMain();
+  } catch(e){
+    document.getElementById('main').innerHTML = `<div class="empty">加载失败：${e.message}</div>`;
+  }
+}
+function renderMain(){
+  const {meta, facts, insights, report, recs} = CURRENT_RUN;
+  const enc = (facts.encounters||[])[0]||{};
+  const g = (k)=> enc[k] ? enc[k].value : null;
+  const total = (facts.expenses||[]).find(e=>e.scope==='total' && e.amount_minor);
+  const selfp = (facts.expenses||[]).find(e=>e.scope==='self_paid' && e.amount_minor);
+  const mode = meta.stages?.guidance?.mode || 'mock';
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="topbar">
+      <div class="crumb">理赔案件 ${meta.case_id} · 运行 ${meta.run_id.slice(0,8)} · ${meta.finished_at||''}</div>
+      <div class="mode-badge ${mode}">${mode==='live'?'实时生成模式':'模板模式（未接 LLM）'}</div>
+    </div>
+    ${mode!=='live'?'<div class="note-banner">当前为离线模板模式：内容锚定真实结构化事实，但语言未经大模型生成。接入 LLM 密钥后自动切换为实时温度生成。</div>':''}
+    <div class="hero">
+      <h2>${g('hospital')||'本次就医'} · 康复关怀报告</h2>
+      <div class="sub">${g('department')?g('department')+' · ':''}${g('admission_date')||'?'} 入院 ~ ${g('discharge_date')||'?'} 出院 · 共 ${g('stay_days')??'?'} 天</div>
+      <div class="facts-row">
+        <div class="fitem"><b>${(facts.diagnoses||[]).length}</b>诊断</div>
+        <div class="fitem"><b>${(facts.procedures||[]).length}</b>手术/操作</div>
+        <div class="fitem"><b>${(facts.medications||[]).length}</b>出院带药</div>
+        <div class="fitem"><b>${total?yuan(total.amount_minor.value):'—'}</b>总费用(元)</div>
+        <div class="fitem"><b>${selfp?yuan(selfp.amount_minor.value):'—'}</b>自付(元)</div>
+        <div class="fitem"><b>${insights.length}</b>已识别关注点</div>
+      </div>
+    </div>
+    <div class="tabs">
+      ${['report|关怀报告','insights|医护洞察','facts|结构化事实','recs|就医推荐'].map(t=>{
+        const [k,zh]=t.split('|'); return `<div class="tab ${TAB===k?'active':''}" onclick="setTab('${k}')">${zh}</div>`;}).join('')}
+    </div>
+    <div id="tab-body"></div>`;
+  renderTab();
+}
+function setTab(k){ TAB=k; renderMain(); }
+function renderTab(){
+  const el = document.getElementById('tab-body');
+  if(TAB==='report') el.innerHTML = renderReport();
+  else if(TAB==='insights') el.innerHTML = renderInsights();
+  else if(TAB==='facts') el.innerHTML = renderFacts();
+  else el.innerHTML = renderRecs();
+}
+
+function renderReport(){
+  const {report} = CURRENT_RUN;
+  if(!report) return '<div class="empty">报告尚未生成</div>';
+  const secs = (report.sections||[]).map(s=>{
+    const [ico,bg] = SEC_ICO[s.key]||['📄','#f0ece6'];
+    return `<div class="card"><h3><span class="ico" style="background:${bg}">${ico}</span>${s.title_zh}</h3><p>${esc(s.content)}</p></div>`;
+  }).join('');
+  const acts = (report.actions||[]).map((a,i)=>`
+    <div class="action">
+      <div class="n">${i+1}</div>
+      <div class="t">${esc(a.action_text)}
+        <div class="why">${esc(a.rationale||'')}${a.due_at?` · 建议 ${a.due_at.slice(0,10)} 前`:' · 时间以医嘱为准'}</div>
+      </div>
+      <div class="btns">
+        <button class="chip-btn" onclick="sendFeedback('action_done',${i})">已完成</button>
+        <button class="chip-btn" onclick="sendFeedback('need_help',${i})">需要协助</button>
+      </div>
+    </div>`).join('');
+  const fb = `
+    <div class="card" style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
+      <span style="font-size:13px;color:var(--ink-2);align-self:center">这份报告对您有帮助吗？</span>
+      <button class="chip-btn" onclick="sendFeedback('understood')">看懂了</button>
+      <button class="chip-btn" onclick="sendFeedback('unclear')">有些没看懂</button>
+      <button class="chip-btn" onclick="sendFeedback('verify_fact')">发现事实有误</button>
+    </div>`;
+  return `<div class="actions">${acts}</div>${secs}${fb}`;
+}
+
+function renderInsights(){
+  const items = CURRENT_RUN.insights;
+  if(!items.length) return '<div class="empty">本案例未触发关注点</div>';
+  return `<div class="card">${items.map(i=>`
+    <div class="insight">
+      <div class="sev ${i.severity}">${SEV_ZH[i.severity]||i.severity}</div>
+      <div class="body">
+        <div class="lbl">${LABEL_ZH[i.label_code]||i.label_code} · ${i.category==='clinical'?'临床':i.category==='cost'?'费用':'体验'} · ${i.judgment_status==='supported'?'证据支持':'待核实'}</div>
+        <div class="rat">${esc(i.rationale)}</div>
+        ${i.uncertainty?`<div class="unc">不确定性：${esc(i.uncertainty)}</div>`:''}
+        ${i.suggested_action?`<div style="font-size:13px;margin-top:3px">建议：${esc(i.suggested_action)}</div>`:''}
+        ${i.evidence_ids?.length?`<div style="margin-top:4px"><span class="ev-link" onclick="showEvidence('${i.evidence_ids[0]}')">查看证据原文</span></div>`:''}
+      </div>
+    </div>`).join('')}</div>`;
+}
+
+function fvCell(fv){
+  if(!fv) return '<td>—</td>';
+  const conf = fv.confidence_score;
+  const c = conf==null?'':`<span class="conf ${conf>=0.85?'hi':''}">${Math.round(conf*100)}%</span>`;
+  const ev = fv.evidence_ids?.length?` <span class="ev-link" onclick="showEvidence('${fv.evidence_ids[0]}')">证据</span>`:'';
+  return `<td>${esc(String(fv.value??'—'))}${fv.status==='derived'?' <span style="font-size:11px;color:var(--ink-3)">(推导)</span>':''}${fv.status==='conflict'?' <span style="font-size:11px;color:#b3543f">(冲突待核)</span>':''} ${c}${ev}</td>`;
+}
+
+function renderFacts(){
+  const f = CURRENT_RUN.facts; const enc=(f.encounters||[])[0]||{};
+  let html = `<div class="card"><h3>🏥 就医信息</h3><table class="facts">
+    <tr><th>医院</th><th>科室</th><th>入院</th><th>出院</th><th>住院天数</th></tr>
+    <tr>${fvCell(enc.hospital)}${fvCell(enc.department)}${fvCell(enc.admission_date)}${fvCell(enc.discharge_date)}${fvCell(enc.stay_days)}</tr></table></div>`;
+  if((f.diagnoses||[]).length){
+    html += `<div class="card"><h3>🩺 诊断</h3><table class="facts">
+      <tr><th>诊断</th><th>角色</th><th>主要</th><th>置信度</th></tr>
+      ${f.diagnoses.map(d=>`<tr>${fvCell(d.name)}<td>${d.role}</td><td>${d.is_primary?'是':''}</td><td></td></tr>`).join('')}</table></div>`;
+  }
+  if((f.procedures||[]).length){
+    html += `<div class="card"><h3>🔬 手术/操作</h3><table class="facts">
+      <tr><th>名称</th><th>日期</th></tr>
+      ${f.procedures.map(p=>`<tr>${fvCell(p.name)}${fvCell(p.performed_at)}</tr>`).join('')}</table></div>`;
+  }
+  if((f.medications||[]).length){
+    html += `<div class="card"><h3>💊 出院带药</h3><table class="facts">
+      <tr><th>药品</th><th>剂量</th><th>频次</th></tr>
+      ${f.medications.map(m=>`<tr>${fvCell(m.name)}${fvCell(m.dosage)}${fvCell(m.frequency)}</tr>`).join('')}</table></div>`;
+  }
+  if((f.expenses||[]).length){
+    html += `<div class="card"><h3>💰 费用（医院结算口径）</h3><table class="facts">
+      <tr><th>口径</th><th>金额(元)</th><th>来源文档</th></tr>
+      ${f.expenses.map(e=>`<tr><td>${{total:'总费用',self_paid:'自付',out_of_catalog:'自费/目录外',insurance_paid:'医保统筹',category_total:'分类合计',commercial_paid:'商保赔付'}[e.scope]||e.scope}</td>${fvCell(e.amount_minor)}<td style="font-family:ui-monospace;font-size:11.5px;color:var(--ink-3)">${e.document_id?.slice(0,10)||''}</td></tr>`).join('')}</table></div>`;
+  }
+  const evs = f.evidences||[];
+  html += `<div class="card"><h3>🔗 证据索引</h3><p style="font-size:13px;color:var(--ink-2)">共 ${evs.length} 条原文证据；每条字段/痛点的"证据"链接可回跳 OCR 原文行与页面坐标。</p></div>`;
+  return html;
+}
+
+function renderRecs(){
+  const items = CURRENT_RUN.recs;
+  if(!items.length) return '<div class="empty">该病种暂无画像数据，未生成推荐（明确拒排优于无依据推荐）</div>';
+  return items.map(r=>`
+    <div class="rec">
+      <div class="head"><h4>${esc(r.entity_name)}</h4>
+        ${r.ranking_allowed?`<span class="rank">参考排序 #${r.rank}</span>`:'<span class="norank">样本不足，不排序</span>'}</div>
+      ${(r.match_reasons||[]).map(m=>`<div class="reason"><span class="tick">✓</span><span>${esc(m.text)}</span></div>`).join('')}
+      ${(r.limitations||[]).length?`<div class="limit">局限：${r.limitations.map(esc).join('；')}</div>`:''}
+    </div>`).join('') + `<div class="card" style="font-size:12.5px;color:var(--ink-3)">推荐依据来自历史脱敏理赔数据的机构画像快照（费用水平/自付比例/住院天数/用药记录/指引完整度五维），非营销口碑；样本与口径限制已在每条推荐中披露。政策版本 ${items[0].policy_version||''}。</div>`;
+}
+
+async function showEvidence(evidenceId){
+  const evs = CURRENT_RUN.facts.evidences||[];
+  const ev = evs.find(e=>e.evidence_id===evidenceId);
+  const body = document.getElementById('ev-body');
+  if(!ev){ body.innerHTML = '<p style="color:var(--ink-3)">证据不存在（可能为聚合统计类洞察，无单条原文）</p>'; }
+  else {
+    body.innerHTML = `
+      <div class="meta-line">文档 ${ev.document_id} · 第 ${(ev.page_index??0)+1} 页 · OCR 第 ${(ev.line_index??0)+1} 行 · 方法 ${ev.extraction_method}</div>
+      <div class="quote">${esc(ev.text_span?.text||'（无文本跨度）')}</div>
+      ${ev.bbox?`<div class="meta-line">页面坐标 [${ev.bbox.map(x=>x==null?'—':x.toFixed(2)).join(', ')}]（归一化，用于前端在原图上高亮）</div>`:''}`;
+  }
+  document.getElementById('ev-modal').style.display='flex';
+}
+
+async function sendFeedback(type, actionIndex=null){
+  try{
+    const r = await fetch(API+'/v1/feedback',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({case_id:CURRENT, report_version:1, action_index:actionIndex, type})});
+    if(!r.ok) throw new Error(await r.text());
+    toast('已收到您的反馈，我们会持续改进');
+    if(type==='verify_fact') toast('已转人工复核队列，客服将尽快与您联系');
+  }catch(e){ toast('反馈提交失败：'+e.message); }
+}
+function esc(s){ return String(s??'').replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+let toastTimer=null;
+function toast(msg){ const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show');
+  clearTimeout(toastTimer); toastTimer=setTimeout(()=>t.classList.remove('show'),2600); }
+
+loadCases();
+</script>
+</body>
+</html>
