@@ -278,31 +278,49 @@ def extract_facts(bundle: dict, *, data_origin=DataOrigin.official_deidentified,
         evs.append(ev)
         return ev.evidence_id
 
-    # --- 就医（encounter）：默认一案一次住院 ---
+    # --- 就医（encounter）：按材料形态判定住院/门诊 ---
     enc = Encounter(kind="hospitalization")
-    multi = _detect_multiple_encounters(pages)
+    # 住院号会出现在门诊检验单上，只有明确的住院病程标记才判住院
+    inpatient_markers = find_lines(pages, r"入院诊断|出院诊断|入院日期|出院日期|住院天数|病案首页")
+    if not inpatient_markers:
+        enc.kind = "outpatient"
 
-    # 医院
-    for dt in ("discharge_summary", "medical_record_front", "inpatient_bill", "insurance_settlement"):
-        hits = find_lines(pages, r"([\u4e00-\u9fa5A-Za-z（）()]{2,20}(?:医院|卫生院|中心))", {dt})
+    # 医院：优先住院类文书，其次门诊病历/检查报告/病理（材料头部常有机构名）
+    for dt in ("discharge_summary", "medical_record_front", "inpatient_bill", "insurance_settlement",
+               "outpatient_record", "pathology_report", "exam_report", "outpatient_bill", "invoice"):
+        hits = find_lines(pages, r"([\u4e00-\u9fa5A-Za-z（）()]{2,22}(?:医院|卫生院|医疗中心))", {dt})
         if hits:
             fv, ev = fv_from_hit(case_id, hits[0], clean_name(hits[0].match.group(1)), "rule_hospital", strength=0.8)
             enc.hospital = fv
             add_ev(ev)
             break
 
-    # 入院/出院日期（行内日期优先，其次标题行下方 2 行内的日期行）
-    date_specs = [
-        ("admission_date", r"入院(日期|时间|于)|^入院\s*$", {"discharge_summary", "medical_record_front", "insurance_settlement"}),
-        ("discharge_date", r"出院(日期|时间)|^出院\s*$", {"discharge_summary", "medical_record_front", "insurance_settlement"}),
+    # 入院/出院日期：住院锚点优先，门诊锚点兜底（检验单上的"住院号"字样
+    # 不能作为跳过门诊日期的证据，两套锚点独立尝试）
+    _date_specs = [
+        ("admission_date", [
+            (r"入院(日期|时间|于)|^入院\s*$",
+             {"discharge_summary", "medical_record_front", "insurance_settlement"}),
+            (r"就诊日期[:：]?|检查日期[:：]?|报告时间[:：]?|送检日期[:：]?|接收日期[:：]?|首次报告日期[:：]?|^日期[:：]?",
+             {"outpatient_record", "exam_report", "pathology_report", "insurance_settlement"}),
+        ]),
+        ("discharge_date", [
+            (r"出院(日期|时间)|^出院\s*$",
+             {"discharge_summary", "medical_record_front", "insurance_settlement"}),
+            (r"报告时间[:：]?|审核时间[:：]?|报告日期[:：]?|记录日期[:：]?",
+             {"exam_report", "pathology_report", "outpatient_record"}),
+        ]),
     ]
-    for attr, pat, dts in date_specs:
-        found = _find_dated_field(pages, pat, dts)
-        if found:
-            h, iso = found
-            fv, ev = fv_from_hit(case_id, h, iso, f"rule_{attr}", strength=0.88)
-            setattr(enc, attr, fv)
-            add_ev(ev)
+    for attr, candidates in _date_specs:
+        for pat, dts in candidates:
+            found = _find_dated_field(pages, pat, dts)
+            if found:
+                h, iso = found
+                method = f"rule_{attr}" + ("_op" if pat.startswith("就诊") else "")
+                fv, ev = fv_from_hit(case_id, h, iso, method, strength=0.82)
+                setattr(enc, attr, fv)
+                add_ev(ev)
+                break
 
     # 住院天数：原文优先，否则派生（口径：出院-入院，同日计 1）
     hits = find_lines(pages, r"住院天数[:：]?\s*(\d+)")
@@ -363,14 +381,23 @@ def extract_facts(bundle: dict, *, data_origin=DataOrigin.official_deidentified,
     # --- 诊断 ---
     dx_specs = [
         ("outpatient", r"门（急）诊诊断"), ("admission", r"入院诊断"), ("discharge", r"出院诊断"),
+        ("pathology", r"病理诊断[:：]"), ("clinical", r"临床诊断[:：]"),
     ]
-    _DX_NOISE = re.compile(r"^(具体|详见|待|见|请|无)?$|见.{0,8}报告|待.{0,6}报告|待石蜡")
+    if enc.kind == "outpatient":
+        dx_specs.append(("outpatient", r"^诊断[:：]"))
+    _DX_NOISE = re.compile(
+        r"^(具体|详见|待|见|请|无)?$|见.{0,8}报告|待.{0,6}报告|待石蜡|"
+        r"部分呈|呈.{0,10}方式|免疫组化|分型$|送检|标本")
+    _DX_BRACKET = re.compile(r"^[【\[](.+?)[】\]][：:]?")
     seen_dx: set[tuple[str, str]] = set()
     for role, header in dx_specs:
         for pg, i, ln in extract_section(pages, header):
             body = ln.get("text", "")
             for seg in re.split(r"[、，,；;]", body):
                 seg = clean_name(seg)
+                bm = _DX_BRACKET.match(seg)
+                if bm:
+                    seg = clean_name(bm.group(1))
                 if not seg or len(seg) < 2 or re.fullmatch(r"[\d.]+", seg):
                     continue
                 if _DX_NOISE.search(seg) or (role, seg) in seen_dx or len(seg) > 40:
@@ -463,29 +490,53 @@ def extract_facts(bundle: dict, *, data_origin=DataOrigin.official_deidentified,
                 evs.append(evd)
         facts.procedures.append(proc)
 
-    # --- 出院带药 ---
+    # --- 药品：出院带药段落 + 门诊处方/诊疗意见行 ---
     med_section = extract_section(pages, r"出院带药|出院医嘱.{0,6}药")
-    for pg, i, ln in med_section:
+    med_lines = [(pg, i, ln) for pg, i, ln in med_section]
+    for pg, i, ln in iter_lines(pages, {"outpatient_record"}):
+        t = ln.get("text", "")
+        if re.search(r"(?:注射液|缓释片|胶囊|颗粒|口服液|滴眼液|喷雾剂|乳膏)", t) and re.search(r"(?:一日|每日|每次|口服|注射|静滴|外用)", t):
+            med_lines.append((pg, i, ln))
+
+    _MED_NAME = re.compile(
+        r"([\u4e00-\u9fa5A-Za-z0-9（）()]{2,20}?(?:注射液|缓释片|分散片|胶囊|颗粒|口服液|气雾剂|"
+        r"滴眼液|喷雾剂|软膏|乳膏|栓剂|片|丸|膏|栓|散))"
+    )
+    _MED_DOSE = re.compile(r"\[?(\d+(?:\.\d+)?)\s*(mg|g|ml|IU|μg|ug)(?::[\d.]+\s*(?:mg|g|ml))?(/(?:支|片|粒|瓶|袋|盒))?\]?")
+    _MED_FREQ = re.compile(r"(一日|每日|一天)([一二三四五1-5])次|每晚|必要时|隔日一次")
+    _MED_ROUTE = re.compile(r"(皮下注射|肌内注射|肌注|静脉注射|静脉滴注|静滴|口服|外用|雾化吸入|滴入|含服)")
+    seen_meds: set[str] = set()
+    for pg, i, ln in med_lines:
         body = ln.get("text", "")
-        m = re.search(r"([\u4e00-\u9fa5A-Za-z]{2,16}(?:片|胶囊|颗粒|缓释片|丸|膏|栓|注射液|口服液|气雾剂|滴眼液|喷雾剂))\s*(\d+(?:\.\d+)?)\s*(mg|g|ml|IU|μ[g]?)?", body, re.I)
-        if m:
-            ev = Evidence(
-                case_id=case_id, document_id=pg["document_id"], page_index=pg.get("page_index"), line_index=i,
-                text_span=TextSpan(start=m.start(), end=m.end(), text=body), bbox=ln.get("bbox"),
-                extraction_method="rule_medication",
-            )
-            evs.append(ev)
-            name_fv = FieldValue.observed(m.group(1), body, [ev.evidence_id], 0.7, "rule_medication@0.1.0")
-            med = MedicationItem(encounter_id=enc_id, name=name_fv, phase="discharge_prescription")
-            if m.group(2):
-                dose_fv = FieldValue.observed(
-                    f"{m.group(2)}{m.group(3) or ''}", body, [ev.evidence_id], 0.6, "rule_medication_dose@0.1.0")
-                med.dosage = dose_fv
-            freq_m = re.search(r"(每日|一天|每)(\d+)[次](?:每次)?(\d+(?:\.\d+)?)?", body)
-            if freq_m:
-                med.frequency = FieldValue.observed(
-                    freq_m.group(0), body, [ev.evidence_id], 0.6, "rule_medication_freq@0.1.0")
-            facts.medications.append(med)
+        m = _MED_NAME.search(body)
+        if not m:
+            continue
+        name = clean_name(m.group(1))
+        if name in seen_meds or len(name) < 3:
+            continue
+        seen_meds.add(name)
+        ev = Evidence(
+            case_id=case_id, document_id=pg["document_id"], page_index=pg.get("page_index"), line_index=i,
+            text_span=TextSpan(start=m.start(), end=min(m.end() + 40, len(body)), text=body), bbox=ln.get("bbox"),
+            extraction_method="rule_medication",
+        )
+        evs.append(ev)
+        med = MedicationItem(encounter_id=enc_id, name=FieldValue.observed(
+            name, body, [ev.evidence_id], 0.7, "rule_medication@0.1.0"),
+            phase="discharge_prescription" if (pg, i, ln) in med_section else "outpatient")
+        dm = _MED_DOSE.search(body[m.end():])
+        if dm:
+            med.dosage = FieldValue.observed(
+                dm.group(0).strip("[]"), body, [ev.evidence_id], 0.6, "rule_medication_dose@0.1.0")
+        fm = _MED_FREQ.search(body)
+        if fm:
+            med.frequency = FieldValue.observed(
+                fm.group(0), body, [ev.evidence_id], 0.6, "rule_medication_freq@0.1.0")
+        rm = _MED_ROUTE.search(body)
+        if rm:
+            med.route = FieldValue.observed(
+                rm.group(1), body, [ev.evidence_id], 0.6, "rule_medication_route@0.1.0")
+        facts.medications.append(med)
 
     # --- 费用 ---
     _extract_expenses(case_id, pages, enc_id, facts, evs)
@@ -552,6 +603,15 @@ def _extract_expenses(case_id, pages, enc_id, facts, evs) -> None:
         amt = parse_amount(h.match.group(1))
         if amt and not any(e.scope == ExpenseScope.total for e in facts.expenses):
             add(h, ExpenseScope.total, amt, "rule_invoice_total")
+
+    # 电子票据/费用清单：合计行（总费用兜底来源，取首个 >= 100 元的合计）
+    if not any(e.scope == ExpenseScope.total for e in facts.expenses):
+        for h in find_lines(pages, r"合计[:：]?\s*([\d,，.]{2,})",
+                            {"inpatient_bill", "outpatient_bill", "invoice", "insurance_settlement"}):
+            amt = parse_amount(h.match.group(1))
+            if amt and amt >= 10000:
+                add(h, ExpenseScope.total, amt, "rule_bill_total")
+                break
 
 
 def _build_events(case_id: str, facts: CaseFacts) -> list[MedicalEvent]:

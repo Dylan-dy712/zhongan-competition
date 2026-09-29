@@ -61,6 +61,23 @@ def validate_outputs(facts: CaseFacts, insights: list[Insight], report: Report) 
                                       "recovery_plan", "emotional_support", "next_visit_advice"} - sections)},
     }
     checks["priority_actions_max3"] = {"passed": len(report.actions) <= 5, "detail": {"n": len(report.actions)}}
+
+    # 事实边界：待病理确认的诊断不得被表述为确定结论（QG-01 类检查）
+    import re as _re
+
+    pending_path = any(
+        _re.search(r"待石蜡|待病理|待排|待确诊|具体见石蜡", dx.name.raw_value or "")
+        for dx in facts.diagnoses
+    )
+    if pending_path:
+        over_certain = [
+            s.key for s in report.sections
+            if _re.search(r"确诊为(良性|恶性)|无疑是|确定是良性|良性.{0,6}好消息", s.content)
+        ]
+        checks["pathology_hedging"] = {
+            "passed": not over_certain,
+            "detail": {"over_certain_sections": over_certain},
+        }
     return checks
 
 

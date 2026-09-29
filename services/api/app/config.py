@@ -39,6 +39,8 @@ class Settings(BaseSettings):
     llm_timeout_s: float = 120.0
     llm_max_retries: int = 2
     llm_temperature: float = 0.2
+    # 国内 API 直连；本机系统代理（如 127.0.0.1:7897）会挂起请求，需要代理时显式配置
+    llm_proxy: str = ""
 
     # 数据库（原型默认 SQLite；PG 仅需改 url）
     database_url: str = "sqlite:///./zanh.db"

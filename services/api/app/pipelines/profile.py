@@ -136,11 +136,11 @@ def recommend_for_case(facts: CaseFacts, metrics: list[ProfileMetric], snapshot_
         if not eligible:
             limitations.append(f"样本量 {n} 低于排序门槛 {MIN_SAMPLE}，仅展示描述性信息")
 
-        if cost is not None and cohort_mid:
-            rel = "低于" if cost < cohort_mid else ("接近" if abs(cost - cohort_mid) / cohort_mid < 0.15 else "高于")
+        if cost is not None and cost.computable and cost.value is not None and cohort_mid:
+            rel = "低于" if cost.value < cohort_mid else ("接近" if abs(cost.value - cohort_mid) / cohort_mid < 0.15 else "高于")
             reasons.append(MatchReason(
                 reason_code="cost_level_vs_cohort",
-                text=f"该院同病种历史总费用中位数约 {cost:,.0f} 元，{rel}同类机构中位数（{cohort_mid:,.0f} 元）",
+                text=f"该院同病种历史总费用中位数约 {cost.value:,.0f} 元，{rel}同类机构中位数（{cohort_mid:,.0f} 元）",
                 metric_refs=[f"{snapshot_id}:{hid}:total_cost_median"],
             ))
         if sp is not None and sp.computable:
@@ -179,7 +179,8 @@ def recommend_for_case(facts: CaseFacts, metrics: list[ProfileMetric], snapshot_
     rankable = [r for r in recs if r.ranking_allowed]
     others = [r for r in recs if not r.ranking_allowed]
     rankable.sort(key=lambda r: next(
-        (m.value for m in metrics if m.entity_id == r.entity_id and m.metric_name == "total_cost_median"), 9e9
+        ((m.value if m.value is not None else 9e9) for m in metrics
+         if m.entity_id == r.entity_id and m.metric_name == "total_cost_median"), 9e9
     ))
     for i, r in enumerate(rankable):
         r.rank = i + 1

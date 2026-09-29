@@ -62,6 +62,7 @@ class OpenAICompatLLM:
         self.max_retries = settings.llm_max_retries
         self.temperature = settings.llm_temperature
         self.thinking = settings.llm_thinking
+        self.proxy = settings.llm_proxy
         self.usage = UsageRecord()
 
     def chat(self, messages: list[dict], *, temperature: float | None = None, max_tokens: int | None = None) -> str:
@@ -84,6 +85,8 @@ class OpenAICompatLLM:
                     json=body,
                     headers={"Authorization": f"Bearer {self.api_key}"},
                     timeout=self.timeout_s,
+                    trust_env=False,  # 国内 API 直连；系统代理（127.0.0.1:7897）会挂起
+                    proxy=self.proxy or None,
                 )
                 if resp.status_code >= 500 or resp.status_code == 429:
                     raise LLMError(f"LLM 服务暂不可用 ({resp.status_code})", retryable=True)
