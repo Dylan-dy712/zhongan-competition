@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+.pytest_cache/
+
+# 本地环境与密钥（不入库）
+.env
+*.env.local
+
+# 运行产物与医疗数据（规格 §10.2：病历与患者摘要不进仓库）
+work/
+*.db
+*.db-journal
+*.sqlite3
+
+# 系统
+.DS_Store
+Thumbs.db
