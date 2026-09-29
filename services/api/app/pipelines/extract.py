@@ -584,10 +584,17 @@ def _extract_expenses(case_id, pages, enc_id, facts, evs) -> None:
         if amt:
             add(h, ExpenseScope.out_of_catalog, amt, "rule_front_outofcatalog")
 
-    # 医保结算单
+    # 医保结算单（按文档独立记录总额，供跨文档对账洞察比较）
+    def _doc_value_exists(scope: ExpenseScope, doc_id: str, value: int) -> bool:
+        return any(
+            e.scope == scope and e.document_id == doc_id
+            and e.amount_minor and e.amount_minor.value == value
+            for e in facts.expenses
+        )
+
     for h in find_lines(pages, r"(?:总|医疗)费用[:：]?\s*([\d,，.]+)"):
         amt = parse_amount(h.match.group(1))
-        if amt and not any(e.scope == ExpenseScope.total for e in facts.expenses):
+        if amt and not _doc_value_exists(ExpenseScope.total, h.page["document_id"], amt):
             add(h, ExpenseScope.total, amt, "rule_settle_total")
     for h in find_lines(pages, r"统筹(基金)?支付[:：]?\s*([\d,，.]+)"):
         amt = parse_amount(h.match.group(2))
@@ -601,17 +608,20 @@ def _extract_expenses(case_id, pages, enc_id, facts, evs) -> None:
     # 发票
     for h in find_lines(pages, r"(?:价税合计|小写)[:：]?\s*[（(]?([\d,，.]+)"):
         amt = parse_amount(h.match.group(1))
-        if amt and not any(e.scope == ExpenseScope.total for e in facts.expenses):
+        if amt and not _doc_value_exists(ExpenseScope.total, h.page["document_id"], amt):
             add(h, ExpenseScope.total, amt, "rule_invoice_total")
 
-    # 电子票据/费用清单：合计行（总费用兜底来源，取首个 >= 100 元的合计）
-    if not any(e.scope == ExpenseScope.total for e in facts.expenses):
-        for h in find_lines(pages, r"合计[:：]?\s*([\d,，.]{2,})",
-                            {"inpatient_bill", "outpatient_bill", "invoice", "insurance_settlement"}):
-            amt = parse_amount(h.match.group(1))
-            if amt and amt >= 10000:
-                add(h, ExpenseScope.total, amt, "rule_bill_total")
-                break
+    # 电子票据/费用清单：合计行（每份票据文档取一个 >=100 元的合计）
+    bill_docs_seen: set[str] = set()
+    for h in find_lines(pages, r"合计[:：]?\s*([\d,，.]{2,})",
+                        {"inpatient_bill", "outpatient_bill", "invoice", "insurance_settlement"}):
+        doc = h.page["document_id"]
+        if doc in bill_docs_seen:
+            continue
+        amt = parse_amount(h.match.group(1))
+        if amt and amt >= 100 and not _doc_value_exists(ExpenseScope.total, doc, amt):
+            bill_docs_seen.add(doc)
+            add(h, ExpenseScope.total, amt, "rule_bill_total")
 
 
 def _build_events(case_id: str, facts: CaseFacts) -> list[MedicalEvent]:

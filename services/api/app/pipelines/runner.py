@@ -82,7 +82,8 @@ def validate_outputs(facts: CaseFacts, insights: list[Insight], report: Report) 
 
 
 def run_case(bundle: dict, settings: Settings, *, profiles: list[ProfileMetric] | None = None,
-             snapshot_id: str = "", user_context: str = "") -> dict:
+             snapshot_id: str = "", user_context: str = "",
+             cohort: list | None = None) -> dict:
     run_id = str(uuid.uuid4())
     stages: dict[str, dict] = {}
     t0 = _dt.datetime.now(_dt.timezone.utc)
@@ -94,13 +95,23 @@ def run_case(bundle: dict, settings: Settings, *, profiles: list[ProfileMetric] 
         "evidences": len(facts.evidences)}}
 
     cohort_stats = None
-    if profiles:
+    if profiles and cohort:
+        # 规格 §3.2：当前病例不得污染评价自己的基准 —— 留一法（排除本案）
         from ..knowledge import classify_disease_group
+        from .profile import _self_paid, _total
 
         g = classify_disease_group(facts)
         gcode = (g or {}).get("code") if g else None
-        ratios = [m.value for m in profiles
-                  if m.metric_name == "self_pay_ratio" and m.disease_group == gcode and m.value is not None]
+        ratios = []
+        for other in cohort:
+            if other.case_id == facts.case_id:
+                continue
+            og = classify_disease_group(other)
+            if gcode is None or (og or {}).get("code") != gcode:
+                continue
+            t, s = _total(other), _self_paid(other)
+            if t and s is not None:
+                ratios.append(s / t)
         if ratios:
             cohort_stats = {"self_pay_ratio_median": sorted(ratios)[len(ratios) // 2]}
 
@@ -152,5 +163,8 @@ def run_all(bundles: list[dict], settings: Settings) -> tuple[list[dict], list[P
         all_facts.append(facts)
         first_pass.append((b, facts))
     profiles = build_profiles(all_facts, snapshot_id)
-    runs = [run_case(b, settings, profiles=profiles, snapshot_id=snapshot_id) for b, _ in first_pass]
+    runs = [
+        run_case(b, settings, profiles=profiles, snapshot_id=snapshot_id, cohort=all_facts)
+        for b, _ in first_pass
+    ]
     return runs, profiles, snapshot_id
