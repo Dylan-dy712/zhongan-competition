@@ -25,15 +25,18 @@ def _facts_with_expenses(totals):
 
 class TestCostInsights(unittest.TestCase):
     def test_reconciliation_triggers_on_mismatch(self):
-        out = detect_insights(_facts_with_expenses([1234567, 1240000]))
+        # 差 12.7%（>5% → medium；≤1 元舍入不触发，见下一条）
+        out = detect_insights(_facts_with_expenses([1234567, 1400000]))
         rec = [i for i in out if i.label_code == "COST_AMOUNT_RECONCILIATION"]
         self.assertTrue(rec)
         self.assertEqual(rec[0].judgment_status.value, "candidate")
         self.assertEqual(rec[0].severity.value, "medium")
 
-    def test_no_reconciliation_on_consistent_totals(self):
+    def test_no_reconciliation_on_rounding_or_cross_category(self):
         out = detect_insights(_facts_with_expenses([1234567, 1234567]))
         self.assertFalse([i for i in out if i.label_code == "COST_AMOUNT_RECONCILIATION"])
+        out2 = detect_insights(_facts_with_expenses([1234567, 1234600]))  # 差 0.33 元（舍入）
+        self.assertFalse([i for i in out2 if i.label_code == "COST_AMOUNT_RECONCILIATION"])
 
 
 class TestExperienceInsights(unittest.TestCase):

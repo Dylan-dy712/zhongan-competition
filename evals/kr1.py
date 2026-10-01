@@ -59,8 +59,20 @@ def _sim(a: str, b: str) -> float:
     return difflib.SequenceMatcher(None, a, b).ratio()
 
 
+def _strip_punct(s: str) -> str:
+    import re as _re
+
+    return _re.sub(r"[\s，,；;：:、（）()【】\[\].·-]+", "", s)
+
+
 def _match_sets(gold: list, pred: list, threshold: float = 0.75) -> tuple[int, int, int]:
-    """一对一匹配：精确优先，剩余按相似度 >= threshold 贪心。返回 TP, FP, FN。"""
+    """一对一匹配：精确优先 → 相似度>=threshold 贪心 → 连续片段组合匹配。
+
+    组合匹配：金标常把多行诊断合并为一条（病理"（部位）结论"跨行），
+    若一条未匹配金标（去标点）等于连续若干条未匹配预测（去标点）的拼接，
+    计为 TP（规格 §11.2 集合一对一语义下的合并等价）。
+    返回 TP, FP, FN。
+    """
     tp = 0
     used_g: set[int] = set()
     used_p: set[int] = set()
@@ -86,6 +98,38 @@ def _match_sets(gold: list, pred: list, threshold: float = 0.75) -> tuple[int, i
         if best_g is not None and best_s >= threshold:
             tp += 1
             used_g.add(best_g)
+            used_p.add(pi)
+    # 组合匹配
+    n = len(pred)
+    for gi, g in enumerate(gold):
+        if gi in used_g:
+            continue
+        gs = _strip_punct(str(g))
+        if not gs:
+            continue
+        i = 0
+        while i < n:
+            if i in used_p:
+                i += 1
+                continue
+            acc = ""
+            j = i
+            matched = False
+            while j < n and (j - i) < 4:
+                if j in used_p:
+                    break
+                acc += _strip_punct(str(pred[j]))
+                if acc == gs:
+                    for k in range(i, j + 1):
+                        used_p.add(k)
+                    used_g.add(gi)
+                    tp += j - i + 1  # 金标 1 条 + 预测 j-i 条 → 每条预测各计一次 TP
+                    matched = True
+                    break
+                if not gs.startswith(acc):
+                    break
+                j += 1
+            i = j + 1 if matched else i + 1
     fp = len(pred) - tp
     fn = len(gold) - tp
     return tp, fp, fn

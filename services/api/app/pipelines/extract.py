@@ -147,7 +147,10 @@ def fv_from_hit(case_id: str, hit: LineHit, value, method: str, unit: str | None
 _HEADER_STOP = re.compile(
     r"^(入院诊断|出院诊断|门诊（急）诊断|门（急）诊诊断|病理诊断|入院时主要症状|主要化验结果|"
     r"特殊检查|病程与治疗结果|合并症|出院医嘱|出院情况|住院天数|入院日期|出院日期|手术及操作|"
-    r"出院带药|既往史|个人史|家族史|体格检查|辅助检查|诊疗经过|入院记录|主诉|现病史|第\d+页)"
+    r"出院带药|既往史|个人史|家族史|体格检查|辅助检查|诊疗经过|入院记录|主诉|现病史|第\d+页|"
+    r"病情评估|精神状态|睡眠|饮食|活动能力|出院记录|大体描述|病理所见|镜下所见|备注|切片|"
+    r"出院原因|离院方式|医疗付费方式|性别|年龄|科别|姓名|床号|住院号|门诊号|"
+    r"[\u4e00-\u9fa5A-Za-z]{2,20}(?:医院|卫生院|医疗中心)\s*$)"
 )
 
 
@@ -271,6 +274,11 @@ def extract_facts(bundle: dict, *, data_origin=DataOrigin.official_deidentified,
                   execution_mode=ExecutionMode.live) -> CaseFacts:
     case_id = bundle["case_id"]
     pages = bundle["pages"]
+    # 注册文档费用口径类别（供跨文档对账的口径隔离，见 insights._amount_reconciliation）
+    from .profile import register_doc_type
+
+    for pg in pages:
+        register_doc_type(pg["document_id"], pg["classification"]["doc_type"])
     facts = CaseFacts(case_id=case_id, run_id="", data_origin=data_origin, execution_mode=execution_mode)
     evs: list[Evidence] = []
 
@@ -285,14 +293,23 @@ def extract_facts(bundle: dict, *, data_origin=DataOrigin.official_deidentified,
     if not inpatient_markers:
         enc.kind = "outpatient"
 
-    # 医院：优先住院类文书，其次门诊病历/检查报告/病理（材料头部常有机构名）
+    # 医院：取行内"最长"机构名（含大学/学院/集团前缀与南院/分院后缀），优先住院类文书
+    _HOSP_RX = re.compile(
+        r"[\u4e00-\u9fa5A-Za-z（）()]{3,25}?(?:医院|卫生院|医疗中心)(?:南院|北院|东院|西院|分院|总院)?")
+    _HOSP_ALIAS = {"妇女儿童医院": "妇幼保健院"}
     for dt in ("discharge_summary", "medical_record_front", "inpatient_bill", "insurance_settlement",
                "outpatient_record", "pathology_report", "exam_report", "outpatient_bill", "invoice"):
-        hits = find_lines(pages, r"([\u4e00-\u9fa5A-Za-z（）()]{2,22}(?:医院|卫生院|医疗中心))", {dt})
+        hits = find_lines(pages, r"[\u4e00-\u9fa5A-Za-z（）()]{3,25}?(?:医院|卫生院|医疗中心)", {dt})
         if hits:
-            fv, ev = fv_from_hit(case_id, hits[0], clean_name(hits[0].match.group(1)), "rule_hospital", strength=0.8)
-            enc.hospital = fv
-            add_ev(ev)
+            candidates = [m.group(0) for m in _HOSP_RX.finditer(hits[0].text)]
+            if candidates:
+                name = max(candidates, key=len)
+                for frag, canon in _HOSP_ALIAS.items():
+                    if frag in name:
+                        name = name.replace(frag, canon)
+                fv, ev = fv_from_hit(case_id, hits[0], clean_name(name), "rule_hospital", strength=0.8)
+                enc.hospital = fv
+                add_ev(ev)
             break
 
     # 入院/出院日期：住院锚点优先，门诊锚点兜底（检验单上的"住院号"字样
@@ -321,6 +338,28 @@ def extract_facts(bundle: dict, *, data_origin=DataOrigin.official_deidentified,
                 setattr(enc, attr, fv)
                 add_ev(ev)
                 break
+
+    # 兜底（标注口径：门诊案=最早的就诊/检查/报告日期）：全文扫日精度日期取最早
+    if enc.admission_date is None:
+        earliest = None
+        for pg in pages:
+            for ln in pg.get("lines", []):
+                m = _DATE_CTX.search(ln.get("text", ""))
+                if m:
+                    parsed = parse_date(ln.get("text", "")[m.start():])
+                    if parsed and parsed[1] == TimePrecision.day:
+                        iso = parsed[0]
+                        if earliest is None or iso < earliest[0]:
+                            earliest = (iso, pg, ln, m)
+        if earliest:
+            iso, pg, ln, m = earliest
+            ev = Evidence(case_id=case_id, document_id=pg["document_id"], page_index=pg.get("page_index"),
+                          line_index=pg.get("lines", []).index(ln) if ln in pg.get("lines", []) else None,
+                          text_span=TextSpan(start=0, end=len(ln.get("text", "")), text=ln.get("text", "")),
+                          bbox=ln.get("bbox"), extraction_method="rule_date_earliest")
+            evs.append(ev)
+            enc.admission_date = FieldValue.observed(iso, ln.get("text", ""), [ev.evidence_id], 0.45,
+                                                     "rule_date_earliest@0.1.0")
 
     # 住院天数：原文优先，否则派生（口径：出院-入院，同日计 1）
     hits = find_lines(pages, r"住院天数[:：]?\s*(\d+)")
@@ -379,30 +418,47 @@ def extract_facts(bundle: dict, *, data_origin=DataOrigin.official_deidentified,
     enc_id = facts.encounters[0].encounter_id
 
     # --- 诊断 ---
+    # --- 诊断 ---
+    # 各标题只在可信文档类型内生效：影像/检验报告的"临床诊断："后常跟整页
+    # 报告正文，跨类型收割会把正文当诊断（曾致单案 80 条假诊断）
     dx_specs = [
-        ("outpatient", r"门（急）诊诊断"), ("admission", r"入院诊断"), ("discharge", r"出院诊断"),
-        ("pathology", r"病理诊断[:：]"), ("clinical", r"临床诊断[:：]"),
+        ("outpatient", r"门（急）诊诊断", {"discharge_summary", "medical_record_front", "outpatient_record"}),
+        ("admission", r"入院诊断", {"discharge_summary", "medical_record_front"}),
+        ("discharge", r"出院诊断", {"discharge_summary", "medical_record_front"}),
+        ("pathology", r"病理诊断[:：]", {"pathology_report", "discharge_summary"}),
+        ("outpatient", r"^诊断[:：]", {"outpatient_record"}),
     ]
-    if enc.kind == "outpatient":
-        dx_specs.append(("outpatient", r"^诊断[:：]"))
     _DX_NOISE = re.compile(
         r"^(具体|详见|待|见|请|无)?$|见.{0,8}报告|待.{0,6}报告|待石蜡|"
-        r"部分呈|呈.{0,10}方式|免疫组化|分型$|送检|标本")
-    _DX_BRACKET = re.compile(r"^[【\[](.+?)[】\]][：:]?")
+        r"部分呈|呈.{0,10}方式|免疫组化|分型$|送检|标本|"
+        r"账户|余额|离院|再住院|昏迷|清单|打印|病案|费用|第\d+页|报告|建议|所见|结论")
+    _DX_BRACKET = re.compile(r"^[（(【\[](.+?)[）)】\]][：:]?")
+    _DX_NUM = re.compile(r"^\s*\d+[\.、]\s*")  # "1.双肺结节2.右乳腺…" 编号列表拆分
+    _DX_MEASURE = re.compile(r"\d+(?:\.\d+)?\s*(?:cm|mm|x|\*)|[\d.]+\*[\d.]+", re.I)
     seen_dx: set[tuple[str, str]] = set()
-    for role, header in dx_specs:
-        for pg, i, ln in extract_section(pages, header):
+    seen_dx_global: set[str] = set()
+    dx_budget = 18  # 单案诊断上限（真实病例极少超过；超出视为收割失控）
+    for role, header, dts in dx_specs:
+        if len(seen_dx_global) >= dx_budget:
+            break
+        for pg, i, ln in extract_section(pages, header, dts, max_lines=6):
             body = ln.get("text", "")
+            # 编号列表整行："1.双肺结节2.右乳腺纤维腺瘤3.…" 按编号拆开
+            if _DX_NUM.search(body) and len(re.findall(r"\d+[\.、]", body)) >= 2:
+                body = re.sub(r"(\d+[\.、])", r";\1", body)
             for seg in re.split(r"[、，,；;]", body):
                 seg = clean_name(seg)
+                seg = re.sub(r"^\s*\d+[\.、]\s*", "", seg)  # 剥离编号前缀
                 bm = _DX_BRACKET.match(seg)
                 if bm:
                     seg = clean_name(bm.group(1))
-                if not seg or len(seg) < 2 or re.fullmatch(r"[\d.]+", seg):
+                if not seg or len(seg) < 2 or len(seg) > 25 or re.fullmatch(r"[\d.]+", seg):
                     continue
-                if _DX_NOISE.search(seg) or (role, seg) in seen_dx or len(seg) > 40:
+                if _DX_NOISE.search(seg) or _DX_MEASURE.search(seg) or (role, seg) in seen_dx or seg in seen_dx_global:
                     continue
-                seen_dx.add(seg)
+                # 病理角色：剔除大体/镜下描述行（含"可见/大小/质地/："等 prose 特征）
+                if role == "pathology" and re.search(r"：|可见|大小|质地|灰红|灰白|一堆|块", seg):
+                    continue
                 m = re.search(re.escape(seg), body)
                 ev = Evidence(
                     case_id=case_id, document_id=pg["document_id"], page_index=pg.get("page_index"),
@@ -411,6 +467,8 @@ def extract_facts(bundle: dict, *, data_origin=DataOrigin.official_deidentified,
                     bbox=ln.get("bbox"), extraction_method="rule_diagnosis",
                 )
                 evs.append(ev)
+                seen_dx.add((role, seg))
+                seen_dx_global.add(seg)
                 facts.diagnoses.append(
                     DiagnosisItem(
                         encounter_id=enc_id, role=role,
@@ -493,9 +551,11 @@ def extract_facts(bundle: dict, *, data_origin=DataOrigin.official_deidentified,
     # --- 药品：出院带药段落 + 门诊处方/诊疗意见行 ---
     med_section = extract_section(pages, r"出院带药|出院医嘱.{0,6}药")
     med_lines = [(pg, i, ln) for pg, i, ln in med_section]
+    # 门诊处方（手机截图形态）：含剂型词即收；剂量/频次/途径从行内与邻行解析
     for pg, i, ln in iter_lines(pages, {"outpatient_record"}):
         t = ln.get("text", "")
-        if re.search(r"(?:注射液|缓释片|胶囊|颗粒|口服液|滴眼液|喷雾剂|乳膏)", t) and re.search(r"(?:一日|每日|每次|口服|注射|静滴|外用)", t):
+        if re.search(r"(?:注射液|缓释片|分散片|胶囊|颗粒|口服液|滴眼液|喷雾剂|乳膏|软膏|片|丸|膏|栓)", t) \
+                and not re.search(r"费|价|金额|合计|数量", t):
             med_lines.append((pg, i, ln))
 
     _MED_NAME = re.compile(
@@ -507,6 +567,8 @@ def extract_facts(bundle: dict, *, data_origin=DataOrigin.official_deidentified,
     _MED_ROUTE = re.compile(r"(皮下注射|肌内注射|肌注|静脉注射|静脉滴注|静滴|口服|外用|雾化吸入|滴入|含服)")
     seen_meds: set[str] = set()
     for pg, i, ln in med_lines:
+        if len(facts.medications) >= 12:
+            break
         body = ln.get("text", "")
         m = _MED_NAME.search(body)
         if not m:
@@ -570,8 +632,8 @@ def _extract_expenses(case_id, pages, enc_id, facts, evs) -> None:
                         document_id=hit.page["document_id"], note=note)
         )
 
-    # 病案首页：总费用/自付/自费
-    for h in find_lines(pages, r"总费用\s*([\d,，.]+)"):
+    # 病案首页：总费用/费用总额/自付/自费
+    for h in find_lines(pages, r"(?:总费用|费用总额)\s*[:：]?\s*([\d,，.]+)"):
         amt = parse_amount(h.match.group(1))
         if amt:
             add(h, ExpenseScope.total, amt, "rule_front_total")
@@ -611,17 +673,13 @@ def _extract_expenses(case_id, pages, enc_id, facts, evs) -> None:
         if amt and not _doc_value_exists(ExpenseScope.total, h.page["document_id"], amt):
             add(h, ExpenseScope.total, amt, "rule_invoice_total")
 
-    # 电子票据/费用清单：合计行（每份票据文档取一个 >=100 元的合计）
-    bill_docs_seen: set[str] = set()
-    for h in find_lines(pages, r"合计[:：]?\s*([\d,，.]{2,})",
-                        {"inpatient_bill", "outpatient_bill", "invoice", "insurance_settlement"}):
-        doc = h.page["document_id"]
-        if doc in bill_docs_seen:
-            continue
-        amt = parse_amount(h.match.group(1))
-        if amt and amt >= 100 and not _doc_value_exists(ExpenseScope.total, doc, amt):
-            bill_docs_seen.add(doc)
-            add(h, ExpenseScope.total, amt, "rule_bill_total")
+    # 电子票据/费用清单：合计行（任意文档类型兜底，容忍"合 计"空格形态）
+    if not any(e.scope == ExpenseScope.total for e in facts.expenses):
+        for h in find_lines(pages, r"合\s*计[:：]?\s*([\d,，.]{2,})"):
+            amt = parse_amount(h.match.group(1))
+            if amt and amt >= 100 and not _doc_value_exists(ExpenseScope.total, h.page["document_id"], amt):
+                add(h, ExpenseScope.total, amt, "rule_bill_total")
+                break
 
 
 def _build_events(case_id: str, facts: CaseFacts) -> list[MedicalEvent]:

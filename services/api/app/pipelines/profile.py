@@ -26,6 +26,26 @@ def _self_paid(f: CaseFacts) -> int | None:
     return e.amount_minor.value if e else None
 
 
+# 文档 ID -> 费用口径类别（inpatient/outpatient/unknown），抽取阶段注册
+_DOC_TYPE_BY_ID: dict[str, str] = {}
+
+_DOC_TYPE_CATEGORY = {
+    "insurance_settlement": "inpatient", "medical_record_front": "inpatient",
+    "inpatient_bill": "inpatient", "discharge_summary": "inpatient",
+    "surgery_record": "inpatient",
+    "outpatient_bill": "outpatient", "invoice": "outpatient",
+    "outpatient_record": "outpatient",
+}
+
+
+def register_doc_type(document_id: str, doc_type: str) -> None:
+    _DOC_TYPE_BY_ID.setdefault(document_id, _DOC_TYPE_CATEGORY.get(doc_type, "unknown"))
+
+
+def _doc_cost_category(document_id: str) -> str:
+    return _DOC_TYPE_BY_ID.get(document_id, "unknown")
+
+
 def _stay(f: CaseFacts) -> int | None:
     enc = f.encounters[0] if f.encounters else None
     if enc is not None and enc.stay_days and enc.stay_days.value is not None:

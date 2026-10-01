@@ -30,12 +30,14 @@ _DRUG_INDICATION_HINTS = [
 ]
 
 # 高频重复检查关注名单（名称片段 -> 关注阈值次数）
+# 阈值按"OCR 行计数"校准：行计数含标题/页眉，需明显高于常规才值得提示
+# （内部金标 15 案回归：旧阈值 CT=3 导致 11 假阳，上调后观察）
 _REPEAT_EXAM_WATCH = [
-    (r"CT|计算机断层", 3),
-    (r"磁共振|MR[I]?", 2),
-    (r"彩超|多普勒|超声", 4),
-    (r"心电图", 4),
-    (r"胸片|X线|DR", 3),
+    (r"CT|计算机断层", 5),
+    (r"磁共振|MR[I]?", 4),
+    (r"彩超|多普勒|超声", 6),
+    (r"心电图", 6),
+    (r"胸片|X线|DR", 4),
 ]
 
 # 出院材料指引适用清单（规格 §6.2：相对适用清单的缺项，不断言医生未口头指导）
@@ -171,20 +173,33 @@ def _amount_reconciliation(facts: CaseFacts, case_id: str) -> list[Insight]:
     totals = [e for e in facts.expenses if e.scope == ExpenseScope.total and e.amount_minor and e.amount_minor.value is not None]
     if len(totals) < 2:
         return []
-    vals = {t.amount_minor.value for t in totals}
-    if len(vals) == 1:
+    # 口径隔离：住院类文书之间、门诊类票据之间才可互相对账；跨类（门诊发票 vs
+    # 住院清单）金额不同属正常构成差，不判疑点（内部金标 15 案回归：4 假阳由此来）
+    from .profile import _doc_cost_category
+
+    by_cat: dict[str, list] = {}
+    for t in totals:
+        by_cat.setdefault(_doc_cost_category(t.document_id), []).append(t)
+    diff_pairs = []
+    for items in by_cat.values():
+        vals = sorted({t.amount_minor.value for t in items})
+        if len(vals) >= 2:
+            diff_pairs.append((vals[0], vals[-1]))
+    if not diff_pairs:
         return []
-    lo, hi = min(vals), max(vals)
+    lo = min(p[0] for p in diff_pairs)
+    hi = max(p[1] for p in diff_pairs)
     if hi - lo <= 100:  # 1 元以内视作口径四舍五入
         return []
-    doc_ids = ",".join(sorted({t.document_id for t in totals}))
+    rel = (hi - lo) / hi
+    sev = Severity.high if rel > 0.2 else (Severity.medium if rel > 0.05 else Severity.low)
     return [
         Insight(
             case_id=case_id, label_code="COST_AMOUNT_RECONCILIATION",
-            category=InsightCategory.cost, severity=Severity.medium,
+            category=InsightCategory.cost, severity=sev,
             confidence=0.75, evidence_ids=[ev for t in totals for ev in (t.amount_minor.evidence_ids or [])][:2],
-            rationale=f"不同材料记录的总费用不一致（相差 {(hi-lo)/100:.2f} 元），需核对口径。",
-            uncertainty="可能来自门诊+住院合并口径、补记项目或结算时点差异",
+            rationale=f"同类材料记录的总费用不一致（相差 {(hi-lo)/100:.2f} 元），需核对口径。",
+            uncertainty="可能来自补记项目或结算时点差异",
             suggested_action="以医保结算单为准核对；如金额影响理赔，请联系客服协助核对。",
             judgment_status=JudgmentStatus.candidate,
             review_required=False,
@@ -201,7 +216,9 @@ def _terminology_barrier(facts: CaseFacts, case_id: str) -> list[Insight]:
     jargon_pat = re.compile(
         r"(VATS|胸腔镜|腹腔镜|磨玻璃|亚实性|占位|结节|萎缩|反流|不全|功能障碍|突出|狭窄|"
         r"腺上皮增生|分化|浸润|粘连|坏死|囊肿|息肉|糜烂|溃疡|结石|脱垂|疝|瘘|"
-        r"慢性|急性|良性|恶性|待排|待石蜡)"
+        r"慢性|急性|良性|恶性|待排|待石蜡|"
+        r"癌|瘤|梗|栓|衰竭|中毒|畸形|异位|综合征|功能不全|早搏|颤动|扑动|紫癜|痛风|"
+        r"骨髓穿刺|腰穿|活检|造影|透析|化疗|放疗)"
     )
     terms: dict[str, int] = {}
     for d in facts.diagnoses:
