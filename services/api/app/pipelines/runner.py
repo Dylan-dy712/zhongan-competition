@@ -89,7 +89,13 @@ def run_case(bundle: dict, settings: Settings, *, profiles: list[ProfileMetric] 
     t0 = _dt.datetime.now(_dt.timezone.utc)
 
     facts = extract_facts(bundle)
-    stages["extract"] = {"status": "completed", "counts": {
+    llm = build_llm(settings)
+    enrich_info = {"status": "disabled"}
+    if settings.extract_llm_enabled and settings.llm_provider != "mock":
+        from .extract_llm import enrich_facts
+
+        enrich_info = enrich_facts(facts, bundle, llm)
+    stages["extract"] = {"status": "completed", "llm_enrich": enrich_info, "counts": {
         "diagnoses": len(facts.diagnoses), "procedures": len(facts.procedures),
         "medications": len(facts.medications), "expenses": len(facts.expenses),
         "evidences": len(facts.evidences)}}
@@ -120,7 +126,6 @@ def run_case(bundle: dict, settings: Settings, *, profiles: list[ProfileMetric] 
         "total": len(insights),
         "by_label": {k: sum(1 for i in insights if i.label_code == k) for k in {i.label_code for i in insights}}}}
 
-    llm = build_llm(settings)
     report = generate_guidance(facts, insights, llm, user_context=user_context,
                                run_id=run_id, input_hash=compute_input_hash(bundle))
     stages["guidance"] = {"status": "completed", "mode": report.validation.get("guidance_mode", "")}

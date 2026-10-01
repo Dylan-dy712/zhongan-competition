@@ -39,6 +39,8 @@ class Settings(BaseSettings):
     llm_timeout_s: float = 120.0
     llm_max_retries: int = 2
     llm_temperature: float = 0.2
+    # B 层：LLM 辅助抽取开关（仅 live provider 时生效）
+    extract_llm_enabled: bool = True
     # 国内 API 直连；本机系统代理（如 127.0.0.1:7897）会挂起请求，需要代理时显式配置
     llm_proxy: str = ""
 
