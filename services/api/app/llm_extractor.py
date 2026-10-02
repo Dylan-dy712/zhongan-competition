@@ -10,14 +10,14 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 
 PROMPT_VERSION = "medical-five-fields-v1"
-SCHEMA_VERSION = "0.1.0"
+SCHEMA_VERSION = "0.1.1"
 
 
 class ModelCandidate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     fact_type: Literal["diagnosis", "surgery", "medication", "stay_days", "total_cost"]
     raw_value: str = Field(min_length=1, max_length=500)
-    normalized_value: str | int | dict
+    normalized_value: str | int | float | dict
     assertion: Literal["present", "negated", "suspected", "historical", "unknown"]
     evidence_quote: str = Field(min_length=1, max_length=1000)
     confidence_score: float | None = Field(default=None, ge=0, le=1)

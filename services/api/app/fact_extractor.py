@@ -4,7 +4,7 @@ import re
 from decimal import Decimal, InvalidOperation
 from uuid import uuid4
 
-EXTRACTOR_VERSION = "evidence-pattern-candidate-v1"
+EXTRACTOR_VERSION = "evidence-pattern-candidate-v2"
 FIELD_TYPES = ("diagnosis", "surgery", "medication", "stay_days", "total_cost")
 LABELS = {
     "diagnosis": r"(?:诊断|初步诊断|入院诊断|出院诊断)",
@@ -33,8 +33,11 @@ def normalize_value(fact_type: str, value):
     if fact_type in {"surgery", "medication"} and isinstance(value, str):
         return clean_value(value)
     if fact_type == "stay_days":
-        match = re.search(r"\d+", str(value))
-        return int(match.group()) if match else value
+        match = re.fullmatch(r"\s*(\d+(?:\.\d+)?)\s*(?:天|days?)?\s*", str(value))
+        if not match:
+            return None
+        days = Decimal(match.group(1))
+        return int(days) if days == days.to_integral_value() else float(days)
     if fact_type == "total_cost":
         if isinstance(value, dict) and "amount_minor" in value:
             return {"amount_minor": int(value["amount_minor"]), "currency": value.get("currency", "CNY")}
@@ -65,9 +68,9 @@ def extract_facts(evidence_rows):
                 raw, value = clean_value(match.group(0)), clean_value(match.group(1))
                 if value:
                     found[fact_type] = candidate(fact_type, normalize_value(fact_type, value), raw, evidence_id)
-        stay = re.search(r"住院\s*(?:共|时长|天数)?\s*[:：]?\s*(\d{1,4})\s*天", text)
+        stay = re.search(r"住院\s*(?:共|时长|天数)?\s*[:：]?\s*(\d{1,4}(?:\.\d{1,4})?)\s*天", text)
         if stay and "stay_days" not in found:
-            found["stay_days"] = candidate("stay_days", int(stay.group(1)), clean_value(stay.group(0)), evidence_id, unit="day", confidence=0.9)
+            found["stay_days"] = candidate("stay_days", normalize_value("stay_days", stay.group(1)), clean_value(stay.group(0)), evidence_id, unit="day", confidence=0.9)
         cost = re.search(r"(?:医疗总费用|总费用|费用合计|合计)\s*[:：]?\s*(?:人民币|CNY|￥|¥)?\s*([0-9][0-9,]*(?:\.\d{1,2})?)\s*元?", text, re.I)
         if cost and "total_cost" not in found:
             try:
@@ -96,6 +99,8 @@ def merge_model_candidates(rule_facts, model_candidates, evidence_rows):
             continue
         fact_type = candidate_item["fact_type"]
         model_value = normalize_value(fact_type, candidate_item["normalized_value"])
+        if model_value is None:
+            continue
         model_evidence = [str(source["evidence_id"])]
         current = facts[fact_type]
         if current["status"] == "missing":
