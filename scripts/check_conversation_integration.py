@@ -9,7 +9,7 @@ import tempfile
 from contextlib import redirect_stdout
 from io import StringIO
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
@@ -20,6 +20,8 @@ from services.api.app import conversation_repository as chats
 from services.api.app.conversation_agent import CareTools
 from services.api.app.repository import AccessDenied, connect, token_digest
 from services.api.app.worker import claim_run, process_run
+from services.api.app.report_builder import SECTION_TYPES
+from services.api.app.report_llm import PROMPT_VERSION as REPORT_PROMPT_VERSION
 
 
 class ScriptedModel:
@@ -124,10 +126,39 @@ def main():
             with connection() as conn:
                 conn.autocommit=True
                 run=claim_run(conn)
-                with patch.dict(os.environ, {'LLM_API_KEY':''}):
+                draft = {'sections': [{'section_type': section, 'claims': [{
+                    'text': '医疗总费用：999.00元', 'claim_type': 'case_fact',
+                    'evidence_quote': '医疗总费用：120.00元'}]} for section in SECTION_TYPES],
+                    'actions': [
+                        {'action_text': '请自行停药', 'source_quote': '医疗总费用：120.00元',
+                         'source_refs': [], 'owner_role': 'patient', 'due_source': 'unknown',
+                         'rationale': '合成测试'},
+                        {'action_text': '三天后复诊', 'source_quote': '医疗总费用：120.00元',
+                         'source_refs': [], 'owner_role': 'patient', 'due_source': 'medical_order',
+                         'due_at': '2026-10-10T09:00:00+08:00', 'rationale': '合成测试'}]}
+                extractor = MagicMock(provider='scripted_test', model_id='scripted-report')
+                extractor.extract.return_value = {'status': 'completed', 'candidates': {'candidates': []},
+                                                  'raw_output': {}, 'usage_metadata': {}}
+                with patch.dict(os.environ, {'LLM_API_KEY': 'scripted-test-no-network'}), \
+                     patch('services.api.app.worker.OpenAiCompatibleExtractor', return_value=extractor), \
+                     patch('services.api.app.worker.detect_semantic', return_value={
+                         'status': 'completed', 'candidates': [], 'raw_output': {}, 'usage_metadata': {}}), \
+                     patch('services.api.app.worker.draft_report', return_value={
+                         'status': 'completed', 'draft': draft, 'raw_output': {}, 'usage_metadata': {}}):
                     process_run(conn,run,Path(storage))
                 status=conn.execute('SELECT status,error FROM analysis_runs WHERE run_id=%s',(run_id,)).fetchone()
                 check(status['status']=='completed',f"worker parses synthetic invoice ({status['status']})")
+                saved = conn.execute('SELECT status,sections,actions,validation_errors FROM reports WHERE run_id=%s',
+                                     (run_id,)).fetchone()
+                check(saved['status'] == 'pending_review' and
+                      all(c['review_status'] == 'pending' for s in saved['sections'] for c in s['claims']),
+                      'real quote cannot automatically release contradictory report facts')
+                check('UNSAFE_OR_EMPTY_ACTION' in saved['validation_errors'] and
+                      len(saved['actions']) == 1 and saved['actions'][0]['due_at'] is None,
+                      'worker removes unsafe action and ungrounded deadline')
+                audited = conn.execute('SELECT candidates FROM model_extractions WHERE run_id=%s AND prompt_version=%s',
+                                       (run_id, REPORT_PROMPT_VERSION)).fetchone()
+                check(audited['candidates'] == draft, 'worker preserves raw report source quotes for audit')
             evidence_ref=[]
             def grounded_reply(messages):
                 data=json.loads(next(m['content'] for m in reversed(messages) if m['role']=='tool'))

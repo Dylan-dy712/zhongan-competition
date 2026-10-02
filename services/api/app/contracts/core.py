@@ -277,6 +277,9 @@ class Action(Contract):
     def due_time_has_source(self):
         if self.due_at is not None and self.due_source == "unknown":
             raise ValueError("due_at requires a known due_source")
+        if self.due_at is not None:
+            if "T" not in self.due_at or datetime.fromisoformat(self.due_at).tzinfo is None:
+                raise ValueError("due_at requires an RFC3339 timestamp with timezone")
         return self
 
 
