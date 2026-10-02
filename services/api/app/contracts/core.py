@@ -209,7 +209,7 @@ class Insight(Contract):
 
 
 class ReviewCorrection(Contract):
-    field_or_claim_id: str = Field(pattern=r"^(severity|rationale|uncertainty|suggested_action|judgment_status|knowledge_refs)$")
+    field_or_claim_id: str = Field(pattern=r"^(severity|rationale|uncertainty|suggested_action|judgment_status|knowledge_refs|sections|actions)$")
     replacement: object
     source_refs: list[UUID] = Field(default_factory=list)
     reason: str = Field(min_length=1, max_length=1000)
@@ -219,13 +219,22 @@ class ReviewTask(Contract):
     review_id: UUID
     case_id: UUID
     run_id: UUID
-    target_type: str = Field(pattern=r"^insight$")
+    target_type: str = Field(pattern=r"^(insight|report)$")
     target_id: UUID
     target_version: int = Field(ge=1)
     status: str = Field(pattern=r"^(pending|decided|cancelled)$")
     reason: str
-    target: Insight
+    target: 'Insight | Report'
     created_at: datetime
+
+    @model_validator(mode='after')
+    def target_matches_task(self):
+        target_id = self.target.insight_id if isinstance(self.target, Insight) else self.target.report_id
+        if (self.target_type != ('insight' if isinstance(self.target, Insight) else 'report') or
+            self.target_id != target_id or self.case_id != self.target.case_id or
+            self.run_id != self.target.run_id):
+            raise ValueError('review target must match task identity and scope')
+        return self
 
 
 class ReviewDecision(Contract):
@@ -239,6 +248,7 @@ class ReviewDecision(Contract):
     corrections: list[ReviewCorrection] = Field(default_factory=list)
     reviewer_id: UUID
     decided_at: datetime
+    result_report_id: UUID | None = None
 
 
 class Claim(Contract):
@@ -378,3 +388,5 @@ class AnalysisRun(Contract):
     started_at: datetime | None
     finished_at: datetime | None
     created_at: datetime
+
+ReviewTask.model_rebuild()

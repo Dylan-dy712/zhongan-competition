@@ -396,6 +396,10 @@ def get_report(conn, *, actor_id: UUID, case_id: UUID, version: int) -> Report |
     ).fetchone()
     if not row or (row["role"] == "patient" and row["status"] != "published"):
         return None
+    return _to_report(row)
+
+
+def _to_report(row) -> Report:
     return Report(report_id=row["report_id"], case_id=row["case_id"], run_id=row["run_id"],
         report_version=row["report_version"], status=row["status"], sections=row["sections"],
         actions=row["actions"], input_hash=row["input_hash"], model_id=row["model_id"],
