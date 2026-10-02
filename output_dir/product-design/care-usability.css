@@ -1,0 +1,1113 @@
+/* Readable care pages. Load after care-polish.css so the home palette stays shared. */
+:root {
+  --care-ink: #243c33;
+  --care-copy: #425e52;
+  --care-muted: #5c7368;
+  --care-green: #007b5a;
+  --care-border: #d6e9df;
+  --care-tint: #ecfaf3;
+}
+
+.replica-episode {
+  min-height: 44px;
+  cursor: pointer;
+}
+
+.replica-episode:focus-visible {
+  outline: 3px solid #16876a;
+  outline-offset: 3px;
+}
+
+.report-chat-screen,
+.records-screen,
+.records-detail-screen {
+  color: var(--care-ink);
+  font-size: 15px;
+}
+
+.report-chat-screen :is(button, textarea),
+.records-screen button,
+.records-detail-screen button,
+.case-caption button,
+.case-document button {
+  touch-action: manipulation;
+}
+
+.report-chat-screen button:not(.nuan-key),
+.records-screen button,
+.records-detail-screen button,
+.case-caption button,
+.case-document button {
+  min-height: 44px;
+}
+
+.report-chat-screen :is(button, textarea):focus-visible,
+.records-screen button:focus-visible,
+.records-detail-screen :is(button, summary):focus-visible,
+.nuan-topic-details > summary:focus-visible,
+.records-remaining > summary:focus-visible {
+  outline: 3px solid #16876a;
+  outline-offset: 3px;
+}
+
+.main.report-chat-screen + .nav button,
+.main.records-screen + .nav button {
+  color: var(--care-muted);
+}
+
+.main.report-chat-screen + .nav button.active,
+.main.records-screen + .nav button.active {
+  color: var(--care-green);
+}
+
+/* Compact welcome: the first care action should be visible sooner. */
+.report-chat-screen .inline-report-thread {
+  padding: 0 16px 22px;
+  scroll-padding-block: 14px;
+}
+
+.nuan-welcome {
+  min-height: 122px;
+  padding: 14px 4px;
+  margin: 0 0 4px;
+}
+
+.nuan-welcome::before {
+  width: 98px;
+  height: 98px;
+  right: 0;
+  top: 12px;
+}
+
+.nuan-welcome-copy {
+  max-width: calc(100% - 100px);
+}
+
+.nuan-welcome-kicker {
+  font-size: 12px;
+  letter-spacing: .3px;
+  color: var(--care-green);
+}
+
+.nuan-welcome h2 {
+  font-size: 20px;
+  line-height: 1.45;
+  letter-spacing: 0;
+  margin: 5px 0;
+}
+
+.nuan-welcome p {
+  font-size: 13px;
+  line-height: 1.65;
+  color: var(--care-copy);
+}
+
+.nuan-welcome img {
+  width: 106px;
+  height: 110px;
+  right: -3px;
+  top: 6px;
+  filter: drop-shadow(0 7px 7px #008d6812);
+}
+
+.nuan-conversation-caption {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 9px;
+  margin: 15px 2px 13px;
+  padding: 0;
+  color: var(--care-muted);
+  font-size: 13px;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+
+.nuan-conversation-caption strong {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--care-copy);
+}
+
+.nuan-conversation-caption small {
+  font-size: 12px;
+  color: var(--care-muted);
+}
+
+.nuan-reading-heading {
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 8px 1px 12px;
+}
+
+.nuan-reading-heading > span {
+  font-size: 14px;
+}
+
+.nuan-reading-heading > small,
+.nuan-time,
+.nuan-hint,
+.nuan-end {
+  color: var(--care-muted);
+  font-size: 12px;
+  line-height: 1.65;
+}
+
+.nuan-message {
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.nuan-message-body {
+  padding: 15px 14px;
+  border-color: #e0ebe5;
+  box-shadow: 0 3px 12px #2e664805;
+}
+
+.nuan-message-body p,
+.report-chat-screen .bubble,
+.report-file-status p {
+  font-size: 15px;
+  line-height: 1.85;
+  color: var(--care-copy);
+}
+
+.nuan-message-label {
+  margin-bottom: 12px;
+  font-size: 14px;
+  color: var(--care-green);
+}
+
+.nuan-message-label > svg {
+  padding: 5px;
+}
+
+.nuan-key {
+  color: var(--care-green);
+  text-decoration-color: #6cae96;
+  text-decoration-thickness: 1px;
+}
+
+.nuan-key span {
+  font-size: 12px;
+}
+
+.nuan-date-card {
+  padding: 12px 10px;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.nuan-date-card > :last-child {
+  min-width: 0;
+}
+
+.nuan-date-card h3 {
+  font-size: 15px;
+  line-height: 1.65;
+}
+
+.nuan-calendar small {
+  font-size: 12px;
+  background: #008565;
+  color: #fff;
+}
+
+.nuan-calendar span {
+  font-size: 12px;
+  color: var(--care-muted);
+}
+
+.nuan-status {
+  margin-top: 5px;
+  font-size: 12px;
+  color: var(--care-copy);
+  line-height: 1.7;
+}
+
+.nuan-money {
+  background: #f2faf6;
+  border-color: var(--care-border);
+  gap: 9px;
+  flex-wrap: wrap;
+}
+
+.nuan-money small {
+  font-size: 12px;
+  color: var(--care-muted);
+}
+
+.nuan-money strong {
+  font-size: 25px;
+  color: #285442;
+}
+
+.nuan-money-unknown {
+  border-color: var(--care-border);
+}
+
+.nuan-money-unknown b {
+  font-size: 14px;
+  color: var(--care-copy);
+}
+
+.nuan-add {
+  padding: 11px 12px;
+  font-size: 14px;
+  color: var(--care-green);
+  line-height: 1.6;
+}
+
+/* Secondary reading stays accessible without dominating the conversation. */
+.nuan-topic-details {
+  min-width: 0;
+  margin: 0 0 14px 36px;
+  border: 1px solid var(--care-border);
+  border-radius: 14px;
+  background: #ffffffc9;
+}
+
+.nuan-topic-details > summary,
+.records-remaining > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 48px;
+  padding: 12px 14px;
+  cursor: pointer;
+  list-style: none;
+  color: var(--care-green);
+  font-size: 14px;
+  line-height: 1.65;
+}
+
+.nuan-topic-details > summary::-webkit-details-marker,
+.records-remaining > summary::-webkit-details-marker {
+  display: none;
+}
+
+.nuan-topic-details > summary::after,
+.records-remaining > summary::after {
+  content: "";
+  flex: 0 0 7px;
+  width: 7px;
+  height: 7px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(45deg) translateY(-2px);
+  margin-right: 3px;
+}
+
+.nuan-topic-details[open] > summary::after,
+.records-remaining[open] > summary::after {
+  transform: rotate(225deg) translate(-2px, -1px);
+}
+
+.nuan-topic-details[open] > summary {
+  border-bottom: 1px solid #e1eee6;
+}
+
+.nuan-topic-details > summary > span {
+  margin-left: auto;
+  color: var(--care-muted);
+  font-size: 12px;
+  text-align: right;
+}
+
+.nuan-topic-details > .nuan-message {
+  margin: 12px 10px;
+}
+
+.nuan-topic-details .nuan-message-body {
+  padding: 12px;
+  border: 0;
+  border-radius: 12px;
+  box-shadow: none;
+}
+
+.nuan-topic-details > p {
+  margin: 12px 14px;
+  color: var(--care-copy);
+  font-size: 15px;
+  line-height: 1.85;
+}
+
+.report-chat-screen .chat-dock {
+  padding: 9px 12px 7px;
+}
+
+.nuan-quick-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+  margin-bottom: 8px;
+}
+
+.nuan-quick-actions button {
+  min-width: 0;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 8px 5px;
+  border: 1px solid #d5eadd;
+  border-radius: 12px;
+  background: #effaf4;
+  color: var(--care-green);
+  font-size: 13px;
+  line-height: 1.55;
+  font-weight: 500;
+}
+
+.nuan-quick-actions button:hover {
+  background: #def5e9;
+  border-color: #aad9c4;
+}
+
+.nuan-quick-actions svg {
+  width: 15px;
+  height: 15px;
+}
+
+.report-chat-screen .composer textarea,
+.report-chat-screen .composer textarea:focus {
+  height: 46px;
+  min-height: 46px;
+  font-size: 16px;
+  line-height: 22px;
+  padding: 11px 10px;
+  color: var(--care-ink);
+}
+
+.report-chat-screen .composer textarea::placeholder {
+  color: #61796d;
+  opacity: 1;
+}
+
+.report-chat-screen .composer .attach,
+.report-chat-screen .composer button {
+  width: 44px;
+  height: 44px;
+}
+
+.report-chat-screen .composer .attach {
+  color: var(--care-green);
+}
+
+.report-chat-screen .chat-dock .notice {
+  font-size: 12px;
+  color: var(--care-muted);
+  line-height: 1.6;
+  margin-top: 6px;
+}
+
+.inline-report-thread .report-prompts {
+  margin-top: 14px;
+  margin-bottom: 16px;
+}
+
+.report-prompts > p {
+  font-size: 13px;
+  color: var(--care-muted);
+}
+
+.inline-report-thread .report-prompts button {
+  font-size: 14px;
+}
+
+/* A smaller cover leaves room for the first relevant encounter. */
+.records-screen > .page {
+  padding: 12px 16px 24px;
+}
+
+.records-profile {
+  padding: 14px 16px 0;
+  border-radius: 20px;
+}
+
+.records-profile-kicker {
+  font-size: 12px;
+  margin-bottom: 12px;
+  color: var(--care-copy);
+  letter-spacing: .2px;
+}
+
+.records-profile-kicker > span {
+  font-size: 12px;
+  color: var(--care-muted);
+  background: #ffffffc2;
+}
+
+.records-profile-top {
+  width: calc(100% - 85px);
+  gap: 9px;
+}
+
+.records-avatar {
+  width: 39px;
+  height: 39px;
+}
+
+.records-screen .records-person h2 {
+  font-size: 21px;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-bottom: 4px;
+}
+
+.records-person h2 span {
+  font-size: 12px;
+  padding: 2px 5px;
+  color: var(--care-copy);
+}
+
+.records-person p {
+  font-size: 13px;
+  color: var(--care-copy);
+  gap: 2px 5px;
+  line-height: 1.6;
+}
+
+.records-profile-art {
+  width: 102px;
+  height: 107px;
+  right: 2px;
+  top: 30px;
+}
+
+.records-profile-saying {
+  font-size: 13px;
+  color: var(--care-copy);
+  margin: 12px 0;
+}
+
+.records-profile-bottom {
+  margin: 0 -16px;
+  padding: 4px 14px;
+  min-height: 50px;
+  flex-wrap: wrap;
+  gap: 0 9px;
+}
+
+.records-profile-counts {
+  gap: 12px;
+}
+
+.records-profile-counts > span {
+  gap: 4px;
+  font-size: 12px;
+  color: var(--care-copy);
+}
+
+.records-profile-counts strong {
+  font-size: 19px;
+  color: var(--care-green);
+}
+
+.records-profile-bottom button {
+  font-size: 12px;
+  color: var(--care-green);
+  padding: 0 2px;
+}
+
+.records-section-heading {
+  margin: 20px 0 12px;
+  align-items: flex-start;
+}
+
+.records-section-kicker {
+  font-size: 12px;
+  letter-spacing: 1px;
+  color: var(--care-muted);
+  margin-bottom: 3px;
+}
+
+.records-screen .records-section-heading h2 {
+  font-size: 20px;
+  margin-bottom: 4px;
+}
+
+.records-section-heading p {
+  font-size: 13px;
+  color: var(--care-muted);
+}
+
+.records-section-heading > span {
+  font-size: 12px;
+  color: var(--care-muted);
+  margin-top: 3px;
+}
+
+.records-controls {
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.records-controls > span {
+  font-size: 12px;
+  color: var(--care-muted);
+}
+
+.records-view {
+  padding: 2px;
+  border-radius: 13px;
+}
+
+.records-view button {
+  min-height: 44px;
+  padding: 0 16px;
+  font-size: 14px;
+  color: var(--care-muted);
+}
+
+.records-view button[aria-pressed=true] {
+  color: var(--care-green);
+}
+
+.records-filters {
+  gap: 7px;
+  margin: 12px 0 18px;
+}
+
+.records-filters button {
+  font-size: 13px;
+  min-height: 44px;
+  padding: 9px 12px;
+  color: var(--care-copy);
+  background: #fff;
+}
+
+.records-filters button span {
+  font-size: 12px;
+  opacity: 1;
+}
+
+.records-filters button[aria-pressed=true] {
+  background: linear-gradient(120deg, #008663, #007a5d);
+  border-color: #007d5e;
+  color: #fff;
+}
+
+.records-group {
+  margin-bottom: 23px;
+}
+
+.records-group-heading {
+  gap: 9px;
+  margin-bottom: 11px;
+}
+
+.records-screen .records-group-heading h2 {
+  gap: 5px 8px;
+  flex-wrap: wrap;
+  font-size: 17px;
+}
+
+.records-group-heading h2 small {
+  font-size: 12px;
+  color: var(--care-muted);
+}
+
+.records-group-heading p {
+  font-size: 13px;
+  color: var(--care-muted);
+  line-height: 1.6;
+}
+
+.records-group-items {
+  gap: 12px;
+}
+
+.records-encounter {
+  padding: 15px 15px 0;
+  border-radius: 18px;
+}
+
+.records-encounter[data-selected=true] {
+  border-color: #83c7ad;
+}
+
+.records-selected {
+  color: #007b5a;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.records-date {
+  color: var(--care-muted);
+  font-size: 13px;
+  line-height: 1.6;
+  letter-spacing: 0;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  margin-bottom: 3px;
+}
+
+.records-date > span:last-child {
+  color: var(--care-copy);
+  font-size: 12px;
+  padding: 3px 7px;
+}
+
+.records-title-link {
+  min-height: 44px;
+}
+
+.records-title-link h3 {
+  font-size: 18px;
+}
+
+.records-hospital {
+  color: var(--care-muted);
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.records-statuses {
+  gap: 6px 9px;
+  margin-top: 10px;
+  color: var(--care-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.records-care-status {
+  font-size: 12px;
+  color: #32694f;
+}
+
+.records-encounter[data-tone=sand] .records-care-status {
+  color: #7d632d;
+}
+
+.records-next {
+  margin-top: 12px;
+  padding: 12px 10px;
+}
+
+.records-next strong {
+  font-size: 15px;
+  color: #296b52;
+  line-height: 1.7;
+}
+
+.records-next p {
+  font-size: 13px;
+  color: var(--care-copy);
+  line-height: 1.8;
+  margin-top: 4px;
+}
+
+.records-card-bottom {
+  min-height: 53px;
+  flex-wrap: wrap;
+  gap: 0 8px;
+}
+
+.records-card-bottom > span {
+  font-size: 12px;
+  color: var(--care-muted);
+}
+
+.records-link {
+  font-size: 14px;
+  color: var(--care-green);
+  line-height: 1.6;
+}
+
+.records-note {
+  margin-top: 20px;
+  color: var(--care-muted);
+}
+
+.records-note p {
+  font-size: 13px;
+}
+
+.records-note span {
+  font-size: 12px;
+  color: var(--care-muted);
+}
+
+.records-remaining {
+  position: relative;
+  min-width: 0;
+  border-radius: 13px;
+  border: 1px solid #dcebe2;
+  background: #f6fcf8;
+}
+
+.records-remaining > summary {
+  font-size: 13px;
+}
+
+.records-remaining > .records-encounter,
+.records-remaining > .records-group-items {
+  margin: 0 8px 9px;
+}
+
+.records-remaining[open] > summary {
+  margin-bottom: 2px;
+}
+
+/* Shared encounter context keeps the same readable hierarchy across views. */
+.case-caption,
+.page > .case-caption {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  padding: 12px 14px;
+  margin-bottom: 16px;
+  border: 1px solid var(--care-border);
+  border-radius: 14px;
+  background: linear-gradient(115deg, #eafaf2, #f7fdf9);
+  color: var(--care-copy);
+  font-size: 13px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+
+.case-caption > div {
+  min-width: 0;
+  flex: 1;
+}
+
+.case-caption strong {
+  font-size: 15px;
+  color: var(--care-ink);
+}
+
+.case-caption :is(p, span, small) {
+  font-size: 13px;
+  color: var(--care-muted);
+  line-height: 1.7;
+}
+
+.case-caption button {
+  color: var(--care-green);
+  font-size: 13px;
+  padding: 7px 0;
+}
+
+.encounter-links {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0 0 16px;
+}
+
+.encounter-links > button {
+  justify-content: center;
+  gap: 4px;
+  min-width: 0;
+  padding: 10px 5px;
+  border: 1px solid var(--care-border);
+  border-radius: 12px;
+  background: #fff;
+  font-size: 14px;
+}
+
+.case-document {
+  border: 1px solid #dce9e1;
+  border-radius: 15px;
+  padding: 16px;
+  margin-bottom: 12px;
+  background: #fff;
+  color: var(--care-copy);
+}
+
+.case-document h3 {
+  color: var(--care-ink);
+  font-size: 16px;
+  margin-bottom: 8px;
+}
+
+.case-document :is(p, blockquote) {
+  font-size: 15px;
+  line-height: 1.85;
+  color: var(--care-copy);
+  overflow-wrap: anywhere;
+}
+
+.case-document blockquote {
+  margin: 10px 0;
+  padding: 10px 12px;
+  border-left: 3px solid #b3dbc7;
+  border-radius: 0 8px 8px 0;
+  background: #f3faf6;
+}
+
+.case-document :is(small, .notice) {
+  display: block;
+  color: var(--care-muted);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.records-detail-screen .records-detail-hero {
+  padding: 16px;
+}
+
+.records-detail-label,
+.records-detail-card > small,
+.records-question small,
+.records-evidence small,
+.records-detail-footnote {
+  font-size: 12px;
+  color: var(--care-muted);
+  line-height: 1.8;
+}
+
+.records-detail-hero > p,
+.records-claim-meta {
+  font-size: 13px;
+  color: var(--care-muted);
+}
+
+.records-detail-card {
+  padding: 17px;
+}
+
+.records-detail-card > p,
+.records-question p,
+.records-evidence blockquote {
+  font-size: 15px;
+  line-height: 1.85;
+  color: var(--care-copy);
+}
+
+.records-care-card > strong {
+  font-size: 16px;
+  color: #296b52;
+}
+
+.records-detail-action {
+  font-size: 14px;
+  color: var(--care-green);
+}
+
+.records-evidence summary {
+  min-height: 44px;
+  padding: 12px 0;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--care-green);
+}
+
+.records-evidence h4,
+.records-detail-money {
+  font-size: 14px;
+  color: var(--care-copy);
+}
+
+.records-claim-meta > div {
+  padding: 8px 0;
+  flex-wrap: wrap;
+}
+
+.records-claim-meta dd {
+  color: var(--care-copy);
+  overflow-wrap: anywhere;
+}
+
+#nuan-explanation .explain-body,
+.explain-evidence blockquote,
+.explain-knowledge p {
+  font-size: 15px;
+  line-height: 1.85;
+  color: var(--care-copy);
+}
+
+.explain-evidence h3,
+.explain-knowledge h3 {
+  font-size: 14px;
+  color: var(--care-copy);
+}
+
+.explain-evidence small,
+.explain-knowledge small {
+  color: var(--care-muted);
+  font-size: 12px;
+}
+
+@media (max-width: 359px) {
+  .report-chat-screen .inline-report-thread {
+    padding-left: 11px;
+    padding-right: 11px;
+  }
+
+  .nuan-welcome {
+    min-height: 118px;
+    padding: 10px 3px;
+  }
+
+  .nuan-welcome-copy {
+    max-width: calc(100% - 90px);
+  }
+
+  .nuan-welcome h2 {
+    font-size: 20px;
+    margin: 3px 0;
+  }
+
+  .nuan-welcome::before {
+    width: 86px;
+    height: 86px;
+    top: 17px;
+  }
+
+  .nuan-welcome img {
+    width: 94px;
+    height: 102px;
+    top: 9px;
+    right: -4px;
+  }
+
+  .nuan-avatar {
+    width: 24px;
+    height: 30px;
+  }
+
+  .nuan-message {
+    gap: 6px;
+  }
+
+  .nuan-message-body {
+    padding: 13px 11px;
+  }
+
+  .nuan-date-card {
+    padding: 10px 8px;
+    gap: 8px;
+  }
+
+  .nuan-calendar {
+    width: 42px;
+  }
+
+  .nuan-topic-details {
+    margin-left: 30px;
+  }
+
+  .nuan-topic-details > .nuan-message {
+    margin: 10px 6px;
+  }
+
+  .nuan-topic-details .nuan-message-body {
+    padding: 10px 7px;
+  }
+
+  .report-chat-screen .chat-dock {
+    padding-left: 10px;
+    padding-right: 10px;
+  }
+
+  .report-chat-screen .composer {
+    gap: 6px;
+  }
+
+  .nuan-quick-actions {
+    gap: 5px;
+  }
+
+  .nuan-quick-actions button {
+    gap: 3px;
+    padding-left: 3px;
+    padding-right: 3px;
+    font-size: 13px;
+  }
+
+  .records-screen > .page,
+  .records-detail-screen > .page {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+
+  .records-profile {
+    padding-left: 13px;
+    padding-right: 13px;
+  }
+
+  .records-profile-top {
+    width: calc(100% - 66px);
+    gap: 7px;
+  }
+
+  .records-avatar {
+    width: 35px;
+    height: 35px;
+  }
+
+  .records-profile-art {
+    width: 84px;
+    height: 98px;
+    right: -4px;
+    top: 34px;
+  }
+
+  .records-profile-bottom {
+    margin-left: -13px;
+    margin-right: -13px;
+    padding-left: 11px;
+    padding-right: 11px;
+  }
+
+  .records-profile-counts {
+    gap: 8px;
+  }
+
+  .records-profile-counts > span {
+    gap: 3px;
+  }
+
+  .records-profile-counts strong {
+    font-size: 18px;
+  }
+
+  .records-profile-bottom button {
+    gap: 3px;
+  }
+
+  .records-view button {
+    padding-left: 13px;
+    padding-right: 13px;
+  }
+
+  .records-filters {
+    gap: 6px;
+  }
+
+  .records-filters button {
+    padding-left: 10px;
+    padding-right: 10px;
+  }
+
+  .records-encounter,
+  .records-detail-card {
+    padding-left: 13px;
+    padding-right: 13px;
+  }
+
+  .encounter-links {
+    gap: 6px;
+  }
+
+  .encounter-links > button {
+    font-size: 13px;
+  }
+
+  .case-caption,
+  .case-document {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+
+  #nuan-explanation {
+    padding-left: 17px;
+    padding-right: 17px;
+  }
+}

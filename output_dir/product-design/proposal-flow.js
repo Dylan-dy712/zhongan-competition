@@ -8,7 +8,7 @@ const parentPage={'raw-cost':'evidence','claim-record':'evidence','raw-treatment
 let renderedPage=pageId();
 function rememberPosition(){saveDraft();positions[renderedPage]=main.scrollTop;}
 function trail(){return history.state?.navKey===navKey ? history.state.trail||[] : [];}
-function navigationState(id,parents){return {navKey,page:id,trail:parents};}
+function navigationState(id,parents){return {navKey,page:id,trail:parents,encounterId:careContext.activeId};}
 go=function(id,options={}){
  if(id===pageId())return;
  rememberPosition();
@@ -33,7 +33,7 @@ function intake(){return `<img class="onboard-art materials-art" src="assets/onb
 chat=function(){return `<div class="chat-context"><span>${imported?'本次就医 · 看病资料':'还没有使用你的理赔资料'}</span><button data-go="${imported?'materials':'consent'}">${imported?'查看资料':'使用已有资料'}</button></div><div class="chat-thread" aria-label="聊天记录"><div class="chat-intro"><img src="assets/home-chat.webp?img=20261002c" alt=""><div><h2>有不明白的，慢慢问</h2><small>${imported?'可以从你最在意的一件事开始。':'先了解资料怎么使用，也可以补充资料。'}</small></div></div><div class="bubble">${imported?'你想先了解看病经过、检查结果，还是费用？资料尚未读取的部分，需要补充后再看。':'我是暖暖。你可以在下方添加看病资料，或先看看已有理赔资料怎么使用。'}</div>${messages.map(m=>`<div class="bubble ${m.me?'me':''}">${!m.me?'<small>问答服务暂不可用</small><br>':''}${escape(m.text)}${m.to?btn(m.label,m.to,'link'):''}</div>`).join('')}</div><div class="chat-dock">${files.length?`<button class="home-material-link" data-go="materials">已选 ${files.length} 份补充资料 · 尚未分析 ${icon('arrow',14)}</button>`:''}<div class="suggestions">${(imported?['费用总额就是自付吗？','复诊要准备什么？']:['我该准备哪些资料？']).map(q=>`<button data-question="${q}">${q}</button>`).join('')}</div><form class="composer" id="chat-form"><button class="attach" type="button" data-action="upload" aria-label="上传看病资料">＋</button><textarea id="question" aria-label="想问暖暖的问题" placeholder="有哪里没看懂，问问暖暖" rows="1">${escape(draft)}</textarea><button type="submit" aria-label="发送">${icon('send',20)}</button></form><p class="notice">问答服务暂不可用 · 所选文件仅保存在当前页面</p></div>`;};
 render=function(){
  const id=pageId(); main.classList.toggle('expense-reference',id==='evidence'); main.classList.toggle('is-chat',id==='chat');main.classList.toggle('document-page',['discharge','evidence','test','summary','raw-record','raw-test','raw-treatment','raw-other','raw-cost','claim-record','guide'].includes(id)); main.classList.toggle('onboarding',['welcome','consent','intake'].includes(id));
- details.materials[1]=originalMaterials+`<section class="card"><h2>我补充的资料</h2>${files.length?fileList():'<p>后来拿到的病历、检查报告，也可以放在这里。</p>'}${uploadButton()}<p class="notice">当前仅本地预览，未上传或分析。</p></section>`;
+ details.materials[1]=typeof buildCaseMaterials==='function'?buildCaseMaterials():originalMaterials+`<section class="card"><h2>我补充的资料</h2>${files.length?fileList():'<p>后来拿到的病历、检查报告，也可以放在这里。</p>'}${uploadButton()}<p class="notice">当前仅本地预览，未上传或分析。</p></section>`;
  originalRender();
  if(id==='chat'){main.innerHTML=header('问暖暖')+chat();document.querySelector('.chat-thread').scrollTop=chatScroll;}
  const screens={welcome:['暖愈智护',welcome],consent:['资料怎么使用',consentPage],intake:['这次看病的资料',intake]};

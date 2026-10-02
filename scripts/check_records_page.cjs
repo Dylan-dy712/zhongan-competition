@@ -28,6 +28,7 @@ context.history = {
   back() { if(historyStack.length>1) historyStack.pop(); const entry=historyStack.at(-1); this.state=entry.state; context.location.hash=entry.hash; },
 };
 const evaluate = code => vm.runInContext(code, context);
+evaluate(fs.readFileSync(path.join(root,'encounter-data.js'),'utf8'));
 evaluate(fs.readFileSync(path.join(root,'proposal.js'),'utf8'));
 // Exercise the actual navigation implementation without unrelated upload/DOM setup.
 evaluate('const parentPage={}; function saveDraft(){}; const uploadSheet={open:false};');
@@ -54,7 +55,10 @@ assert.doesNotMatch(html(),/1,200\.00|10 月 12 日|DEMO-001|DEMO-003/);
 assert.match(html(),/data-go="encounter-pneumonia-followup"/);
 evaluate("go('encounter-pneumonia-followup')");
 assert.match(html(),/DEMO-003/);
-assert.doesNotMatch(html(),/DEMO-002|data-go="recovery"|data-go="chat"/);
+assert.doesNotMatch(html(),/DEMO-002|data-go="recovery"/);
+assert.match(html(),/data-go="chat"/);
+assert.match(html(),/data-go="evidence"/);
+assert.match(html(),/data-go="materials"/);
 evaluate('back(); render();');
 assert.match(html(),/DEMO-002/);
 evaluate('back(); render();');
@@ -71,7 +75,8 @@ click({recordsFilter:'fracture'});
 assert.equal(count('class="records-encounter"'),1);
 evaluate("go('encounter-fracture-visit')");
 assert.match(html(),/DEMO-001/);
-assert.doesNotMatch(html(),/1,200\.00|data-go="recovery"|data-go="chat"/);
+assert.doesNotMatch(html(),/1,200\.00|data-go="recovery"/);
+assert.match(html(),/data-go="chat"/);
 evaluate("go('encounter-current')");
 assert.match(html(),/1,200\.00/);
 assert.match(html(),/data-go="recovery"/);
