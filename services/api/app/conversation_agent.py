@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from .conversation_repository import require_conversation, search_history
 from .contracts.core import DocumentVersionRef
 from .llm_extractor import OpenAiCompatibleExtractor
-from .repository import AccessDenied, create_analysis_run, get_analysis_run, get_evidence
+from .repository import AccessDenied, create_analysis_run, get_analysis_run, get_evidence, get_report
 
 
 PROMPT_VERSION = 'conversation-agent-v1'
@@ -141,10 +141,13 @@ class CareTools:
                 ORDER BY report_version DESC LIMIT 1''', (target, args.version, args.version)).fetchone()
             if not report:
                 return {'status': 'not_generated', 'available_versions': versions}
-            if report['status'] != 'published':
-                return {'status': report['status'], 'report_version': report['report_version'],
+            visible = get_report(self.conn,actor_id=self.actor_id,case_id=target,
+                                 version=report['report_version'],patient_view=True)
+            if visible is None:
+                return {'status': 'not_released', 'report_version': report['report_version'],
                         'available_versions': versions,
-                        'notice': '报告尚未发布，可查看原始材料，但不能引用待审结论。'}
+                        'notice': '报告当前不可交付，可查看获授权原始材料，但不能引用未放行结论。'}
+            report = visible.model_dump(mode='json')
             for section in report['sections']:
                 section['claims'] = [c for c in section['claims'] if c['review_status'] in ('approved','corrected','not_required')]
                 for claim in section['claims']:

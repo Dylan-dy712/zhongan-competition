@@ -18,4 +18,16 @@
 
 `python -m scripts.check_conversation_integration`通过真实Worker验证报告待审任务创建和新材料取消旧任务；模型使用明确测试替身，材料为合成输入。
 
-当前没有报告发布API或触达outbox。ready仅表示报告内容审核阶段完成；未决疑点、事实冲突、当前输入版本、知识获准状态、授权与记忆来源、发布/撤回并发仍须在后续原子发布门槛验证。审核人不能用本接口批准知识包或跳过这些门槛。本轮不代表官方KR指标或真实模型质量已通过。
+ready仅表示报告内容审核阶段完成；审核人不能用报告审批批准知识包或跳过发布门槛。本轮不代表官方KR指标或真实模型质量已通过。
+
+## 原子发布与待触达记录
+
+新增`POST /v1/cases/{case_id}/reports/{version}/publish`，必须带Idempotency-Key，正文为`{"expected_version": 版本号}`。只有有案件范围、有效用途的medical_reviewer可发布。发布记录、published状态和APP care_outbox记录在同一事务写入；旧published版改为superseded。outbox目前仅pending，不表示已经通知患者。
+
+发布核对当前最高报告版本、解析/抽取完成、五类字段输出、当前全部文档版本和source_hash、输入哈希、未决审核和临床驳回、事实冲突、行动所依赖的疑似/否定/既往/unknown事实、报告审核记录、正文与行动来源、安全策略版本、知识版本/病例适用性/获准状态、授权ID/版本/用途及实时期限。尚无可验证记忆来源时，有memory_refs的报告保持未发布；不回退到模型自称可信。
+
+患者、客服/评测角色、助手与聊天工具读取必须经过发布记录和实时授权版本检查；仅medical_reviewer可在案件范围读取审核用草稿。撤回或重新授权为更高版本时，旧发布不能复活；历史superseded报告在其发布授权仍有效时可读。读取时也核对当前知识与安全策略，未完成claim不返回。
+
+`python -m scripts.check_release_integration`运行真实HTTP/SQL，覆盖上述主要拒绝条件、获授权发布、幂等重放/冲突、读取隔离、未获准知识不能被报告审批越过，以及失败不留下半发布状态。输入是明确合成SQL夹具，不能证明生成报告的医学质量或KR指标。
+
+PGlite协议适配器在数据库错误后存在回滚响应问题，因此该环境只验证应用异常引发的实际事务回滚，输出`sql_error_rollback=not_tested_pglite_protocol_limit`。测试脚本在原生PostgreSQL上保留触达表触发器异常的数据库回滚用例。发布/撤回并发当前输出`concurrency=not_tested`，仍须原生数据库验收。APP待触达消费、送前复核、用户确认/反馈、外部渠道均未完成；不能把outbox条数当作触达成功率。

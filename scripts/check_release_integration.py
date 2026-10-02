@@ -1,0 +1,201 @@
+"""Real HTTP/SQL release gates in a disposable schema. Synthetic fixtures only."""
+
+import json
+import os
+from copy import deepcopy
+from pathlib import Path
+from uuid import uuid4
+from unittest.mock import MagicMock, patch
+
+from fastapi.testclient import TestClient
+from psycopg import sql
+import psycopg
+
+from services.api.app import main as api
+from services.api.app.release_repository import publish_report
+from services.api.app.fact_extractor import extract_facts
+from services.api.app.report_builder import SECTION_TYPES
+from services.api.app.repository import connect, request_digest, token_digest
+from services.api.app.knowledge_assembler import KnowledgeAssembler
+from services.api.app.contracts.knowledge import DiseaseCode
+
+
+def main():
+    dsn=os.environ['ZHONGAN_DATABASE_URL']
+    schema='release_test_'+uuid4().hex
+    admin=connect(dsn)
+    admin.autocommit=True
+    admin.execute(sql.SQL('CREATE SCHEMA {}').format(sql.Identifier(schema)))
+    conn=connect(dsn)
+    conn.prepare_threshold=None
+    conn.execute(sql.SQL('SET search_path TO {}').format(sql.Identifier(schema)))
+    conn.commit()
+    def database():
+        yield conn
+    api.app.dependency_overrides[api.database]=database
+    client=TestClient(api.app)
+    checks=[]
+    def check(value,name):
+        if not value:
+            raise AssertionError(name)
+        checks.append(name)
+    try:
+        for migration in sorted(Path('services/api/sql').glob('*.sql')):
+            conn.execute(migration.read_text(encoding='utf-8'))
+        reviewer,patient,subject,consent,case,run,document,evidence,report=[uuid4() for _ in range(9)]
+        reviewer_token,patient_token=uuid4().hex,uuid4().hex
+        conn.execute("INSERT INTO actors(actor_id,token_sha256,role) VALUES (%s,%s,'medical_reviewer'),(%s,%s,'patient')",
+                     (reviewer,token_digest(reviewer_token),patient,token_digest(patient_token)))
+        conn.execute('INSERT INTO actor_subject_access VALUES (%s,%s,true,true),(%s,%s,true,true)',
+                     (reviewer,subject,patient,subject))
+        conn.execute("INSERT INTO consents(consent_id,subject_id,notice_version,version) VALUES (%s,%s,'synthetic',1)",(consent,subject))
+        conn.execute("INSERT INTO consent_purposes(consent_id,purpose,status,granted_at) VALUES (%s,'case_guidance','active',now())",(consent,))
+        conn.execute("""INSERT INTO cases(case_id,subject_id,consent_id,created_by,source_ref,data_origin,idempotency_key,request_hash)
+            VALUES (%s,%s,%s,%s,'release-synthetic','synthetic','fixture',%s)""",(case,subject,consent,patient,'a'*64))
+        conn.execute("""INSERT INTO documents(document_id,case_id,media_type,byte_size,source_hash,source_ref,storage_ref,status,policy_version)
+            VALUES (%s,%s,'text/plain',1,%s,'synthetic','synthetic-no-file','parsed','synthetic')""",(document,case,'b'*64))
+        snapshot=[{'document_id':str(document),'document_version':1,'source_hash':'b'*64}]
+        digest=request_digest({'documents':snapshot,'pipeline_version':'synthetic-release-test'})
+        conn.execute("""INSERT INTO analysis_runs(run_id,case_id,input_hash,schema_version,pipeline_version,document_versions,
+            status,current_stage,stage_results,execution_mode) VALUES (%s,%s,%s,'0.1.0','synthetic-release-test',%s::jsonb,
+            'completed','validate','{"parse":{"status":"completed"},"extract":{"status":"completed"}}','mock')""",
+            (run,case,digest,json.dumps(snapshot)))
+        conn.execute("""INSERT INTO evidence(evidence_id,run_id,case_id,document_id,document_version,page_index,
+            text_start,text_end,text_value,extraction_method,source_hash,parser_version)
+            VALUES (%s,%s,%s,%s,1,0,0,12,'医疗总费用：120元','synthetic',%s,'synthetic')""",
+            (evidence,run,case,document,'b'*64))
+        for fact in extract_facts([{'evidence_id':evidence,'text':'医疗总费用：120元'}]):
+            conn.execute("""INSERT INTO extracted_facts(fact_id,run_id,case_id,fact_type,value,raw_value,status,assertion,
+                evidence_ids,confidence_score,confidence_method,unit,alternatives,missing_reason,extractor_version)
+                VALUES (%s,%s,%s,%s,%s::jsonb,%s,%s,%s,%s::jsonb,%s,%s,%s,%s::jsonb,%s,%s)""",
+                (fact['fact_id'],run,case,fact['fact_type'],json.dumps(fact['value']),fact['raw_value'],fact['status'],
+                 fact['assertion'],json.dumps(fact['evidence_ids']),fact['confidence_score'],fact['confidence_method'],
+                 fact['unit'],json.dumps(fact['alternatives']),fact['missing_reason'],fact['extractor_version']))
+        sections=[{'section_type':kind,'claims':[{'claim_id':str(uuid4()),'text':'医疗总费用：120元',
+            'claim_type':'case_fact','evidence_refs':[str(evidence)],'review_status':'not_required'}]} for kind in SECTION_TYPES]
+        conn.execute("""INSERT INTO reports(report_id,case_id,run_id,report_version,status,sections,input_hash,model_id,
+            prompt_version,knowledge_version,policy_version,consent_refs) VALUES (%s,%s,%s,1,'ready',%s::jsonb,%s,
+            'synthetic','synthetic','knowledge:none','report-safety-v2',%s::jsonb)""",(report,case,run,json.dumps(sections),
+            digest,json.dumps([{'consent_id':str(consent),'version':1,'purpose':'case_guidance'}])))
+        conn.commit()
+        conn.autocommit=True
+        headers={'Authorization':f'Bearer {reviewer_token}','Idempotency-Key':'publish-one'}
+        patient_headers={'Authorization':f'Bearer {patient_token}','Idempotency-Key':'patient-attempt'}
+        endpoint=f'/v1/cases/{case}/reports/1/publish'
+        def publish():
+            return client.post(endpoint,headers=headers,json={'expected_version':1})
+        def denied(expected,name):
+            response=publish()
+            check(response.status_code==expected,name+f' ({response.status_code})')
+            check(conn.execute('SELECT count(*) AS n FROM report_releases').fetchone()['n']==0 and
+                  conn.execute('SELECT count(*) AS n FROM care_outbox').fetchone()['n']==0,name+' writes no release or outbox')
+        check(client.post(endpoint,headers=patient_headers,json={'expected_version':1}).status_code==403,'patient cannot publish')
+        check(client.get(f'/v1/cases/{case}/reports/1',headers=patient_headers).status_code==404,'ready is not patient-visible')
+        conn.execute("UPDATE consent_purposes SET status='revoked' WHERE consent_id=%s",(consent,))
+        denied(404,'revoked purpose blocks release')
+        conn.execute("UPDATE consent_purposes SET status='active' WHERE consent_id=%s",(consent,))
+        conn.execute('UPDATE consents SET version=2 WHERE consent_id=%s',(consent,))
+        denied(422,'stale authorization snapshot blocks release')
+        conn.execute('UPDATE consents SET version=1 WHERE consent_id=%s',(consent,))
+        conn.execute("UPDATE reports SET memory_refs='[\"unverified-memory\"]' WHERE report_id=%s",(report,))
+        denied(422,'unverified memory blocks release')
+        conn.execute("UPDATE reports SET memory_refs='[]',knowledge_version='stale-build' WHERE report_id=%s",(report,))
+        denied(422,'changed knowledge version blocks release')
+        conn.execute("UPDATE reports SET knowledge_version='knowledge:none' WHERE report_id=%s",(report,))
+        assembler=KnowledgeAssembler()
+        entry=next(e for e in assembler.select(DiseaseCode.ty,patient_visible=False).allowed if e.status.value!='approved')
+        unsafe_knowledge=deepcopy(sections)
+        unsafe_knowledge[0]['claims'][0].update(claim_type='professional_explanation',review_status='approved',
+                                              knowledge_refs=[entry.entry_id])
+        conn.execute("UPDATE reports SET sections=%s::jsonb,knowledge_version=%s WHERE report_id=%s",
+                     (json.dumps(unsafe_knowledge),assembler.knowledge_version,report))
+        knowledge_task=uuid4()
+        conn.execute("""INSERT INTO review_tasks(review_id,case_id,run_id,target_type,target_id,target_version,status,reason)
+            VALUES (%s,%s,%s,'report',%s,1,'decided','synthetic knowledge gate fixture')""",(knowledge_task,case,run,report))
+        conn.execute("""INSERT INTO review_decisions(decision_id,review_id,target_type,target_id,target_version,decision,reason,reviewer_id)
+            VALUES (%s,%s,'report',%s,1,'approve','report approval cannot approve knowledge',%s)""",(uuid4(),knowledge_task,report,reviewer))
+        denied(422,'report approval cannot release unapproved knowledge')
+        conn.execute('DELETE FROM review_decisions WHERE review_id=%s',(knowledge_task,))
+        conn.execute('DELETE FROM review_tasks WHERE review_id=%s',(knowledge_task,))
+        conn.execute("UPDATE reports SET sections=%s::jsonb,knowledge_version='knowledge:none' WHERE report_id=%s",
+                     (json.dumps(sections),report))
+        conn.execute("UPDATE analysis_runs SET status='failed' WHERE run_id=%s",(run,))
+        denied(422,'failed analysis blocks release')
+        conn.execute("UPDATE analysis_runs SET status='completed' WHERE run_id=%s",(run,))
+        conn.execute('UPDATE documents SET document_version=2 WHERE document_id=%s',(document,))
+        denied(422,'changed document version blocks release')
+        conn.execute('UPDATE documents SET document_version=1 WHERE document_id=%s',(document,))
+        conn.execute("""UPDATE extracted_facts SET status='conflict',value=NULL,evidence_ids='[]',
+            alternatives=%s::jsonb WHERE run_id=%s AND fact_type='total_cost'""",(json.dumps([
+                {'value':{'amount_minor':12000,'currency':'CNY'},'evidence_ids':[str(evidence)]},
+                {'value':{'amount_minor':13000,'currency':'CNY'},'evidence_ids':[str(evidence)]}]),run))
+        denied(422,'unresolved fact conflict blocks release')
+        conn.execute("""UPDATE extracted_facts SET status='observed',value=%s::jsonb,evidence_ids=%s::jsonb,
+            alternatives='[]' WHERE run_id=%s AND fact_type='total_cost'""",(json.dumps({'amount_minor':12000,'currency':'CNY'}),json.dumps([str(evidence)]),run))
+        task=uuid4()
+        conn.execute("""INSERT INTO review_tasks(review_id,case_id,run_id,target_type,target_id,target_version,status,reason)
+            VALUES (%s,%s,%s,'report',%s,1,'pending','synthetic review')""",(task,case,run,report))
+        denied(422,'pending review blocks release')
+        conn.execute("UPDATE review_tasks SET status='cancelled' WHERE review_id=%s",(task,))
+        engine=conn.execute('SELECT version() AS version').fetchone()['version']
+        sql_rollback='not_tested_pglite_protocol_limit'
+        if 'wasm32' not in engine:
+            conn.execute("""CREATE FUNCTION release_fault() RETURNS trigger LANGUAGE plpgsql AS
+                $$ BEGIN RAISE EXCEPTION 'synthetic outbox fault'; END $$""")
+            conn.execute('CREATE TRIGGER outbox_fault BEFORE INSERT ON care_outbox FOR EACH ROW EXECUTE FUNCTION release_fault()')
+            try:
+                publish()
+                raise AssertionError('outbox fault did not abort release')
+            except psycopg.Error:
+                pass
+            check(conn.execute('SELECT count(*) AS n FROM report_releases').fetchone()['n']==0 and
+                  conn.execute('SELECT status FROM reports WHERE report_id=%s',(report,)).fetchone()['status']=='ready',
+                  'outbox SQL failure rolls back release record and published status')
+            conn.execute('DROP TRIGGER outbox_fault ON care_outbox')
+            sql_rollback='passed'
+        else:
+            proxy=MagicMock(wraps=conn)
+            def fault(query, params=None):
+                if 'INSERT INTO care_outbox' in query:
+                    raise RuntimeError('synthetic application failure before outbox insert')
+                return conn.execute(query,params)
+            proxy.execute.side_effect=fault
+            with patch.object(api,'publish_report',side_effect=lambda _conn,**kw: publish_report(proxy,**kw)):
+                try:
+                    publish()
+                    raise AssertionError('application fault did not abort release')
+                except RuntimeError:
+                    pass
+            check(conn.execute('SELECT count(*) AS n FROM report_releases').fetchone()['n']==0 and
+                  conn.execute('SELECT status FROM reports WHERE report_id=%s',(report,)).fetchone()['status']=='ready',
+                  'application failure before outbox insert rolls back release record and published status')
+        released=publish()
+        check(released.status_code==200,'validated report publishes through actual API')
+        check(conn.execute('SELECT count(*) AS n FROM report_releases').fetchone()['n']==1 and
+              conn.execute('SELECT count(*) AS n FROM care_outbox').fetchone()['n']==1,'release and pending app outbox persist together')
+        check(client.get(f'/v1/cases/{case}/reports/1',headers=patient_headers).status_code==200,'published report visible to authorized patient')
+        check(publish().json()==released.json(),'same publish request replays same release')
+        check(client.post(endpoint,headers=headers,json={'expected_version':2}).status_code==409,'changed publish payload conflicts')
+        conn.execute('UPDATE consents SET subject_id=%s WHERE consent_id=%s',(uuid4(),consent))
+        check(client.get(f'/v1/cases/{case}/reports/1',headers=headers).status_code==404,
+              'medical reviewer cannot read report using another subject consent')
+        conn.execute('UPDATE consents SET subject_id=%s WHERE consent_id=%s',(subject,consent))
+        conn.execute('UPDATE consents SET version=2 WHERE consent_id=%s',(consent,))
+        check(client.get(f'/v1/cases/{case}/reports/1',headers=patient_headers).status_code==404,'new consent version cannot revive prior release')
+        check(publish().status_code==404,'stale release replay is denied after consent version change')
+        conn.execute('UPDATE consents SET version=1 WHERE consent_id=%s',(consent,))
+        conn.execute("UPDATE consent_purposes SET status='revoked' WHERE consent_id=%s",(consent,))
+        check(client.get(f'/v1/cases/{case}/reports/1',headers=patient_headers).status_code==404 and
+              publish().status_code==404,'revocation blocks published read and release replay')
+        print(json.dumps({'status':'passed','checks':checks,'count':len(checks),
+                          'mode':'synthetic-fixtures/real-HTTP/SQL','engine':engine,'sql_error_rollback':sql_rollback,'concurrency':'not_tested'},ensure_ascii=False))
+    finally:
+        api.app.dependency_overrides.pop(api.database,None)
+        conn.rollback()
+        conn.close()
+        admin.execute(sql.SQL('DROP SCHEMA {} CASCADE').format(sql.Identifier(schema)))
+        admin.close()
+
+
+if __name__=='__main__':
+    main()

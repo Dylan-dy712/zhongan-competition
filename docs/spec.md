@@ -431,6 +431,7 @@ flowchart TD
 | GET /v1/evidence/{id} | 无 | Evidence、受控原页/文本引用 | 同案件证据权限 |
 | GET /v1/cases/{id}/insights | run_id | Insight[]；患者端仅返回可见状态的内容 | 按角色过滤 |
 | GET /v1/cases/{id}/reports/{version} | 无 | Report；患者只可读允许交付版本 | 按角色与发布状态 |
+| POST /v1/cases/{id}/reports/{version}/publish | expected_version；Idempotency-Key | 发布记录与APP待触达ID，delivery_status=pending | 指定审核权限、授权及发布门槛 |
 | GET /v1/cases/{id}/recommendations | run_id | 推荐、拒排原因、引用快照及策略版本 | 案件及推荐用途权限 |
 | GET /v1/reviews | status、limit、cursor | 获授权复核队列 | 审核角色及案件范围 |
 | POST /v1/reviews/{id}/decision | expected_version、decision、reason、corrections | 新决策版本；必要时重建报告 | 指定审核权限 |

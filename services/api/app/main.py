@@ -29,6 +29,7 @@ from .repository import (
 from .review_repository import (
     ReviewAccessDenied, ReviewNotFound, StaleReview, decide_review, list_reviews,
 )
+from .release_repository import publish_report
 from .care_assistant import AssistantAnswer, answer_question
 from . import conversation_repository as chats
 from .conversation_agent import CareTools, run_agent
@@ -80,6 +81,10 @@ class DecideReview(Contract):
     decision: Literal["approve", "correct", "reject"]
     reason: str = Field(min_length=1, max_length=2000)
     corrections: list[ReviewCorrection] = Field(default_factory=list, max_length=20)
+
+
+class PublishReport(Contract):
+    expected_version: int = Field(ge=1)
 
 
 class AskAssistant(Contract):
@@ -387,10 +392,29 @@ def read_report(case_id: UUID, version: Annotated[int, ApiPath(ge=1)],
     return report
 
 
+@app.post('/v1/cases/{case_id}/reports/{version}/publish')
+def post_report_release(case_id: UUID, version: Annotated[int, ApiPath(ge=1)], body: PublishReport,
+                        idempotency_key: Annotated[str, Header(min_length=1,max_length=200)],
+                        actor_id: UUID = Depends(current_actor), conn=Depends(database)):
+    try:
+        return publish_report(conn,actor_id=actor_id,case_id=case_id,version=version,
+                              expected_version=body.expected_version,idempotency_key=idempotency_key)
+    except ReviewNotFound:
+        raise HTTPException(404,'Authorized report not found') from None
+    except ReviewAccessDenied:
+        raise HTTPException(403,'Medical reviewer role required') from None
+    except StaleReview:
+        raise HTTPException(409,'Report version or request conflicts') from None
+    except ValueError as exc:
+        raise HTTPException(422,str(exc)) from None
+    except OSError:
+        raise HTTPException(503,'Report knowledge validation unavailable') from None
+
+
 @app.post("/v1/cases/{case_id}/assistant/messages", response_model=AssistantAnswer)
 def post_assistant_message(body: AskAssistant, case_id: UUID,
                            actor_id: UUID = Depends(current_actor), conn=Depends(database)) -> AssistantAnswer:
-    report = get_report(conn, actor_id=actor_id, case_id=case_id, version=body.report_version)
+    report = get_report(conn, actor_id=actor_id, case_id=case_id, version=body.report_version, patient_view=True)
     if report is None:
         raise HTTPException(status_code=404, detail="Published report not found")
     try:
