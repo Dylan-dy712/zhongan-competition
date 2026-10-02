@@ -17,6 +17,10 @@ python -m uvicorn services.api.app.main:app --reload
 python -m unittest discover -s tests -v
 ```
 
+## 内部评测
+
+内部KR1/KR2及KR3汇总可使用 `python -m scripts.eval_cli`。当前API导出、冻结manifest、不确定标注剔除、失败样本保留与独立真人注册口径见 [内部评测协议](docs/evaluation/protocol.md)。AI辅助标注和预评分不能替代官方评测或真人盲评。
+
 ## 持续对话与材料分析
 
 患者端位于 `apps/web`，使用 React、TypeScript 与 Vite。新的入口是持续聊天：连接访问令牌后可直接开始，不需要预先输入报告版本。支持聊天内上传 PDF/图片/UTF-8 文本、恢复历史会话、补充材料和查看证据；可另开对话接续同次就医，也可开始新的就医案件。
