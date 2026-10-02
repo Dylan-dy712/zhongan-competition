@@ -176,6 +176,88 @@ def main():
         check(client.get(f'/v1/cases/{case}/reports/1',headers=patient_headers).status_code==200,'published report visible to authorized patient')
         check(publish().json()==released.json(),'same publish request replays same release')
         check(client.post(endpoint,headers=headers,json={'expected_version':2}).status_code==409,'changed publish payload conflicts')
+        feed=client.get(f'/v1/cases/{case}/deliveries',headers=patient_headers)
+        if feed.status_code!=200:
+            raise AssertionError(f'APP feed HTTP {feed.status_code}: {feed.text}')
+        check(len(feed.json())==1 and feed.json()[0]['receipt_state']=='pending',
+              'APP pull feed returns eligible unread reminder')
+        check('120' not in feed.json()[0]['message'] and '费用' not in feed.json()[0]['message'],
+              'APP reminder contains no diagnosis or costs')
+        event_id=feed.json()[0]['outbox_id']
+        receipt_headers={**patient_headers,'Idempotency-Key':'presented-one'}
+        receipt_url=f'/v1/deliveries/{event_id}/receipts'
+        check(client.post(receipt_url,headers=receipt_headers,json={'state':'read','expected_version':0}).status_code==409,
+              'receipt cannot skip presentation state')
+        presented=client.post(receipt_url,headers=receipt_headers,json={'state':'presented','expected_version':0})
+        check(presented.status_code==200 and presented.json()['receipt_version']==1,'APP presentation receipt is recorded')
+        check(client.post(receipt_url,headers=receipt_headers,json={'state':'presented','expected_version':0}).json()==presented.json(),
+              'presentation receipt replays without duplicate')
+        check(client.post(receipt_url,headers=receipt_headers,json={'state':'read','expected_version':1}).status_code==409,
+              'receipt idempotency key cannot change payload')
+        read_headers={**patient_headers,'Idempotency-Key':'read-one'}
+        read=client.post(receipt_url,headers=read_headers,json={'state':'read','expected_version':1})
+        check(read.status_code==200 and conn.execute('SELECT status FROM care_outbox').fetchone()['status']=='acknowledged',
+              'explicit read receipt acknowledges APP outbox')
+        check(client.get(f'/v1/cases/{case}/deliveries',headers=patient_headers).json()[0]['receipt_state']=='read',
+              'feed returns actual reader receipt state')
+        feedback_body={'report_id':str(report),'report_version':1,'type':'inaccurate','text':'请帮我核对这段解释。'}
+        feedback_headers={**patient_headers,'Idempotency-Key':'feedback-one'}
+        check(client.post('/v1/feedback',headers=feedback_headers,json={**feedback_body,'action_id':str(uuid4())}).status_code==404,
+              'feedback cannot refer to an unrelated action')
+        feedback=client.post('/v1/feedback',headers=feedback_headers,json=feedback_body)
+        check(feedback.status_code==201 and feedback.json()['triage_status']=='pending',
+              'medical concern feedback enters actual pending triage')
+        check(client.post('/v1/feedback',headers=feedback_headers,json=feedback_body).json()==feedback.json(),
+              'feedback request replays same record')
+        check(client.post('/v1/feedback',headers=feedback_headers,json={**feedback_body,'type':'helpful'}).status_code==409,
+              'feedback idempotency key cannot change payload')
+        triage=client.get('/v1/feedback/triage',headers=headers)
+        check(triage.status_code==200 and len(triage.json())==1,'authorized reviewer sees pending feedback')
+        check(client.get('/v1/feedback/triage',headers=patient_headers).status_code==403,'patient cannot read staff triage queue')
+        outsider,proxy_patient,support=[uuid4() for _ in range(3)]
+        outsider_token,proxy_token,support_token=[uuid4().hex for _ in range(3)]
+        conn.execute("""INSERT INTO actors(actor_id,token_sha256,role) VALUES
+            (%s,%s,'patient'),(%s,%s,'patient'),(%s,%s,'customer_service')""",
+            (outsider,token_digest(outsider_token),proxy_patient,token_digest(proxy_token),support,token_digest(support_token)))
+        outsider_headers={'Authorization':f'Bearer {outsider_token}','Idempotency-Key':'outsider'}
+        counts=conn.execute('SELECT (SELECT count(*) FROM care_feedback) AS feedback,(SELECT count(*) FROM delivery_receipts) AS receipts').fetchone()
+        check(client.get(f'/v1/cases/{case}/deliveries',headers=outsider_headers).status_code==404 and
+              client.post(receipt_url,headers=outsider_headers,json={'state':'presented','expected_version':0}).status_code==404 and
+              client.post('/v1/feedback',headers=outsider_headers,json=feedback_body).status_code==404,
+              'unscoped patient cannot list reminders or submit receipts and feedback')
+        check(conn.execute('SELECT (SELECT count(*) FROM care_feedback) AS feedback,(SELECT count(*) FROM delivery_receipts) AS receipts').fetchone()==counts,
+              'unscoped patient writes no receipts or feedback')
+        conn.execute('INSERT INTO actor_subject_access VALUES (%s,%s,false,true),(%s,%s,false,true)',
+                     (proxy_patient,subject,support,subject))
+        proxy_headers={'Authorization':f'Bearer {proxy_token}','Idempotency-Key':'proxy-presented'}
+        proxy_feed=client.get(f'/v1/cases/{case}/deliveries',headers=proxy_headers).json()
+        check(proxy_feed[0]['receipt_state']=='pending' and proxy_feed[0]['receipt_version']==0,
+              'another authorized reader does not inherit first reader receipt')
+        check(client.post(receipt_url,headers=proxy_headers,json={'state':'presented','expected_version':0}).status_code==200 and
+              client.get(f'/v1/cases/{case}/deliveries',headers=patient_headers).json()[0]['receipt_state']=='read',
+              'receipt versions are independent for each authorized reader')
+        support_headers={'Authorization':f'Bearer {support_token}'}
+        check(client.get('/v1/feedback/triage',headers=support_headers).json()==[],
+              'customer service cannot read medical inaccuracy feedback')
+        help_response=client.post('/v1/feedback',headers={**patient_headers,'Idempotency-Key':'needs-help'},
+                                 json={**feedback_body,'type':'needs_help'})
+        support_queue=client.get('/v1/feedback/triage',headers=support_headers).json()
+        check(help_response.status_code==201 and len(support_queue)==1 and support_queue[0]['type']=='needs_help',
+              'scoped customer service sees only help requests')
+        conn.execute('UPDATE actor_subject_access SET can_read_case=false WHERE actor_id=%s',(support,))
+        check(client.get('/v1/feedback/triage',headers=support_headers).json()==[],
+              'staff scope removal hides triage records')
+        newer=uuid4()
+        conn.execute("""INSERT INTO reports(report_id,case_id,run_id,report_version,status,sections,input_hash,model_id,
+            prompt_version,knowledge_version,policy_version,consent_refs)
+            SELECT %s,case_id,run_id,2,'pending_review',sections,input_hash,model_id,prompt_version,knowledge_version,
+                policy_version,consent_refs FROM reports WHERE report_id=%s""",(newer,report))
+        check(client.get(f'/v1/cases/{case}/deliveries',headers=patient_headers).json()==[] and
+              client.post(receipt_url,headers=read_headers,json={'state':'read','expected_version':1}).status_code==404,
+              'a newer pending report hides old reminders and prevents old receipt replay')
+        check(client.post('/v1/feedback',headers=feedback_headers,json=feedback_body).json()==feedback.json(),
+              'feedback still refers to the explicitly selected accessible historical version')
+        conn.execute('DELETE FROM reports WHERE report_id=%s',(newer,))
         conn.execute('UPDATE consents SET subject_id=%s WHERE consent_id=%s',(uuid4(),consent))
         check(client.get(f'/v1/cases/{case}/reports/1',headers=headers).status_code==404,
               'medical reviewer cannot read report using another subject consent')
@@ -183,10 +265,19 @@ def main():
         conn.execute('UPDATE consents SET version=2 WHERE consent_id=%s',(consent,))
         check(client.get(f'/v1/cases/{case}/reports/1',headers=patient_headers).status_code==404,'new consent version cannot revive prior release')
         check(publish().status_code==404,'stale release replay is denied after consent version change')
+        check(client.get(f'/v1/cases/{case}/deliveries',headers=patient_headers).json()==[],
+              'old notification disappears after new consent version')
+        check(client.post('/v1/feedback',headers=feedback_headers,json=feedback_body).status_code==404,
+              'old feedback replay is denied after new consent version')
         conn.execute('UPDATE consents SET version=1 WHERE consent_id=%s',(consent,))
         conn.execute("UPDATE consent_purposes SET status='revoked' WHERE consent_id=%s",(consent,))
         check(client.get(f'/v1/cases/{case}/reports/1',headers=patient_headers).status_code==404 and
               publish().status_code==404,'revocation blocks published read and release replay')
+        check(client.get(f'/v1/cases/{case}/deliveries',headers=patient_headers).status_code==404 and
+              client.post(receipt_url,headers=read_headers,json={'state':'read','expected_version':1}).status_code==404,
+              'revocation blocks feed and receipt replay')
+        check(client.get('/v1/feedback/triage',headers=headers).json()==[],
+              'revoked feedback is hidden from staff triage')
         print(json.dumps({'status':'passed','checks':checks,'count':len(checks),
                           'mode':'synthetic-fixtures/real-HTTP/SQL','engine':engine,'sql_error_rollback':sql_rollback,'concurrency':'not_tested'},ensure_ascii=False))
     finally:

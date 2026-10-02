@@ -72,6 +72,14 @@ export interface ChatTurn {
 export interface ChatSnapshot {
   conversation: Conversation; turns: ChatTurn[];
   analysis: {status:string; run_id?:string; stage?:string; error?:unknown};
-  report: {status:string; report_version?:number; sections?:ReportSection[]; actions?:CareAction[]};
+  report: {status:string; report_id?:string; report_version?:number; sections?:ReportSection[]; actions?:CareAction[]};
 }
 export interface ChatSubject {subject_id:string; consent_id:string}
+
+export interface DeliveryNotice {
+  outbox_id:string; case_id:string; report_id:string; report_version:number;
+  message:string; channel:'app'; receipt_state:'pending'|'presented'|'read'; receipt_version:number;
+}
+export interface DeliveryReceipt {receipt_id:string; receipt_version:number; state:'presented'|'read'}
+export type FeedbackType = 'helpful'|'not_helpful'|'inaccurate'|'needs_help';
+export interface FeedbackResult {feedback_id:string; triage_status:'not_required'|'pending'|'resolved'}

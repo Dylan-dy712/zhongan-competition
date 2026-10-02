@@ -22,7 +22,7 @@ ready仅表示报告内容审核阶段完成；审核人不能用报告审批批
 
 ## 原子发布与待触达记录
 
-新增`POST /v1/cases/{case_id}/reports/{version}/publish`，必须带Idempotency-Key，正文为`{"expected_version": 版本号}`。只有有案件范围、有效用途的medical_reviewer可发布。发布记录、published状态和APP care_outbox记录在同一事务写入；旧published版改为superseded。outbox目前仅pending，不表示已经通知患者。
+新增`POST /v1/cases/{case_id}/reports/{version}/publish`，必须带Idempotency-Key，正文为`{"expected_version": 版本号}`。只有有案件范围、有效用途的medical_reviewer可发布。发布记录、published状态和APP care_outbox记录在同一事务写入；旧published版改为superseded。outbox初始pending，不表示已经通知患者。
 
 发布核对当前最高报告版本、解析/抽取完成、五类字段输出、当前全部文档版本和source_hash、输入哈希、未决审核和临床驳回、事实冲突、行动所依赖的疑似/否定/既往/unknown事实、报告审核记录、正文与行动来源、安全策略版本、知识版本/病例适用性/获准状态、授权ID/版本/用途及实时期限。尚无可验证记忆来源时，有memory_refs的报告保持未发布；不回退到模型自称可信。
 
@@ -30,4 +30,17 @@ ready仅表示报告内容审核阶段完成；审核人不能用报告审批批
 
 `python -m scripts.check_release_integration`运行真实HTTP/SQL，覆盖上述主要拒绝条件、获授权发布、幂等重放/冲突、读取隔离、未获准知识不能被报告审批越过，以及失败不留下半发布状态。输入是明确合成SQL夹具，不能证明生成报告的医学质量或KR指标。
 
-PGlite协议适配器在数据库错误后存在回滚响应问题，因此该环境只验证应用异常引发的实际事务回滚，输出`sql_error_rollback=not_tested_pglite_protocol_limit`。测试脚本在原生PostgreSQL上保留触达表触发器异常的数据库回滚用例。发布/撤回并发当前输出`concurrency=not_tested`，仍须原生数据库验收。APP待触达消费、送前复核、用户确认/反馈、外部渠道均未完成；不能把outbox条数当作触达成功率。
+PGlite协议适配器在数据库错误后存在回滚响应问题，因此该环境只验证应用异常引发的实际事务回滚，输出`sql_error_rollback=not_tested_pglite_protocol_limit`。测试脚本在原生PostgreSQL上保留触达表触发器异常的数据库回滚用例。发布/撤回并发当前输出`concurrency=not_tested`，仍须原生数据库验收；不能把outbox条数当作触达成功率。
+
+## APP提醒、回执与反馈
+
+迁移`014_delivery_feedback.sql`保存每个身份的回执和不可覆盖的反馈。以下写接口必须带Idempotency-Key，同身份同键同正文重放原记录，同键不同正文409；访问检查先于重放。
+
+- `GET /v1/cases/{case_id}/deliveries`：仅patient身份，核验案件范围、实时用途、发布授权版本、知识与安全策略。只返回当前最高版本且已发布的APP提醒；新报告仍在待审时隐藏旧提醒。文案不包含诊断或费用。读取本身不产生展示回执。
+- `POST /v1/deliveries/{outbox_id}/receipts`：正文`state=presented|read, expected_version`。版本从0到presented/1，再到read/2；不能跳级。前端实际渲染提醒后提交presented，进入报告面板后提交read。均为客户端报告，不能证明用户理解内容；另一个获授权身份不继承此前身份的已读。首个read将outbox标为acknowledged，逐人状态仍以delivery_receipts为准。每次写入及重放重新核验报告可见性。
+- `POST /v1/feedback`：正文`report_id, report_version, action_id?, type, text?`。type支持helpful/not_helpful/inaccurate/needs_help；text最大4000字。绑定实际可读的报告版本及其行动，保留授权快照。历史报告仍可针对其明确版本反馈；反馈不改写医学事实或行动执行状态。
+- `GET /v1/feedback/triage`：限获授权医学审核者和客服，核验案件范围、当前授权及反馈授权版本。审核者看到inaccurate/needs_help，客服仅看到needs_help。仅返回pending；撤回或授权换版即隐藏。
+
+报告页面包含查看提醒、已查看状态、四种反馈按钮，只在服务器确认后显示已记录。inaccurate/needs_help进入pending，其余为not_required；页面如实写“等待处理”。暂未接入待办解决接口、客服工单、短信/企微送达或自动随访，不能声称求助已被响应。反馈不是人工盲评，也不用于直接计算KR3温度评分。
+
+发布集成脚本另覆盖无范围身份不得读取/写入、逐人回执隔离、旧提醒随报告换版隐藏、反馈版本归属、客服与医学队列隔离、撤回/换授权后的重放拒绝。`scripts.preview_chat_fixture`提供带显式界面测试标记的报告，仅用于本地页面和回执/反馈验收，不是模型生成或发布医学质量证明。

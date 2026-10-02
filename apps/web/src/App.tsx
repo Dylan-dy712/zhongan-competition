@@ -1,7 +1,8 @@
 import {useCallback, useEffect, useRef, useState, type FormEvent} from 'react';
 import {ApiError, continueAnalysis, createConversation, getConversation, getEvidence, getOlderTurns,
-  listConversations, listSubjects, sendChatMessage, setRecall, uploadChatDocument} from './api';
-import type {ChatSnapshot, ChatSubject, ChatTurn, Conversation, Evidence, ToolEvent} from './types';
+  listConversations, listSubjects, sendChatMessage, setRecall, uploadChatDocument,
+  listDeliveries, recordDeliveryReceipt, submitCareFeedback} from './api';
+import type {ChatSnapshot, ChatSubject, ChatTurn, Conversation, Evidence, ToolEvent, DeliveryNotice, FeedbackType} from './types';
 import './chat.css';
 
 // randomUUID requires HTTPS in some browsers; retain a cryptographic HTTP development fallback.
@@ -45,6 +46,13 @@ export default function App() {
   const [error,setError] = useState('');
   const [evidence,setEvidence] = useState<Evidence|null>(null);
   const [panel,setPanel] = useState<'chat'|'report'>('chat');
+  const [delivery,setDelivery] = useState<DeliveryNotice|null>(null);
+  const [feedbackNotice,setFeedbackNotice] = useState('');
+  const [feedbackBusy,setFeedbackBusy] = useState(false);
+  const feedbackBusyRef = useRef(false);
+  const careKeys = useRef(new Map<string,string>());
+  const currentReport = useRef('');
+  currentReport.current=snapshot?.report.report_id || '';
   const [historyOpen,setHistoryOpen] = useState(false);
   const active = useRef('');
   const epoch = useRef(0);
@@ -100,6 +108,51 @@ export default function App() {
 
   useEffect(()=>{if(!initialized.current){initialized.current=true;if(token) void connect(token);}},[connect,token]);
   useEffect(()=>{bottom.current?.scrollIntoView({behavior:'smooth'});},[snapshot?.turns.length,busy,panel]);
+
+  const careKey = (operation:string) => {
+    const existing=careKeys.current.get(operation);
+    if(existing) return existing;
+    const key=requestId();careKeys.current.set(operation,key);return key;
+  };
+  useEffect(()=>{
+    let cancelled=false;
+    setDelivery(null);setFeedbackNotice('');
+    const reportId=snapshot?.report.report_id,caseId=snapshot?.conversation.case_id;
+    if(!reportId || !caseId) return;
+    void listDeliveries(token,caseId).then(items=>{
+      if(!cancelled) setDelivery(items.find(item=>item.report_id===reportId) || null);
+    }).catch(e=>{
+      if(!cancelled){setError(errorText(e));if(e instanceof ApiError && [401,404].includes(e.status))setSnapshot(null);}
+    });
+    return ()=>{cancelled=true;};
+  },[snapshot?.report.report_id,snapshot?.conversation.case_id,token]);
+  useEffect(()=>{
+    let cancelled=false;
+    if(!delivery) return;
+    const state=delivery.receipt_version===0 ? 'presented' :
+      delivery.receipt_state==='presented' && panel==='report' ? 'read' : null;
+    if(!state) return;
+    void recordDeliveryReceipt(token,delivery.outbox_id,state,delivery.receipt_version,
+      careKey(`receipt:${delivery.outbox_id}:${state}`)).then(result=>{
+        if(!cancelled && currentReport.current===delivery.report_id)setDelivery({...delivery,receipt_state:result.state,receipt_version:result.receipt_version});
+      }).catch(e=>{
+        if(!cancelled && currentReport.current===delivery.report_id){setError(errorText(e));if(e instanceof ApiError && [401,404].includes(e.status)){setDelivery(null);setSnapshot(null);}}
+      });
+    return ()=>{cancelled=true;};
+  },[delivery,token,panel]);
+  const feedback = async (type:FeedbackType) => {
+    if(feedbackBusyRef.current || !snapshot?.report.report_id || !snapshot.report.report_version)return;
+    const report=snapshot.report,generation=epoch.current;
+    feedbackBusyRef.current=true;setFeedbackBusy(true);setFeedbackNotice('');
+    try{
+      const result=await submitCareFeedback(token,report.report_id!,report.report_version!,type,
+        careKey(`feedback:${report.report_id}:${type}`));
+      if(epoch.current===generation && currentReport.current===report.report_id)setFeedbackNotice(result.triage_status==='pending' ?
+        '反馈已记录，正在等待处理。' : '谢谢你的反馈，已记录。');
+    }catch(e){
+      if(epoch.current===generation && currentReport.current===report.report_id){setError(errorText(e));if(e instanceof ApiError && [401,404].includes(e.status)){setDelivery(null);setSnapshot(null);}}
+    }finally{feedbackBusyRef.current=false;setFeedbackBusy(false);}
+  };
 
   const newChat = async (sameCase=false) => {
     if (busyRef.current || busy || uploading) return;
@@ -198,6 +251,7 @@ export default function App() {
     ++epoch.current;active.current='';sessionStorage.removeItem('zhongan_chat_token');
     setToken('');setTokenInput('');setConnected(false);setConversations([]);setSnapshot(null);
     setOlder([]);setAttachments([]);setEvidence(null);setError('');setHistoryOpen(false);pendingSend.current=null;
+    setDelivery(null);setFeedbackNotice('');careKeys.current.clear();
   };
   const toggleRecall=async()=>{
     if(!snapshot)return;
@@ -224,6 +278,8 @@ export default function App() {
         {snapshot && <div className="chat-tabs"><button className={panel==='chat'?'selected':''} onClick={()=>setPanel('chat')}>对话</button>
           <button className={panel==='report'?'selected':''} onClick={()=>setPanel('report')}>分析报告</button></div>}
       </header>
+      {delivery && snapshot?.report.report_id===delivery.report_id && <div className="analysis-status care-notice" role="status">{delivery.message}
+        {delivery.receipt_state==='read' ? <span>已查看</span> : <button onClick={()=>setPanel('report')}>查看报告</button>}</div>}
       {error && <div role="alert" className="chat-error persistent-error">{error}<button aria-label="关闭提示" onClick={()=>setError('')}>×</button></div>}
       {!connected ? <main className="start-screen"><div className="welcome-symbol">✦</div><h1>有什么担心，慢慢说</h1>
         <p>把病历、检查单或发票放进对话。我们一起看清楚发生了什么，下一步可以做什么。</p>
@@ -240,7 +296,13 @@ export default function App() {
           {!subjects.length && !caseInput && <small>当前账号没有可新建案件的授权，可以填写已有案件ID。</small>}</div></main>
       : panel==='report' ? <main className="chat-report"><h1>本次分析报告</h1>
           {snapshot.report.sections ? <><p>第 {snapshot.report.report_version} 版 · 已发布</p><div className="report-grid">{snapshot.report.sections.map(s=><article className="report-tile" key={s.section_type}>
-            <h2>{sectionLabels[s.section_type] || s.section_type}</h2>{s.claims.map(c=><div key={c.claim_id}><p>{c.text}</p>{c.evidence_refs.map(id=><button className="citation" key={id} onClick={()=>void showEvidence(id)}>查看原始依据</button>)}</div>)}</article>)}</div></>
+            <h2>{sectionLabels[s.section_type] || s.section_type}</h2>{s.claims.map(c=><div key={c.claim_id}><p>{c.text}</p>{c.evidence_refs.map(id=><button className="citation" key={id} onClick={()=>void showEvidence(id)}>查看原始依据</button>)}</div>)}</article>)}</div>
+            {snapshot.report.report_id && <div className="report-feedback"><p>这份指引对你有帮助吗？</p>
+              <button disabled={feedbackBusy} onClick={()=>void feedback('helpful')}>有帮助</button>
+              <button disabled={feedbackBusy} onClick={()=>void feedback('not_helpful')}>还不够清楚</button>
+              <button disabled={feedbackBusy} onClick={()=>void feedback('inaccurate')}>内容需要核实</button>
+              <button disabled={feedbackBusy} onClick={()=>void feedback('needs_help')}>我需要帮助</button>
+              {feedbackNotice && <p role="status">{feedbackNotice}</p>}</div>}</>
           : <div className="empty-report"><p>{snapshot.report.status==='not_generated'?'还没有报告。你可以在对话中上传材料，让暖暖帮你分析。':'报告尚未发布，部分内容可能需要复核。你仍可以在对话中查阅材料、核对事实。'}</p>
             <button onClick={()=>setPanel('chat')}>回到对话</button></div>}</main>
       : <><main className="chat-scroll"><div className="conversation-intro"><div className="welcome-symbol">✦</div><h1>有什么担心，<em>慢慢说给我听</em></h1><span>你说的、材料写的，我们一起核对清楚</span></div>
