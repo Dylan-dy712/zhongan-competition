@@ -6,6 +6,9 @@ from uuid import uuid4
 
 from .contracts.core import Action, Insight, Report, ReviewCorrection
 from .report_builder import validate_and_complete
+from .contracts.knowledge import DiseaseCode
+from .insight_detector import infer_disease_code
+from .knowledge_assembler import KnowledgeAssembler, KnowledgeAssemblerError
 
 CORRECTABLE_FIELDS = {
     "severity", "rationale", "uncertainty", "suggested_action",
@@ -88,3 +91,23 @@ def corrected_report_payload(current: Report, corrections: list[ReviewCorrection
     payload.update(report_id=str(report_id), report_version=version, status='pending_review',
                    sections=sections, actions=actions, validation_errors=errors)
     return Report.model_validate(payload).model_dump(mode='json')
+
+
+def check_report_knowledge(report, material):
+    refs = {ref for section in report.sections for claim in section.claims for ref in claim.knowledge_refs}
+    if report.knowledge_version=='knowledge:none' and not refs:
+        return
+    try:
+        assembler = KnowledgeAssembler()
+        if assembler.knowledge_version!=report.knowledge_version:
+            raise ValueError('knowledge version changed; regenerate and review')
+        disease = infer_disease_code(material)
+        allowed = set()
+        for code in ({disease, DiseaseCode.ty} if disease else {DiseaseCode.ty}):
+            assembler.check_exclusions(code, material)
+            allowed.update(e.entry_id for e in assembler.select(code,patient_visible=True).allowed
+                           if not e.numeric_pending_review)
+        if not refs.issubset(allowed):
+            raise ValueError('knowledge is unapproved, pending or outside case scope')
+    except KnowledgeAssemblerError:
+        raise ValueError('knowledge validation unavailable or case excluded') from None

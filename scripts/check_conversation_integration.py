@@ -216,8 +216,19 @@ def main():
                       {a['value']['amount_minor'] for a in cost['alternatives']}=={12000,13000,14000} and
                       all(a['evidence_ids'] for a in cost['alternatives']),
                       'three source totals retain non-null alternatives and actual evidence')
-                # A released historical report remains addressable when the latest one is pending.
-                conn.execute("UPDATE reports SET status='published' WHERE case_id=%s AND report_version=1",(case_id,))
+                # Historical-read fixture only; actual release gates are tested separately.
+                # This explicit synthetic state is not evidence that the model's unsafe draft can publish.
+                safe_sections=[{'section_type': kind,'claims':[{'claim_id':str(uuid4()),
+                    'text':'合成历史报告：相关信息仍需结合原始材料核对。','claim_type':'to_confirm',
+                    'evidence_refs':[],'knowledge_refs':[],'source_refs':[],'review_status':'approved'}]}
+                    for kind in SECTION_TYPES]
+                conn.execute("UPDATE reports SET status='published',sections=%s::jsonb,actions='[]',validation_errors='[]' WHERE case_id=%s AND report_version=1",
+                             (json.dumps(safe_sections,ensure_ascii=False),case_id))
+                conn.execute("""INSERT INTO report_releases(release_id,report_id,case_id,report_version,released_by,
+                    consent_id,consent_version,input_hash,knowledge_version,policy_version,idempotency_key,request_hash)
+                    SELECT %s,report_id,case_id,report_version,%s,%s,1,input_hash,knowledge_version,policy_version,
+                    'historical-read-fixture',%s FROM reports WHERE case_id=%s AND report_version=1""",
+                    (uuid4(),actor,consent,'f'*64,case_id))
                 historical=tools.execute('read_report','{"version":1}')
                 check(historical['report_version']==1 and 'sections' in historical,
                       'published historical report can be read by version')

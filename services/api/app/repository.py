@@ -14,6 +14,8 @@ from .contracts.core import (
     EventBundle, EventRelation, ExecutionMode, ExternalRef, ExtractedFact,
     Insight, MedicalEvent, Report, TextSpan,
 )
+from .report_builder import POLICY_VERSION
+from .review_service import check_report_knowledge
 
 
 class AccessDenied(Exception):
@@ -383,20 +385,46 @@ def get_insights(conn, *, actor_id: UUID, case_id: UUID, run_id: UUID) -> list[I
     ) for r in rows]
 
 
-def get_report(conn, *, actor_id: UUID, case_id: UUID, version: int) -> Report | None:
+def get_report(conn, *, actor_id: UUID, case_id: UUID, version: int, patient_view: bool = False) -> Report | None:
     row = conn.execute(
         """SELECT r.*,ac.role FROM reports r JOIN cases c ON c.case_id=r.case_id
            JOIN actors ac ON ac.actor_id=%s AND ac.active=true
            JOIN actor_subject_access a ON a.subject_id=c.subject_id
              AND a.actor_id=ac.actor_id AND a.can_read_case=true
+           JOIN consents co ON co.consent_id=c.consent_id AND co.subject_id=c.subject_id
            JOIN consent_purposes p ON p.consent_id=c.consent_id
              AND p.purpose='case_guidance' AND p.status='active'
              AND (p.expires_at IS NULL OR p.expires_at>now())
            WHERE r.case_id=%s AND r.report_version=%s""", (actor_id, case_id, version),
     ).fetchone()
-    if not row or (row["role"] == "patient" and row["status"] != "published"):
+    if not row:
+        return None
+    if (patient_view or row['role']!='medical_reviewer') and not patient_report_visible(conn,row):
         return None
     return _to_report(row)
+
+
+def patient_report_visible(conn, row) -> bool:
+    if row['status'] not in {'published','superseded'} or row['policy_version']!=POLICY_VERSION:
+        return False
+    allowed = conn.execute("""SELECT 1 FROM report_releases rel JOIN cases c ON c.case_id=rel.case_id
+        JOIN consents co ON co.consent_id=c.consent_id AND co.subject_id=c.subject_id
+        JOIN consent_purposes p ON p.consent_id=co.consent_id AND p.purpose='case_guidance'
+          AND p.status='active' AND (p.expires_at IS NULL OR p.expires_at>clock_timestamp())
+        WHERE rel.report_id=%s AND rel.case_id=%s AND rel.consent_id=co.consent_id
+          AND rel.consent_version=co.version""",(row['report_id'],row['case_id'])).fetchone()
+    if not allowed or row['memory_refs']:
+        return False
+    if any(c['review_status'] in {'pending','rejected'} for s in row['sections'] for c in s['claims']):
+        return False
+    try:
+        material = '\n'.join(e['text_value'] or '' for e in conn.execute(
+            'SELECT text_value FROM evidence WHERE case_id=%s AND run_id=%s',
+            (row['case_id'],row['run_id'])).fetchall())
+        check_report_knowledge(_to_report(row),material)
+    except (ValueError,OSError):
+        return False
+    return True
 
 
 def _to_report(row) -> Report:
