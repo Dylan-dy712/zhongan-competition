@@ -35,6 +35,11 @@ def list_reviews(conn, *, actor_id: UUID, status: str, limit: int,
            JOIN cases c ON c.case_id=t.case_id
            JOIN actor_subject_access a ON a.subject_id=c.subject_id
              AND a.actor_id=%s AND a.can_read_case=true
+           JOIN actors ac ON ac.actor_id=a.actor_id AND ac.active=true AND ac.role='medical_reviewer'
+           JOIN consents co ON co.consent_id=c.consent_id AND co.subject_id=c.subject_id
+           JOIN consent_purposes p ON p.consent_id=co.consent_id
+             AND p.purpose='case_guidance' AND p.status='active'
+             AND (p.expires_at IS NULL OR p.expires_at>now())
            WHERE t.status=%s AND (%s::uuid IS NULL OR t.review_id>%s::uuid)
            ORDER BY t.review_id LIMIT %s""", (actor_id, status, cursor, cursor, limit),
     ).fetchall()
@@ -53,7 +58,11 @@ def decide_review(conn, *, actor_id: UUID, review_id: UUID, expected_version: in
                JOIN actor_subject_access a ON a.subject_id=c.subject_id
                  AND a.actor_id=%s AND a.can_read_case=true
                JOIN actors ac ON ac.actor_id=a.actor_id AND ac.active=true
-               WHERE t.review_id=%s FOR UPDATE OF t,i""", (actor_id, review_id),
+               JOIN consents co ON co.consent_id=c.consent_id AND co.subject_id=c.subject_id
+               JOIN consent_purposes p ON p.consent_id=co.consent_id
+                 AND p.purpose='case_guidance' AND p.status='active'
+                 AND (p.expires_at IS NULL OR p.expires_at>now())
+               WHERE t.review_id=%s FOR UPDATE OF t,i FOR SHARE OF ac,a,c,co,p""", (actor_id, review_id),
         ).fetchone()
         if not row:
             raise ReviewNotFound()
