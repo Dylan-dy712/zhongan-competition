@@ -30,6 +30,7 @@ from .review_repository import (
     ReviewAccessDenied, ReviewNotFound, StaleReview, decide_review, list_reviews,
 )
 from .release_repository import publish_report
+from .delivery_repository import list_deliveries, record_receipt, submit_feedback, list_feedback_triage
 from .care_assistant import AssistantAnswer, answer_question
 from . import conversation_repository as chats
 from .conversation_agent import CareTools, run_agent
@@ -85,6 +86,19 @@ class DecideReview(Contract):
 
 class PublishReport(Contract):
     expected_version: int = Field(ge=1)
+
+
+class DeliveryReceipt(Contract):
+    state: Literal['presented','read']
+    expected_version: int = Field(ge=0)
+
+
+class SubmitFeedback(Contract):
+    report_id: UUID
+    report_version: int = Field(ge=1)
+    action_id: UUID | None = None
+    type: Literal['helpful','not_helpful','inaccurate','needs_help']
+    text: str | None = Field(default=None,min_length=1,max_length=4000)
 
 
 class AskAssistant(Contract):
@@ -421,6 +435,48 @@ def post_assistant_message(body: AskAssistant, case_id: UUID,
         return answer_question(report, body.question)
     except RuntimeError:
         raise HTTPException(status_code=503, detail="Care assistant is temporarily unavailable") from None
+
+
+@app.get('/v1/cases/{case_id}/deliveries')
+def get_app_deliveries(case_id: UUID, limit: Annotated[int,Query(ge=1,le=100)]=20,
+                       actor_id: UUID=Depends(current_actor), conn=Depends(database)):
+    return list_deliveries(conn,actor_id=actor_id,case_id=case_id,limit=limit)
+
+
+@app.post('/v1/deliveries/{outbox_id}/receipts')
+def post_app_receipt(outbox_id: UUID, body: DeliveryReceipt,
+                     idempotency_key: Annotated[str,Header(min_length=1,max_length=200)],
+                     actor_id: UUID=Depends(current_actor), conn=Depends(database)):
+    return record_receipt(conn,actor_id=actor_id,outbox_id=outbox_id,state=body.state,
+                          expected_version=body.expected_version,idempotency_key=idempotency_key)
+
+
+@app.post('/v1/feedback',status_code=201)
+def post_care_feedback(body: SubmitFeedback,
+                       idempotency_key: Annotated[str,Header(min_length=1,max_length=200)],
+                       actor_id: UUID=Depends(current_actor), conn=Depends(database)):
+    return submit_feedback(conn,actor_id=actor_id,idempotency_key=idempotency_key,**body.model_dump())
+
+
+@app.get('/v1/feedback/triage')
+def get_care_feedback_triage(limit: Annotated[int,Query(ge=1,le=100)]=20,
+                             actor_id: UUID=Depends(current_actor), conn=Depends(database)):
+    return list_feedback_triage(conn,actor_id=actor_id,limit=limit)
+
+
+@app.exception_handler(ReviewNotFound)
+async def care_not_found(request: Request, exc: ReviewNotFound):
+    return await business_error(request,HTTPException(404,'关怀记录不可访问'))
+
+
+@app.exception_handler(ReviewAccessDenied)
+async def care_role_denied(request: Request, exc: ReviewAccessDenied):
+    return await business_error(request,HTTPException(403,'当前身份不能执行此操作'))
+
+
+@app.exception_handler(StaleReview)
+async def care_stale_request(request: Request, exc: StaleReview):
+    return await business_error(request,HTTPException(409,'版本或请求已变化，请刷新后重试'))
 
 
 @app.exception_handler(AccessDenied)

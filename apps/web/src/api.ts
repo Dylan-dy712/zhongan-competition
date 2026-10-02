@@ -1,4 +1,5 @@
-import type { AssistantAnswer, Evidence, Report, Conversation, ChatSnapshot, ChatSubject, ChatTurn } from "./types";
+import type { AssistantAnswer, Evidence, Report, Conversation, ChatSnapshot, ChatSubject, ChatTurn,
+  DeliveryNotice, DeliveryReceipt, FeedbackType, FeedbackResult } from "./types";
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
 
@@ -36,11 +37,12 @@ export async function askAssistant(caseId: string, reportVersion: number, questi
   return response.json() as Promise<AssistantAnswer>;
 }
 
-async function chatRequest<T>(path: string, token: string, method = 'GET', data?: unknown): Promise<T> {
+async function chatRequest<T>(path: string, token: string, method = 'GET', data?: unknown, idempotencyKey?:string): Promise<T> {
   const multipart = data instanceof FormData;
   const response = await fetch(`${API_BASE}${path}`, {
     method,
-    headers: {Authorization: `Bearer ${token}`, ...(!multipart && data !== undefined ? {'Content-Type':'application/json'} : {})},
+    headers: {Authorization: `Bearer ${token}`, ...(!multipart && data !== undefined ? {'Content-Type':'application/json'} : {}),
+      ...(idempotencyKey ? {'Idempotency-Key':idempotencyKey} : {})},
     body: data === undefined ? undefined : multipart ? data : JSON.stringify(data),
   });
   if (!response.ok) {
@@ -50,6 +52,12 @@ async function chatRequest<T>(path: string, token: string, method = 'GET', data?
   return response.json() as Promise<T>;
 }
 export const listConversations = (token: string) => chatRequest<Conversation[]>('/v1/conversations', token);
+export const listDeliveries = (token:string,caseId:string) =>
+  chatRequest<DeliveryNotice[]>(`/v1/cases/${caseId}/deliveries`,token);
+export const recordDeliveryReceipt = (token:string,id:string,state:'presented'|'read',version:number,key:string) =>
+  chatRequest<DeliveryReceipt>(`/v1/deliveries/${id}/receipts`,token,'POST',{state,expected_version:version},key);
+export const submitCareFeedback = (token:string,reportId:string,version:number,type:FeedbackType,key:string) =>
+  chatRequest<FeedbackResult>('/v1/feedback',token,'POST',{report_id:reportId,report_version:version,type},key);
 export const listSubjects = (token: string) => chatRequest<ChatSubject[]>('/v1/chat/subjects', token);
 export const createConversation = (token: string, conversationId: string, subjectId?: string, caseId?: string) =>
   chatRequest<Conversation>('/v1/conversations', token, 'POST', {conversation_id:conversationId, subject_id:subjectId || null, case_id:caseId || null});
