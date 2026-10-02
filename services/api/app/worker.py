@@ -20,7 +20,7 @@ from .event_builder import BUILDER_VERSION, build_events
 from .insight_detector import RULE_VERSION, deterministic_candidates, infer_disease_code, merge_semantic_candidates
 from .insight_llm import PROMPT_VERSION as INSIGHT_PROMPT_VERSION, SCHEMA_VERSION as INSIGHT_SCHEMA_VERSION, detect_semantic
 from .knowledge_assembler import KnowledgeAssembler, PackExcludedError
-from .report_builder import POLICY_VERSION as REPORT_POLICY_VERSION, validate_and_complete
+from .report_builder import POLICY_VERSION as REPORT_POLICY_VERSION, map_report_sources, validate_and_complete
 from .report_llm import PROMPT_VERSION as REPORT_PROMPT_VERSION, draft_report
 from .contracts.core import Action
 from .llm_extractor import PROMPT_VERSION, SCHEMA_VERSION as MODEL_SCHEMA_VERSION, OpenAiCompatibleExtractor, validate_evidence_quotes
@@ -437,28 +437,11 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
                         (uuid4(), run["case_id"], run["run_id"], item["insight_id"],
                          "clinical_or_indeterminate_insight_requires_review"),
                     )
-            raw_draft = report_model_result["draft"]
-            mapped_sections = []
-            for section in raw_draft.get("sections", []):
-                mapped_claims = []
-                for claim in section.get("claims", []):
-                    quote = claim.pop("evidence_quote", None)
-                    source = next((x for x in fact_inputs if quote and quote in x["text"]), None)
-                    mapped_claims.append({**claim,
-                        "evidence_refs": [str(source["evidence_id"])] if source else []})
-                mapped_sections.append({"section_type": section.get("section_type"), "claims": mapped_claims})
-            mapped_actions = []
-            for action in raw_draft.get("actions", []):
-                quote = action.pop("source_quote", None)
-                source = next((x for x in fact_inputs if quote and quote in x["text"]), None)
-                refs = list(action.get("source_refs", []))
-                if source:
-                    refs.append(str(source["evidence_id"]))
-                mapped_actions.append({**action, "source_refs": refs})
-            source_refs = {"case:user_context"} if case_meta and case_meta["user_context"] else set()
+            evidence_texts = {str(x["evidence_id"]): x["text"] for x in fact_inputs}
+            mapped_draft = map_report_sources(report_model_result["draft"], evidence_texts)
+            source_refs = {"case:user_context": str(case_meta["user_context"])} if case_meta and case_meta["user_context"] else {}
             sections, action_drafts, report_errors = validate_and_complete(
-                {"sections": mapped_sections, "actions": mapped_actions},
-                {str(x["evidence_id"]) for x in fact_inputs},
+                mapped_draft, evidence_texts,
                 {e.entry_id for e in knowledge_entries}, source_refs,
             )
             report_id = uuid4()

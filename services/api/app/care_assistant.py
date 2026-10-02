@@ -31,7 +31,7 @@ class AssistantAnswer(AssistantDraft):
 
 
 def answer_question(report: Report, question: str) -> AssistantAnswer:
-    """Ask the configured model, then reject every citation not present in the report."""
+    """Reject the answer if any citation is outside the released report."""
     claims = [claim for section in report.sections for claim in section.claims]
     safe_claims = [{
         "claim_id": str(claim.claim_id), "text": claim.text,
@@ -56,13 +56,10 @@ def answer_question(report: Report, question: str) -> AssistantAnswer:
 
     allowed = {str(c.claim_id): {str(x) for x in c.evidence_refs} for c in claims
                if c.review_status not in {"pending", "rejected"}}
-    citations = []
     for citation in draft.citations:
         claim_id = str(citation.claim_id)
-        if claim_id not in allowed:
-            continue
-        refs = [ref for ref in citation.evidence_refs if str(ref) in allowed[claim_id]]
-        citations.append(Citation(claim_id=citation.claim_id, evidence_refs=refs))
-    return AssistantAnswer(answer=draft.answer, citations=citations,
+        if claim_id not in allowed or any(str(ref) not in allowed[claim_id] for ref in citation.evidence_refs):
+            raise RuntimeError("ASSISTANT_INVALID_CITATION")
+    return AssistantAnswer(answer=draft.answer, citations=draft.citations,
                            uncertainty=draft.uncertainty,
                            model_id=payload.get("model") or client.model_id)
