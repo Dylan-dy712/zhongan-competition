@@ -1,0 +1,13 @@
+{
+  "mode": "Built-in image_gen",
+  "assets": [
+    {
+      "file": "assets/nuan-reading-v1.webp",
+      "prompt": "Use case: stylized-concept. Create a premium 3D clay illustration for a Chinese healthcare companion mobile app. Use the provided image ONLY as character identity reference: small round white seed mascot, two fresh green leaves sprouting on head, emerald oval eyes, rosy cheeks, small friendly smile, mint green leaf feet and little arms. New pose: seated, gently holding a small open mint notebook while one hand waves hello, one small translucent mint speech bubble floating nearby. Single coherent compact composition, three-quarter front view, full body, no clipping, generous transparent margins. Polished matte porcelain and soft translucent mint glass accents, soft studio lighting, understated ambient shadow, warm reassuring mood, emerald #009978, mint #a7ead4 and creamy white. Actual transparent background. No words, letters, numbers, logos, watermark, UI frame or large scenery. Clearly legible at 120px on mobile. High-quality standalone cutout."
+    },
+    {
+      "file": "assets/care-archive-v1.webp",
+      "prompt": "Use case: stylized-concept. Standalone transparent 3D editorial illustration for a premium mint-green healthcare mobile app's personal medical records header. A compact upright mint-green rounded medical document folio, two slightly offset creamy-white paper cards with subtle abstract embossed lines (not writing), small glossy emerald heart in front and one pale teal translucent orbital arc wrapping around the base, tiny leaf sprig to the side. The folio is the central silhouette. No character, no people, no medical red cross, no lettering, no numbers, no labels. Polished soft clay and porcelain with restrained translucent glass accents, delicate soft studio lighting, gentle reassuring feeling. Emerald #009978, mint #a7ead4, creamy white and very pale blue. Three-quarter isometric view, full object visible, balanced compact composition, generous margins. Actual transparent background, no square backdrop or landscape. Must be clear at 110px, do not add tiny clutter or sparkles."
+    }
+  ]
+}
