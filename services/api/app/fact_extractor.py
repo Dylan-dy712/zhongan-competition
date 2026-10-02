@@ -4,7 +4,7 @@ import re
 from decimal import Decimal, InvalidOperation
 from uuid import uuid4
 
-EXTRACTOR_VERSION = "evidence-pattern-candidate-v3"
+EXTRACTOR_VERSION = "evidence-pattern-candidate-v4"
 FIELD_TYPES = ("diagnosis", "surgery", "medication", "stay_days", "total_cost")
 LABELS = {
     "diagnosis": r"(?:诊断|初步诊断|入院诊断|出院诊断)",
@@ -14,13 +14,28 @@ LABELS = {
 
 
 def assertion_for(raw: str) -> str:
-    if re.search(r"(?:疑似|考虑|待排|可能)", raw):
-        return "suspected"
-    if re.search(r"(?:否认|未见|排除)", raw):
-        return "negated"
-    if re.search(r"(?:既往|曾有|曾行)", raw):
-        return "historical"
-    return "present"
+    # Remove double-negation phrases before checking standalone exclusion.
+    uncertain = r"(?:尚未排除|未能排除|不能排除|无法排除|不除外|未排除)"
+    remainder = re.sub(uncertain, "", raw)
+    states = set()
+    if re.search(uncertain, raw) or re.search(r"(?:疑似|考虑|待排|可能|待明确|待确诊)", remainder):
+        states.add("suspected")
+    if re.search(r"(?:否认|未见|排除|无证据支持)", remainder):
+        states.add("negated")
+    if re.search(r"(?:既往|曾有|曾行)", re.sub(r"否认\s*既往", "否认", remainder)):
+        states.add("historical")
+    return next(iter(states)) if len(states) == 1 else ("unknown" if states else "present")
+
+
+def _quoted_context_assertion(quote: str, text: str) -> str:
+    # ponytail: sentence-level cues are conservative; entity-specific scope needs medical NLP validation.
+    states = set()
+    for match in re.finditer(re.escape(quote), text):
+        left = max((text.rfind(mark, 0, match.start()) for mark in '\n。；;'), default=-1) + 1
+        right = re.search(r"[\n。；;]", text[match.end():])
+        end = match.end() + right.start() if right else len(text)
+        states.add(assertion_for(text[left:end]))
+    return next(iter(states)) if len(states) == 1 else "unknown"
 
 
 def clean_value(raw: str) -> str:
@@ -63,7 +78,8 @@ def _merge_fact(current, incoming):
     if current is None or current['status'] == 'missing':
         return incoming
     if current['status'] != 'conflict' and current['value'] == incoming['value']:
-        return {**current, 'evidence_ids': list(dict.fromkeys(
+        return {**current, 'assertion': current['assertion'] if current['assertion'] == incoming['assertion'] else 'unknown',
+            'evidence_ids': list(dict.fromkeys(
             current['evidence_ids'] + incoming['evidence_ids']))}
     alternatives = [dict(item, evidence_ids=list(item['evidence_ids'])) for item in
                     (current['alternatives'] if current['status'] == 'conflict' else [
@@ -130,6 +146,10 @@ def merge_model_candidates(rule_facts, model_candidates, evidence_rows):
             unit="day" if fact_type == "stay_days" else ("CNY" if fact_type == "total_cost" else None),
             confidence=candidate_item.get("confidence_score"))
         incoming['assertion'] = candidate_item['assertion']
+        if fact_type in LABELS:
+            source_assertion = _quoted_context_assertion(quote, source['text'])
+            if source_assertion != 'present' and source_assertion != incoming['assertion']:
+                incoming['assertion'] = 'unknown'
         incoming['confidence_method'] = 'llm-reported-uncalibrated-v1' if candidate_item.get('confidence_score') is not None else None
         facts[fact_type] = _merge_fact(facts[fact_type], incoming)
     return [facts[fact_type] for fact_type in FIELD_TYPES]
