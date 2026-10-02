@@ -184,7 +184,7 @@ def main():
                 'message':'使用错误附件','document_ids':[str(uuid4())]})
             check(spoofed.status_code==404,'unknown attachment is rejected before model call')
 
-            supplement=client.post(base+'/documents',headers=headers,files={'file':('detail.txt','合成费用明细：检查费80元，药费40元。'.encode(),'text/plain')})
+            supplement=client.post(base+'/documents',headers=headers,files={'file':('detail.txt','合成费用明细：检查费80元，药费40元。\n医疗总费用：130元。\n医疗总费用：140元。'.encode(),'text/plain')})
             check(supplement.status_code==201,'supplemental document accepted')
             with connection() as conn:
                 tools=CareTools(conn,actor,conversation_id)
@@ -196,6 +196,14 @@ def main():
                     process_run(conn,run,Path(storage))
                 versions=conn.execute('SELECT report_version FROM reports WHERE case_id=%s ORDER BY report_version',(case_id,)).fetchall()
                 check([r['report_version'] for r in versions]==[1,2],'supplement preserves report v1 and generates v2')
+                response=client.get(f'/v1/cases/{case_id}/facts',headers=headers,
+                                    params={'run_id':second_run['run_id']})
+                check(response.status_code==200,'conflict facts pass actual API contracts')
+                cost=next(f for f in response.json() if f['fact_type']=='total_cost')
+                check(cost['status']=='conflict' and cost['value'] is None and
+                      {a['value']['amount_minor'] for a in cost['alternatives']}=={12000,13000,14000} and
+                      all(a['evidence_ids'] for a in cost['alternatives']),
+                      'three source totals retain non-null alternatives and actual evidence')
                 # A released historical report remains addressable when the latest one is pending.
                 conn.execute("UPDATE reports SET status='published' WHERE case_id=%s AND report_version=1",(case_id,))
                 historical=tools.execute('read_report','{"version":1}')
