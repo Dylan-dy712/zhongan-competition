@@ -1,7 +1,8 @@
 import unittest
 from uuid import uuid4
 
-from services.api.app.fact_extractor import extract_facts, merge_model_candidates
+from services.api.app.fact_extractor import extract_facts, merge_model_candidates, normalize_value
+from services.api.app.llm_extractor import ModelCandidate
 
 
 class FactExtractorTests(unittest.TestCase):
@@ -20,6 +21,27 @@ class FactExtractorTests(unittest.TestCase):
         self.assertEqual(len(facts), 5)
         self.assertTrue(all(item["status"] == "missing" for item in facts))
         self.assertTrue(all(item["missing_reason"] for item in facts))
+
+    def test_fractional_stay_preserves_rule_model_and_json_number(self):
+        rows = [{'evidence_id': uuid4(), 'text': '住院天数：3.5天'}]
+        model = ModelCandidate(fact_type='stay_days', raw_value='3.5天', normalized_value=3.5,
+                               assertion='present', evidence_quote='住院天数：3.5天')
+        rules = extract_facts(rows)
+        merged = merge_model_candidates(rules, [model.model_dump()], rows)
+        stay = next(f for f in merged if f['fact_type'] == 'stay_days')
+        self.assertEqual(stay['value'], 3.5)
+        self.assertEqual(stay['status'], 'observed')
+        self.assertEqual(stay['unit'], 'day')
+        self.assertEqual(normalize_value('stay_days', '3.0天'), 3)
+
+    def test_invalid_stay_is_not_silently_truncated_or_observed(self):
+        for value in ['-3.5天', '3-5天', '3.5.1天', 'NaN', 'Infinity', True]:
+            self.assertIsNone(normalize_value('stay_days', value))
+        rows = [{'evidence_id': uuid4(), 'text': '住院天数未记载'}]
+        facts = merge_model_candidates(extract_facts(rows), [{
+            'fact_type': 'stay_days', 'raw_value': '3-5天', 'normalized_value': '3-5天',
+            'assertion': 'present', 'evidence_quote': '住院天数未记载'}], rows)
+        self.assertEqual(next(f for f in facts if f['fact_type'] == 'stay_days')['status'], 'missing')
 
     def test_rule_model_disagreement_remains_conflict(self):
         evidence_id = uuid4()

@@ -115,7 +115,7 @@ def main():
 
         with tempfile.TemporaryDirectory(prefix='zhongan-chat-files-') as storage:
             api.app.dependency_overrides[api.document_storage_root] = lambda: Path(storage)
-            uploaded=client.post(base+'/documents',headers=headers,files={'file':('invoice.txt','合成票据：医疗总费用：120.00元。'.encode(),'text/plain')})
+            uploaded=client.post(base+'/documents',headers=headers,files={'file':('invoice.txt','合成票据：医疗总费用：120.00元。\n住院天数：3.5天'.encode(),'text/plain')})
             check(uploaded.status_code==201,'chat document upload persists actual file')
             document_id=uploaded.json()['document_id']
             model=ScriptedModel([tool('start_analysis'),reply('材料已排队。')])
@@ -148,6 +148,9 @@ def main():
                     process_run(conn,run,Path(storage))
                 status=conn.execute('SELECT status,error FROM analysis_runs WHERE run_id=%s',(run_id,)).fetchone()
                 check(status['status']=='completed',f"worker parses synthetic invoice ({status['status']})")
+                stay = conn.execute("SELECT value FROM extracted_facts WHERE run_id=%s AND fact_type='stay_days'",
+                                    (run_id,)).fetchone()
+                check(stay['value'] == 3.5, 'fractional hospital stay survives extraction and SQL storage')
                 saved = conn.execute('SELECT status,sections,actions,validation_errors FROM reports WHERE run_id=%s',
                                      (run_id,)).fetchone()
                 check(saved['status'] == 'pending_review' and
