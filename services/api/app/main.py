@@ -360,13 +360,14 @@ def read_reviews(status: Literal["pending", "decided", "cancelled"] = "pending",
 
 @app.post("/v1/reviews/{review_id}/decision", response_model=ReviewDecision)
 def post_review_decision(review_id: UUID, body: DecideReview,
+                         idempotency_key: Annotated[str | None, Header(min_length=1, max_length=200)] = None,
                          actor_id: UUID = Depends(current_actor),
                          conn=Depends(database)) -> ReviewDecision:
     try:
         return decide_review(conn, actor_id=actor_id, review_id=review_id,
                              expected_version=body.expected_version,
                              decision=body.decision, reason=body.reason,
-                             corrections=body.corrections)
+                             corrections=body.corrections, idempotency_key=idempotency_key)
     except ReviewNotFound:
         raise HTTPException(status_code=404, detail="Review not found") from None
     except ReviewAccessDenied:

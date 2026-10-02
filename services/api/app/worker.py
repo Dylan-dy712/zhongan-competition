@@ -476,6 +476,14 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
                  REPORT_PROMPT_VERSION, knowledge_version or "knowledge:none", REPORT_POLICY_VERSION,
                  json.dumps(consent_refs), json.dumps(report_errors)),
             )
+            if report_status == 'pending_review':
+                conn.execute("""INSERT INTO review_tasks
+                    (review_id,case_id,run_id,target_type,target_id,target_version,status,reason)
+                    VALUES (%s,%s,%s,'report',%s,%s,'pending','report_requires_review')""",
+                    (uuid4(), run['case_id'], run['run_id'], report_id, report_version))
+            conn.execute("""UPDATE review_tasks SET status='cancelled'
+                WHERE case_id=%s AND target_type='report' AND target_version<%s AND status='pending'""",
+                (run['case_id'], report_version))
             for fact in facts:
                 conn.execute(
                     """INSERT INTO extracted_facts

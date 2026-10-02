@@ -160,6 +160,8 @@ def main():
                       'model cannot confirm a diagnosis by quoting only the uncertain entity')
                 saved = conn.execute('SELECT status,sections,actions,validation_errors FROM reports WHERE run_id=%s',
                                      (run_id,)).fetchone()
+                check(conn.execute("SELECT count(*) AS n FROM review_tasks WHERE run_id=%s AND target_type='report' AND status='pending'",
+                                   (run_id,)).fetchone()['n']==1, 'worker queues pending report for actual review')
                 check(saved['status'] == 'pending_review' and
                       all(c['review_status'] == 'pending' for s in saved['sections'] for c in s['claims']),
                       'real quote cannot automatically release contradictory report facts')
@@ -203,6 +205,9 @@ def main():
                     process_run(conn,run,Path(storage))
                 versions=conn.execute('SELECT report_version FROM reports WHERE case_id=%s ORDER BY report_version',(case_id,)).fetchall()
                 check([r['report_version'] for r in versions]==[1,2],'supplement preserves report v1 and generates v2')
+                check(conn.execute("SELECT status FROM review_tasks WHERE run_id=%s AND target_type='report'",
+                                   (run_id,)).fetchone()['status']=='cancelled',
+                      'new report cancels superseded pending review task')
                 response=client.get(f'/v1/cases/{case_id}/facts',headers=headers,
                                     params={'run_id':second_run['run_id']})
                 check(response.status_code==200,'conflict facts pass actual API contracts')

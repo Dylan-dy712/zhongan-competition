@@ -271,6 +271,8 @@ flowchart TD
 
 `ReviewDecision = {review_id, target_type, target_id, target_version, decision, reason, corrections}`；审核身份和时间由服务端添加。`decision = approve | correct | reject`。修改必须触发新版本及重新检查；审核通过不代表可以忽略授权撤回。
 
+报告决策通过同一reviews接口处理，必须携带Idempotency-Key；correct的corrections字段允许完整sections或actions替换，逐条验证来源与安全约束。响应的result_report_id定位新版本，review_parent_id保留前版关系，原版内容不原地改写。approve只进入ready，后续发布必须独立通过§7门槛。当前实现范围、验证命令和未完成项见[报告审核链路](reviews/report-workflow.md)。
+
 `corrections` 只允许修改目标版本中获授权的事实/结论，逐项含 `field_or_claim_id, replacement, source_refs, reason`；不得修改主体归属、来源模式、原始文件或既有自动预测记录。目标已有新版时拒绝陈旧决策。
 
 未审风险不能进入已确认患者报告。若要先交付安全内容，必须创建一个独立验证通过的报告版本，明确哪些部分待核实，不得偷偷删除失败内容后沿用原版“完整通过”的状态。
