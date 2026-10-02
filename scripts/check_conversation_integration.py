@@ -115,7 +115,7 @@ def main():
 
         with tempfile.TemporaryDirectory(prefix='zhongan-chat-files-') as storage:
             api.app.dependency_overrides[api.document_storage_root] = lambda: Path(storage)
-            uploaded=client.post(base+'/documents',headers=headers,files={'file':('invoice.txt','合成票据：医疗总费用：120.00元。\n住院天数：3.5天'.encode(),'text/plain')})
+            uploaded=client.post(base+'/documents',headers=headers,files={'file':('invoice.txt','合成票据：医疗总费用：120.00元。\n住院天数：3.5天\nCT提示不能排除肺炎。'.encode(),'text/plain')})
             check(uploaded.status_code==201,'chat document upload persists actual file')
             document_id=uploaded.json()['document_id']
             model=ScriptedModel([tool('start_analysis'),reply('材料已排队。')])
@@ -137,7 +137,9 @@ def main():
                          'source_refs': [], 'owner_role': 'patient', 'due_source': 'medical_order',
                          'due_at': '2026-10-10T09:00:00+08:00', 'rationale': '合成测试'}]}
                 extractor = MagicMock(provider='scripted_test', model_id='scripted-report')
-                extractor.extract.return_value = {'status': 'completed', 'candidates': {'candidates': []},
+                extractor.extract.return_value = {'status': 'completed', 'candidates': {'candidates': [{
+                    'fact_type': 'diagnosis', 'raw_value': '肺炎', 'normalized_value': '肺炎',
+                    'assertion': 'present', 'evidence_quote': '肺炎'}]},
                                                   'raw_output': {}, 'usage_metadata': {}}
                 with patch.dict(os.environ, {'LLM_API_KEY': 'scripted-test-no-network'}), \
                      patch('services.api.app.worker.OpenAiCompatibleExtractor', return_value=extractor), \
@@ -151,6 +153,11 @@ def main():
                 stay = conn.execute("SELECT value FROM extracted_facts WHERE run_id=%s AND fact_type='stay_days'",
                                     (run_id,)).fetchone()
                 check(stay['value'] == 3.5, 'fractional hospital stay survives extraction and SQL storage')
+                response=client.get(f'/v1/cases/{uploaded.json()["case_id"]}/facts',headers=headers,
+                                    params={'run_id':run_id})
+                check(response.status_code==200 and next(f for f in response.json()
+                      if f['fact_type']=='diagnosis')['assertion']=='unknown',
+                      'model cannot confirm a diagnosis by quoting only the uncertain entity')
                 saved = conn.execute('SELECT status,sections,actions,validation_errors FROM reports WHERE run_id=%s',
                                      (run_id,)).fetchone()
                 check(saved['status'] == 'pending_review' and

@@ -2,7 +2,8 @@ import unittest
 from copy import deepcopy
 from uuid import uuid4
 
-from services.api.app.fact_extractor import extract_facts, merge_model_candidates, normalize_value
+from services.api.app.fact_extractor import assertion_for, extract_facts, merge_model_candidates, normalize_value
+from services.api.app.event_builder import build_events
 from services.api.app.llm_extractor import ModelCandidate
 from services.api.app.contracts.core import FieldCandidate
 
@@ -23,6 +24,40 @@ class FactExtractorTests(unittest.TestCase):
         self.assertEqual(len(facts), 5)
         self.assertTrue(all(item["status"] == "missing" for item in facts))
         self.assertTrue(all(item["missing_reason"] for item in facts))
+
+    def test_uncertain_exclusion_is_not_negated_or_confirmed(self):
+        for qualifier in ['未排除', '尚未排除', '未能排除', '不能排除', '无法排除', '不除外', '待明确', '待确诊']:
+            with self.subTest(qualifier=qualifier):
+                facts = extract_facts([{'evidence_id': uuid4(), 'text': f'诊断：肺炎，{qualifier}'}])
+                diagnosis = next(f for f in facts if f['fact_type'] == 'diagnosis')
+                self.assertEqual(diagnosis['assertion'], 'suspected')
+        self.assertEqual(assertion_for('诊断：已排除肺炎'), 'negated')
+        self.assertEqual(assertion_for('诊断：既往肺炎'), 'historical')
+        self.assertEqual(assertion_for('诊断：否认既往肺炎'), 'negated')
+        self.assertEqual(assertion_for('诊断：既往肺炎，目前疑似肺炎'), 'unknown')
+
+    def test_model_entity_quote_cannot_drop_source_qualifiers(self):
+        for text, expected in [('CT提示不能排除肺炎', 'unknown'), ('病史：既往肺炎', 'unknown'),
+                               ('检查提示未见肺炎', 'unknown'), ('肺炎待排', 'unknown'),
+                               ('肺炎待排。此次确诊肺炎', 'unknown'), ('CT提示肺炎', 'present')]:
+            with self.subTest(text=text):
+                rows = [{'evidence_id': uuid4(), 'text': text}]
+                facts = merge_model_candidates(extract_facts(rows), [{
+                    'fact_type': 'diagnosis', 'raw_value': '肺炎', 'normalized_value': '肺炎',
+                    'assertion': 'present', 'evidence_quote': '肺炎'}], rows)
+                diagnosis = next(f for f in facts if f['fact_type'] == 'diagnosis')
+                self.assertEqual(diagnosis['assertion'], expected)
+                _, events, _ = build_events(uuid4(), facts)
+                self.assertEqual(events[0]['assertion'], expected)
+
+    def test_equal_entity_with_different_assertions_remains_unknown(self):
+        rows = [{'evidence_id': uuid4(), 'text': '诊断：肺炎\n既往肺炎'}]
+        facts = merge_model_candidates(extract_facts(rows), [{
+            'fact_type': 'diagnosis', 'raw_value': '既往肺炎', 'normalized_value': '肺炎',
+            'assertion': 'historical', 'evidence_quote': '既往肺炎'}], rows)
+        diagnosis = next(f for f in facts if f['fact_type'] == 'diagnosis')
+        self.assertEqual(diagnosis['value'], '肺炎')
+        self.assertEqual(diagnosis['assertion'], 'unknown')
 
     def test_fractional_stay_preserves_rule_model_and_json_number(self):
         rows = [{'evidence_id': uuid4(), 'text': '住院天数：3.5天'}]
