@@ -1,8 +1,10 @@
 import unittest
+from copy import deepcopy
 from uuid import uuid4
 
 from services.api.app.fact_extractor import extract_facts, merge_model_candidates, normalize_value
 from services.api.app.llm_extractor import ModelCandidate
+from services.api.app.contracts.core import FieldCandidate
 
 
 class FactExtractorTests(unittest.TestCase):
@@ -54,6 +56,51 @@ class FactExtractorTests(unittest.TestCase):
         self.assertEqual(merged["diagnosis"]["status"], "conflict")
         self.assertIsNone(merged["diagnosis"]["value"])
         self.assertEqual(len(merged["diagnosis"]["alternatives"]), 2)
+
+    def test_three_model_values_and_repeated_value_preserve_all_sources(self):
+        rows = [{'evidence_id': uuid4(), 'text': text} for text in [
+            '医疗总费用：100元', '窗口记录200元', '另一记录300元', '复核记录200元']]
+        rules = extract_facts(rows)
+        unchanged = deepcopy(rules)
+        models = [{'fact_type': 'total_cost', 'raw_value': f'{amount}元',
+            'normalized_value': {'amount_minor': amount * 100, 'currency': 'CNY'},
+            'assertion': 'present', 'evidence_quote': row['text']} for amount, row in
+            zip([200, 300, 200], rows[1:])]
+        merged = merge_model_candidates(rules, models, rows)
+        cost = next(item for item in merged if item['fact_type'] == 'total_cost')
+        self.assertEqual(rules, unchanged)
+        self.assertEqual(cost['status'], 'conflict')
+        self.assertIsNone(cost['value'])
+        self.assertEqual([a['value']['amount_minor'] for a in cost['alternatives']], [10000, 20000, 30000])
+        self.assertEqual(set(cost['alternatives'][1]['evidence_ids']), {str(rows[1]['evidence_id']), str(rows[3]['evidence_id'])})
+        for alternative in cost['alternatives']:
+            FieldCandidate[object].model_validate(alternative)
+
+    def test_rule_scalar_disagreements_and_duplicate_sources_are_retained(self):
+        rows = [{'evidence_id': uuid4(), 'text': text} for text in [
+            '医疗总费用：100元\n住院共3.5天', '医疗总费用：200元\n医疗总费用：300元\n住院共4天',
+            '医疗总费用：100元\n住院共3.5天']]
+        facts = {f['fact_type']: f for f in extract_facts(rows)}
+        self.assertEqual(len(facts['total_cost']['alternatives']), 3)
+        self.assertEqual(set(facts['total_cost']['alternatives'][0]['evidence_ids']),
+                         {str(rows[0]['evidence_id']), str(rows[2]['evidence_id'])})
+        self.assertEqual([a['value'] for a in facts['stay_days']['alternatives']], [3.5, 4])
+        same = extract_facts([rows[0], rows[2]])
+        cost = next(f for f in same if f['fact_type'] == 'total_cost')
+        self.assertEqual(cost['status'], 'observed')
+        self.assertEqual(len(cost['evidence_ids']), 2)
+
+    def test_whitespace_quote_or_empty_entity_cannot_create_observed_fact(self):
+        rows = [{'evidence_id': uuid4(), 'text': '未记录实体 空白'}]
+        for quote, value in [(' ', '肺炎'), ('未记录实体', ' ')]:
+            facts = merge_model_candidates(extract_facts(rows), [{
+                'fact_type': 'diagnosis', 'raw_value': value, 'normalized_value': value,
+                'assertion': 'present', 'evidence_quote': quote}], rows)
+            self.assertEqual(next(f for f in facts if f['fact_type'] == 'diagnosis')['status'], 'missing')
+
+    def test_null_conflict_alternative_is_rejected_at_contract_boundary(self):
+        with self.assertRaises(ValueError):
+            FieldCandidate[object](value=None, evidence_ids=[uuid4()])
 
     def test_model_cost_string_normalizes_to_minor_units(self):
         evidence_id = uuid4()

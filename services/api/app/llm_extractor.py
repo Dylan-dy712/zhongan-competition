@@ -96,5 +96,5 @@ class OpenAiCompatibleExtractor:
 
 def validate_evidence_quotes(extraction: dict, material: str) -> dict:
     valid = [item for item in extraction.get("candidates", {}).get("candidates", [])
-             if item["evidence_quote"] in material]
+             if item["evidence_quote"].strip() and item["evidence_quote"] in material]
     return {**extraction, "candidates": {"candidates": valid}}

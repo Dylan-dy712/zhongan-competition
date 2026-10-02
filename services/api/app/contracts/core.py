@@ -83,6 +83,12 @@ class FieldCandidate(Contract, Generic[T]):
     value: T
     evidence_ids: list[UUID] = Field(min_length=1)
 
+    @model_validator(mode="after")
+    def candidate_is_not_an_empty_alternative(self):
+        if self.value is None:
+            raise ValueError("conflict alternative requires a non-null value")
+        return self
+
 
 class FieldValue(Contract, Generic[T]):
     field_id: UUID
