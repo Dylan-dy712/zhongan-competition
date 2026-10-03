@@ -186,5 +186,104 @@ class ReportBuilderTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 DraftReport.model_validate({"sections": invalid, "actions": []})
 
+    def test_unsupported_role_title_is_neutralized_not_published(self):
+        # blind_61DF96B9 shape: a lab reviewer must not be offered as the treating doctor.
+        source = str(uuid4())
+        draft = {"sections": [
+            {"section_type": "recovery_plan", "claims": [{
+                "text": "康复计划：具体复诊时间可咨询主治医生时硕楠医生。", "claim_type": "to_confirm"}]},
+            {"section_type": "next_visit_advice", "claims": [{
+                "text": "预约时可指定时硕楠医生为您接诊", "claim_type": "to_confirm"}]},
+        ]}
+        evidence = {source: "检验报告\n审核者：时硕楠"}
+        sections, _, errors = validate_and_complete(map_report_sources(draft, evidence), evidence, set(), {})
+        self.assertNotIn("时硕楠", sections[3].claims[0].text)
+        self.assertNotIn("主治", sections[3].claims[0].text)
+        self.assertIn("您的诊疗团队", sections[3].claims[0].text)
+        self.assertNotIn("时硕楠", sections[5].claims[0].text)
+        self.assertEqual(sections[3].claims[0].review_status, "pending")
+
+    def test_title_before_name_is_neutralized_mid_sentence_with_punctuation_kept(self):
+        # P6: trailing punctuation survives; P5: name followed by more words still matches.
+        source = str(uuid4())
+        for text, forbidden in [("主治医生李四，建议复查", "，建"),
+                                ("主治医生李四给我做的手术", "给我做")]:
+            with self.subTest(text=text):
+                draft = {"sections": [{"section_type": "recovery_plan", "claims": [{
+                    "text": text, "claim_type": "to_confirm"}]}]}
+                evidence = {source: "审核者：李四"}
+                sections, _, _ = validate_and_complete(
+                    map_report_sources(draft, evidence), evidence, set(), {})
+                self.assertNotIn("主治", sections[3].claims[0].text)
+                self.assertNotIn("李四", sections[3].claims[0].text)
+                self.assertIn("您的诊疗团队", sections[3].claims[0].text)
+                for fragment in forbidden:
+                    self.assertIn(fragment, sections[3].claims[0].text)
+
+    def test_department_word_is_never_read_as_a_person(self):
+        # P9: '心内科医师' is a clinic, not a reviewer to neutralize.
+        source = str(uuid4())
+        draft = {"sections": [{"section_type": "next_visit_advice", "claims": [{
+            "text": "出院后可到心内科医师门诊复诊", "claim_type": "to_confirm"}]}]}
+        evidence = {source: "超声报告医师张三（内科会诊意见）审核"}
+        sections, _, _ = validate_and_complete(map_report_sources(draft, evidence), evidence, set(), {})
+        self.assertEqual(sections[5].claims[0].text, "出院后可到心内科医师门诊复诊")
+
+    def test_role_boilerplate_without_a_name_is_not_corrupted(self):
+        source = str(uuid4())
+        draft = {"sections": [{"section_type": "recovery_plan", "claims": [{
+            "text": "术后主管医生交代病情", "claim_type": "to_confirm"}]}]}
+        evidence = {source: "主管医师：王五\n已交代病情"}
+        sections, _, _ = validate_and_complete(map_report_sources(draft, evidence), evidence, set(), {})
+        self.assertEqual(sections[3].claims[0].text, "术后主管医生交代病情")
+
+    def test_patient_statement_stays_frozen_even_with_role_words(self):
+        # user_sources are the user's frozen words: role neutralization never rewrites
+        # them; the existing provenance rules still force review when paraphrased.
+        source = str(uuid4())
+        draft = {"sections": [{"section_type": "emotional_support", "claims": [{
+            "text": "主治医生李四给我做的手术", "claim_type": "patient_statement",
+            "source_quote": "主治医生李四给我做的手术"}]}]}
+        sources = {"case:user_context": "主治医生李四给我做的手术"}
+        evidence = {source: "审核者：李四"}
+        sections, _, _ = validate_and_complete(
+            map_report_sources(draft, evidence, sources), evidence, set(), sources)
+        self.assertEqual(sections[4].claims[0].text, "主治医生李四给我做的手术")
+
+    def test_evidence_bound_role_title_is_kept_verbatim(self):
+        source = str(uuid4())
+        draft = {"sections": [{"section_type": "treatment_review", "claims": [{
+            "text": "手术者：罗鸿", "claim_type": "case_fact", "evidence_quote": "手术者：罗鸿"}]}]}
+        evidence = {source: "手术者：罗鸿"}
+        sections, _, errors = validate_and_complete(map_report_sources(draft, evidence), evidence, set(), {})
+        self.assertEqual(sections[1].claims[0].text, "手术者：罗鸿")
+        self.assertEqual(sections[1].claims[0].review_status, "not_required")
+        self.assertEqual(errors, [])
+
+    def test_mismatched_role_claim_is_neutralized_and_reviewed(self):
+        source = str(uuid4())
+        draft = {"sections": [{"section_type": "diagnosis_explanation", "claims": [{
+            "text": "主刀医生是郭永明", "claim_type": "case_fact", "evidence_quote": "郭永明"}]}]}
+        evidence = {source: "手术助手：郭永明"}
+        sections, _, errors = validate_and_complete(map_report_sources(draft, evidence), evidence, set(), {})
+        self.assertNotIn("主刀", sections[0].claims[0].text)
+        self.assertEqual(sections[0].claims[0].review_status, "pending")
+        self.assertIn("CASE_FACT_REQUIRES_REVIEW", errors)
+
+    def test_claim_date_contradicting_structured_timeline_is_not_ready(self):
+        source = str(uuid4())
+        draft = {"sections": [{"section_type": "treatment_review", "claims": [{
+            "text": "出院时间：2020-11-08 09:20", "claim_type": "case_fact",
+            "evidence_quote": "出院时间：2020-11-08 09:20"}]}]}
+        evidence = {source: "出院时间：2020-11-08 09:20"}
+        structured = {"encounter:inpatient:2025-11-07": {"discharge": {
+            "status": "observed", "date": "2025-11-08", "alternatives": [], "evidence_ids": []}}}
+        _, _, errors = validate_and_complete(map_report_sources(draft, evidence), evidence, set(), {},
+                                             structured_dates=structured)
+        self.assertIn("CLAIM_DATE_CONFLICTS_WITH_STRUCTURED_DATES", errors)
+        # Without a structured timeline the existing provenance rules still apply.
+        _, _, without = validate_and_complete(map_report_sources(draft, evidence), evidence, set(), {})
+        self.assertNotIn("CLAIM_DATE_CONFLICTS_WITH_STRUCTURED_DATES", without)
+
 
 if __name__ == "__main__": unittest.main()

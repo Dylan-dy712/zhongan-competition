@@ -1,6 +1,6 @@
 import unittest
 
-from services.api.app.worker import looks_like_title, text_chunks
+from services.api.app.worker import assign_encounter_keys, looks_like_title, text_chunks
 from services.api.app.tencent_ocr import normalize_bbox
 
 
@@ -31,6 +31,51 @@ class WorkerTests(unittest.TestCase):
 
     def test_ocr_bbox_is_normalized_to_original_image(self):
         self.assertEqual(normalize_bbox(Detection(), 100, 100), [0.1, 0.2, 0.9, 0.6])
+
+    def test_undated_pages_stay_unattributed_and_visits_stay_separate(self):
+        parsed = [
+            ({"document_id": "D1", "document_version": 1, "document_type": None},
+             [{"page_index": 0, "text": "电子病历\n就诊日期：2025-07-19\n诊断：子宫平滑肌瘤"},
+              {"page_index": 1, "text": "检查报告，未见日期"}]),
+            ({"document_id": "D2", "document_version": 1, "document_type": None},
+             [{"page_index": 0, "text": "出院记录\n入院时间：2025-07-28 09:00\n出院时间：2025-08-11 09:20"}]),
+        ]
+        keys = assign_encounter_keys(parsed)
+        self.assertEqual(keys[("D1", 1, 0)], "encounter:outpatient:2025-07-19")
+        self.assertEqual(keys[("D1", 1, 1)], "encounter:unattributed")
+        self.assertEqual(keys[("D2", 1, 0)], "encounter:inpatient:2025-07-28")
+
+    def test_discharge_only_page_joins_a_nearby_admission_not_a_distant_one(self):
+        parsed = [
+            ({"document_id": "A", "document_version": 1}, [{"page_index": 0, "text": "入院时间：2025-07-28"}]),
+            ({"document_id": "B", "document_version": 1}, [{"page_index": 0, "text": "出院时间：2025-08-11"}]),
+            ({"document_id": "C", "document_version": 1}, [{"page_index": 0, "text": "出院时间：2024-01-05"}]),
+        ]
+        keys = assign_encounter_keys(parsed)
+        self.assertEqual(keys[("B", 1, 0)], "encounter:inpatient:2025-07-28")
+        self.assertEqual(keys[("C", 1, 0)], "encounter:unattributed")
+
+    def test_discharge_between_two_admissions_binds_to_the_latest_one(self):
+        # Two admissions inside the 90-day window: the discharge page joins the latest
+        # admission that started on or before it.
+        parsed = [
+            ({"document_id": "A", "document_version": 1}, [{"page_index": 0, "text": "入院时间：2025-07-28"}]),
+            ({"document_id": "B", "document_version": 1}, [{"page_index": 0, "text": "入院时间：2025-08-20"}]),
+            ({"document_id": "C", "document_version": 1}, [{"page_index": 0, "text": "出院时间：2025-08-25"}]),
+        ]
+        keys = assign_encounter_keys(parsed)
+        self.assertEqual(keys[("C", 1, 0)], "encounter:inpatient:2025-08-20")
+
+    def test_discharge_of_an_earlier_stay_ignores_a_later_admission(self):
+        # A discharge dated before a later admission can only belong to the earlier
+        # stay, even though both sit inside the match window.
+        parsed = [
+            ({"document_id": "A", "document_version": 1}, [{"page_index": 0, "text": "入院时间：2025-07-28"}]),
+            ({"document_id": "B", "document_version": 1}, [{"page_index": 0, "text": "入院时间：2025-08-20"}]),
+            ({"document_id": "C", "document_version": 1}, [{"page_index": 0, "text": "出院时间：2025-08-11"}]),
+        ]
+        keys = assign_encounter_keys(parsed)
+        self.assertEqual(keys[("C", 1, 0)], "encounter:inpatient:2025-07-28")
 
 
 if __name__ == "__main__":

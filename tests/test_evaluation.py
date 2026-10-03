@@ -6,7 +6,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from scripts.eval_cli import evaluate, summarize_blind
+from scripts.eval_cli import evaluate, predictions, summarize_blind
 
 
 def run(facts=(), insights=(), status='completed', insight_status='completed'):
@@ -158,6 +158,36 @@ class EvaluationTests(unittest.TestCase):
         self.assertIsNone(result['registered_independent_humans']['overall']['warmth']['mean'])
         self.assertFalse(result['registered_independent_humans']['score_targets_met'])
         self.assertEqual(result['registered_independent_humans']['unscored_reports'], 2)
+
+
+class PredictionsTests(unittest.TestCase):
+    def test_structured_medication_facts_contribute_their_drug_name(self):
+        run = run_of([fact('medication', {'drug_name': '益气维血片', 'dose': None, 'frequency': None,
+                                          'route': None, 'phase': 'discharge'}),
+                      fact('medication', {'drug_name': '醋酸戈舍瑞林缓释植入剂', 'dose': '3.6mg',
+                                          'frequency': None, 'route': None, 'phase': 'plan'})])
+        values, completed = predictions(run)
+        self.assertTrue(completed)
+        self.assertEqual(values['medications'], [('益气维血片', 'present'),
+                                                 ('醋酸戈舍瑞林缓释植入剂', 'present')])
+
+    def test_structured_medication_without_drug_name_is_skipped(self):
+        run = run_of([fact('medication', {'phase': 'unknown'})])
+        values, _ = predictions(run)
+        self.assertEqual(values['medications'], [])
+
+    def test_multi_encounter_scalars_need_full_agreement(self):
+        gold = [{'case_id': 'c', 'gold': {'stay_days': 14}}]
+        agreeing = run_of([fact('stay_days', 14), fact('stay_days', 14)])
+        self.assertEqual(predictions(agreeing)[0]['stay_days'], 14)
+        disagreeing = run_of([fact('stay_days', 14), fact('stay_days', 3)])
+        self.assertIsNone(predictions(disagreeing)[0].get('stay_days'))
+        result = evaluate(gold, {'c': run_of([fact('stay_days', 14), fact('stay_days', 3)])})
+        self.assertEqual(result['kr1']['per_field']['stay_days']['fn'], 1)
+
+
+def run_of(facts):
+    return {'status': 'completed', 'stage_results': {}, 'facts': list(facts), 'insights': []}
 
 
 if __name__ == '__main__':
