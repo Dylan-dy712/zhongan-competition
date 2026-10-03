@@ -21,6 +21,8 @@ python -m unittest discover -s tests -v
 
 内部KR1/KR2及KR3汇总可使用 `python -m scripts.eval_cli`。当前API导出、冻结manifest、不确定标注剔除、失败样本保留与独立真人注册口径见 [内部评测协议](docs/evaluation/protocol.md)。AI辅助标注和预评分不能替代官方评测或真人盲评。
 
+品质画像与需求解释核心使用 `python -m scripts.quality_cli`，七维定义、来源归因、拒排与尚未接入的在线链路见[品质画像说明](docs/reviews/quality-profiles.md)。合成覆盖不代表真实机构或官方KR4达标。
+
 当前逐项实现证据与未通过门槛见 [2026-10-03质量验收记录](docs/reviews/quality-evidence-20261003.md)。工程路径通过与比赛KR达标分开记录。
 
 PR及main通过[GitHub Actions检查](.github/workflows/ci.yml)后，按[CI与云端同步流程](docs/reviews/ci-cloud-deployment.md)部署确切main提交和对应CI网页产物；SSH私钥保持本机使用。
