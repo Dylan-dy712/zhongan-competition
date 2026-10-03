@@ -5,6 +5,7 @@ import {ApiError, continueAnalysis, createConversation, getConversation, getEvid
 import type {ChatSnapshot, ChatSubject, ChatTurn, Conversation, Evidence, ToolEvent, DeliveryNotice, FeedbackType,ReportSection} from './types';
 import {CareHome,CareRecords,CareReport,EvidencePanel,brand,reading} from './CarePages';
 import {ReviewWorkbench} from './ReviewWorkbench';
+import {CareRecommendations} from './CareRecommendations';
 import {publishedCare,type CarePanel} from './carePresentation';
 import './chat.css';
 import './care.css';
@@ -330,6 +331,7 @@ export default function App() {
           <button disabled={busy || (!subjects.length && !caseInput)} onClick={()=>void newChat()}>{busy?'正在打开…':'开始新的对话'}</button>
           {!subjects.length && !caseInput && <small>当前账号没有可新建案件的授权，可以填写已有案件ID。</small>}</div></main>
       : reviewOpen && connected ? <ReviewWorkbench token={token}/>
+      : panel==='home' && connected ? <><CareHome snapshot={snapshot} onChat={()=>setPanel('chat')} onReport={openReport} onRecords={()=>setPanel('records')}/><CareRecommendations token={token}/></>
       : panel==='home' ? <CareHome snapshot={snapshot} onChat={()=>setPanel('chat')} onReport={openReport} onRecords={()=>setPanel('records')}/>
       : panel==='report' ? <main className="chat-report"><h1>本次关怀指引</h1>
           {publishedCare(snapshot.report) ? <><p className="care-report-version">第 {snapshot.report.report_version} 版 · 已审核发布</p>

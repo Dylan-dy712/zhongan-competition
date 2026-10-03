@@ -251,6 +251,26 @@ def main() -> None:
             conn.execute("ROLLBACK TO SAVEPOINT tamper_check")
         replay = client.post('/v1/quality/snapshots/build', headers=headers, json=build_body)
         assert replay.status_code == 200 and replay.json()['created'] is False,             'identical window rebuild replays the same immutable snapshot'
+        needs = {'disease_group': 'TY', 'treatment_group': 'unmapped', 'risk_group': None,
+                 'payer_group': None,
+                 'needs': [{'need_id': 'n-cost', 'metric_name': 'cost_level'},
+                           {'need_id': 'n-guide', 'metric_name': 'guidance_completeness'}]}
+        assert client.post('/v1/quality/recommendations', headers=patient_headers,
+                           json={**needs, 'needs': needs['needs'][:1]}).status_code == 422, \
+            'fewer than two independent needs is rejected'
+        recs = client.post('/v1/quality/recommendations', headers=patient_headers, json=needs)
+        assert recs.status_code == 200, f'recommendations: {recs.status_code} {recs.text[:150]}'
+        rec_body = recs.json()
+        assert rec_body['data_origin'] == 'synthetic' and rec_body['policy_status'] == 'draft', \
+            'recommendations declare their synthetic origin and draft policy'
+        assert all(r['eligible'] is False and r['ranking_allowed'] is False and not r['match_reasons']
+                   for r in rec_body['results']), \
+            'draft policy and synthetic origin keep every candidate ineligible and unranked'
+        joined = ';'.join(r['rejection_reason'] or '' for r in rec_body['results'])
+        assert '指标政策未冻结' in joined and '合成数据仅供原型验证' in joined, \
+            'rejection reasons are shown verbatim to the requester'
+        assert all(r['entity_name'] for r in rec_body['results']), \
+            'results carry mapped entity names'
         conn.execute("UPDATE consent_purposes SET status='revoked' WHERE consent_id=%s", (consent,))
         assert client.get('/v1/reviews?status=decided', headers=headers).json() == []
         assert client.post(f'/v1/reviews/{task_id}/decision',headers=report_headers,json=body).status_code==404

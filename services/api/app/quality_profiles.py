@@ -395,7 +395,9 @@ def match_profiles(snapshot, *, disease_group, treatment_group, risk_group, paye
     for profile in selected.values():
         group=profile['cohort_filters']
         metrics={m['metric_name']:m for m in profile['metrics']}
-        usable=[n for n in needs if metrics[n.metric_name]['comparison_allowed']]
+        # A need whose metric the snapshot does not carry (honest absence) is an
+        # unmet need, never a server error.
+        usable=[n for n in needs if n.metric_name in metrics and metrics[n.metric_name]['comparison_allowed']]
         reasons=[{'reason_code':n.metric_name,'text':f"您关注{metrics[n.metric_name]['label']}；同组记录值为{metrics[n.metric_name]['value']:.3g}，有效样本{metrics[n.metric_name]['sample_count']}。这不是疗效保证。",
                   'metric_refs':[metrics[n.metric_name]['metric_ref']],
                   'need_refs':[n.need_id]} for n in usable]
@@ -434,6 +436,15 @@ def match_profiles(snapshot, *, disease_group, treatment_group, risk_group, paye
                 candidate['rejection_reason']=('合成数据仅供原型验证' if snapshot['data_origin']=='synthetic' else
                     '可比候选不足' if len(candidates)<2 else
                     '删一后画像维度或明确需求依据不再有效' if not robust_basis else '次序对删一观测扰动敏感')
+    if snapshot['data_origin']=='synthetic':
+        # Every synthetic candidate carries the label, including ones already
+        # ineligible for other reasons; accumulated reasons are preserved.
+        for result in results:
+            reason=result['rejection_reason']
+            if not reason:
+                result['rejection_reason']='合成数据仅供原型验证'
+            elif '合成数据仅供原型验证' not in reason:
+                result['rejection_reason']=reason+';合成数据仅供原型验证'
     for result in results:
         result.pop('values');result.pop('bounds');result.pop('stable_dimensions')
     return [Recommendation.model_validate(result).model_dump(mode='json') for result in results]

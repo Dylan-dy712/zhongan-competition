@@ -208,6 +208,30 @@ def persist_snapshot(conn, *, data: QualityInput, actor_id: UUID, limitations: l
     return {**snapshot, "row_created_at": row["created_at"].isoformat(), "created": existing is None}
 
 
+def recommend_from_latest(conn, request) -> dict | None:
+    """Latest immutable snapshot + match_profiles; rejection reasons stay verbatim.
+
+    Any active actor may ask: the response carries aggregate statistics and
+    honest rejections only (draft policy and synthetic origin can never rank).
+    """
+    row = conn.execute(
+        "SELECT payload FROM quality_snapshots ORDER BY created_at DESC LIMIT 1").fetchone()
+    if not row:
+        return None
+    snapshot = row["payload"]
+    from .quality_profiles import match_profiles
+
+    results = match_profiles(snapshot,
+        disease_group=request.disease_group, treatment_group=request.treatment_group,
+        risk_group=request.risk_group, payer_group=request.payer_group,
+        needs=request.needs)
+    names = {p["entity_id"]: p["display_name"] for p in snapshot["profiles"]}
+    for result in results:
+        result["entity_name"] = names.get(result["candidate_id"], result["candidate_id"])
+    return {"snapshot_id": str(snapshot["snapshot_id"]), "data_origin": snapshot["data_origin"],
+            "policy_status": snapshot["policy"]["status"], "results": results}
+
+
 def list_snapshots(conn) -> list[dict]:
     return [dict(r) for r in conn.execute(
         """SELECT snapshot_id,dataset_version,data_origin,created_at,
