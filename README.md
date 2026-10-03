@@ -23,6 +23,8 @@ python -m unittest discover -s tests -v
 
 当前逐项实现证据与未通过门槛见 [2026-10-03质量验收记录](docs/reviews/quality-evidence-20261003.md)。工程路径通过与比赛KR达标分开记录。
 
+PR及main通过[GitHub Actions检查](.github/workflows/ci.yml)后，按[CI与云端同步流程](docs/reviews/ci-cloud-deployment.md)部署确切main提交和对应CI网页产物；SSH私钥保持本机使用。
+
 ## 持续对话与材料分析
 
 患者端位于 `apps/web`，使用 React、TypeScript 与 Vite。新的入口是持续聊天：连接访问令牌后可直接开始，不需要预先输入报告版本。支持聊天内上传 PDF/图片/UTF-8 文本、恢复历史会话、补充材料和查看证据；可另开对话接续同次就医，也可开始新的就医案件。
