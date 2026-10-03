@@ -176,3 +176,80 @@ class QualityProfilesTests(unittest.TestCase):
         candidates=result['matches'][0]['candidates']
         self.assertEqual(len(candidates),5)
         self.assertTrue(all(c['eligible'] for c in candidates))
+
+    def test_latest_nonresponse_does_not_reuse_older_feedback(self):
+        raw=fixture()
+        rows=raw['records'][:4]
+        for index,row in enumerate(rows):
+            row['subject_ref']='same-person'
+            row['discharged_at']=f'2025-01-{index+1:02d}'
+            row['feedback']['value']=5
+        rows[-1]['feedback']['value']=1
+        def feedback():
+            return next(m for m in build_profiles(QualityInput.model_validate(raw))['profiles'][0]['metrics']
+                        if m['metric_name']=='patient_feedback')
+        self.assertEqual(feedback()['value'],1)
+        for unavailable in (None,{'value':5,'question_version':'other-question',
+                                 'source_refs':rows[0]['feedback']['source_refs']}):
+            rows[-1]['feedback']=unavailable
+            metric=feedback()
+            self.assertEqual(metric['eligible_count'],1)
+            self.assertEqual(metric['sample_count'],0)
+            self.assertEqual(metric['missing_rate'],1)
+            self.assertIsNone(metric['value'])
+            self.assertFalse(metric['comparison_allowed'])
+
+    def test_missing_cost_reference_blocks_recommendation_even_with_complete_candidate(self):
+        raw=fixture()
+        for row in raw['records'][4:20]:
+            row['total_cost_minor']=None
+            row['self_paid_minor']=None
+        result=evaluate(QualityInput.model_validate(raw),[request()])
+        metric=result['snapshot']['profiles'][0]['metrics'][0]
+        self.assertEqual(metric['sample_count'],4)
+        self.assertEqual(metric['missing_rate'],0)
+        self.assertEqual(metric['reference_sample_count'],4)
+        self.assertEqual(metric['reference_eligible_count'],20)
+        self.assertEqual(metric['reference_missing_rate'],.8)
+        self.assertTrue(metric['computable']) # descriptive statistics still disclose their denominator
+        self.assertFalse(metric['comparison_allowed'])
+        self.assertIn('费用参照组缺失比例超限',metric['limitations'])
+        candidate=next(c for c in result['matches'][0]['candidates'] if c['candidate_id']=='FX-H0')
+        self.assertFalse(candidate['eligible'])
+        self.assertEqual(candidate['match_reasons'],[])
+        self.assertEqual(result['matches'][0]['coverage']['valid_two_reason_hospitals'],0)
+
+    def test_leave_one_out_rechecks_sample_and_reference_missing_gates(self):
+        raw=fixture()
+        raw['data_origin']='authorized_historical' # simulated metadata; never real historical validation
+        raw['records']=[row for index,row in enumerate(raw['records']) if index%4!=3]
+        result=evaluate(QualityInput.model_validate(raw),[request()])
+        self.assertTrue(all(c['eligible'] and not c['ranking_allowed'] for c in result['matches'][0]['candidates']))
+        cost=result['snapshot']['profiles'][0]['metrics'][0]
+        self.assertEqual(cost['sample_count'],3)
+        self.assertTrue(cost['comparison_allowed'])
+        self.assertEqual(cost['uncertainty']['undefined_perturbations'],3)
+        raw=fixture()
+        for row in raw['records'][14:20]:
+            row['total_cost_minor']=None
+            row['self_paid_minor']=None
+        result=evaluate(QualityInput.model_validate(raw),[request()])
+        cost=result['snapshot']['profiles'][0]['metrics'][0]
+        self.assertEqual(cost['reference_missing_rate'],.3)
+        self.assertTrue(cost['comparison_allowed']) # exactly at the frozen bound
+        self.assertEqual(cost['uncertainty']['undefined_perturbations'],4) # 6/19 exceeds .3 after deletion
+        self.assertTrue(all(not c['ranking_allowed'] for c in result['matches'][0]['candidates']))
+
+    def test_ranking_requires_stable_secondary_need_and_five_dimensions(self):
+        for missing in [('guidance_completeness',),('medication_conformity','treatment_conformity','followup')]:
+            raw=fixture()
+            raw['data_origin']='authorized_historical' # simulated metadata only
+            for name in missing:
+                raw['records'][0][name]=None
+            result=evaluate(QualityInput.model_validate(raw),[request()])
+            candidates=result['matches'][0]['candidates']
+            self.assertTrue(all(c['eligible'] for c in candidates))
+            self.assertTrue(all(not c['ranking_allowed'] for c in candidates))
+            self.assertTrue(all(c['rank'] is None for c in candidates))
+            self.assertEqual(result['matches'][0]['coverage']['ranked_hospitals'],0)
+            self.assertTrue(all(c['rejection_reason']=='删一后画像维度或明确需求依据不再有效' for c in candidates))
