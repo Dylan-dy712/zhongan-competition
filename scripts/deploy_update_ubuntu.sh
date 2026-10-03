@@ -6,6 +6,8 @@ release_dir="$(pwd -P)"
 app_dir=/home/ubuntu/zhongan-app
 web_dir=/var/www/zhongan-web
 [[ "$release_dir" == /home/ubuntu/zhongan-releases/release-* ]]
+exec 9>/home/ubuntu/zhongan-releases/deploy.lock
+flock -n 9 || { echo 'Another deployment is already running' >&2; exit 1; }
 test -d "$app_dir/.venv"
 test -f "$release_dir/services/api/sql/011_conversations.sql"
 test -f "$release_dir/apps/web/dist/index.html"

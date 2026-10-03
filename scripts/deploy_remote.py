@@ -1,17 +1,30 @@
 """Upload an allowlisted committed release plus the production web build, then update."""
 import argparse
 import io
+import json
 import shlex
 import subprocess
 import tarfile
 import threading
 import sys
+import tempfile
 from pathlib import Path
 
-import paramiko
+def verified_ci_run(revision):
+    remote=subprocess.check_output(['git','ls-remote','origin','refs/heads/main'],text=True).split()
+    if not remote or remote[0]!=revision:
+        raise SystemExit('Deploy only the current remote main revision')
+    runs=json.loads(subprocess.check_output(['gh','run','list','--repo','Dylan-dy712/zhongan-competition',
+        '--workflow','ci.yml','--commit',revision,'--branch','main','--event','push','--limit','1',
+        '--json','databaseId,status,conclusion,headSha,headBranch,event'],text=True))
+    if (not runs or runs[0]['headSha']!=revision or runs[0]['headBranch']!='main' or runs[0]['event']!='push'
+        or runs[0]['status']!='completed' or runs[0]['conclusion']!='success'):
+        raise SystemExit('The exact main revision must pass CI before deployment')
+    return runs[0]['databaseId']
 
 
 def main():
+    import paramiko
     parser = argparse.ArgumentParser()
     parser.add_argument('--host', required=True)
     parser.add_argument('--key', required=True)
@@ -19,6 +32,7 @@ def main():
     if subprocess.check_output(['git','status','--porcelain']).strip():
         raise SystemExit('Commit all intended changes before deploying')
     revision = subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip()
+    ci_run=verified_ci_run(revision)
     roots = ('services/', 'scripts/', 'deploy/', 'contracts/knowledge/', 'docs/medical/knowledge/')
     committed = subprocess.check_output(['git','archive','--format=tar','HEAD',*roots])
     artifact = io.BytesIO()
@@ -31,9 +45,15 @@ def main():
                     data = data.replace(b'\r\n', b'\n')
                     member.size = len(data)
                 archive.addfile(member, io.BytesIO(data) if data is not None else None)
-        for path in Path('apps/web/dist').rglob('*'):
-            if path.is_file():
-                archive.add(path, arcname=path.as_posix())
+        with tempfile.TemporaryDirectory(prefix='zhongan-ci-web-') as build:
+            subprocess.check_call(['gh','run','download',str(ci_run),'--repo','Dylan-dy712/zhongan-competition',
+                                   '--name','web-dist','--dir',build])
+            root=Path(build)
+            if not (root/'index.html').is_file() or (root/'CI_REVISION').read_text().strip()!=revision:
+                raise SystemExit('CI web artifact does not match the deployed revision')
+            for path in root.rglob('*'):
+                if path.is_file():
+                    archive.add(path,arcname='apps/web/dist/'+path.relative_to(root).as_posix())
         info = tarfile.TarInfo('REVISION')
         content = (revision+'\n').encode()
         info.size = len(content)
