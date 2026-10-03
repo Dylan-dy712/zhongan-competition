@@ -1,12 +1,12 @@
 """REQ-05 conservative rule candidates and semantic-candidate reconciliation."""
 
 import re
-from decimal import Decimal, InvalidOperation
+from .cost_breakdown import build_cost_breakdown
 from uuid import uuid4
 
 from .contracts.knowledge import DiseaseCode
 
-RULE_VERSION = "insight-rules-v1"
+RULE_VERSION = "insight-rules-v2"
 LABEL_CATEGORY = {
     "CLIN_MEDICATION_CONTEXT_REVIEW": "clinical",
     "CLIN_EXAM_JUSTIFICATION_REVIEW": "clinical",
@@ -49,24 +49,24 @@ def _insight(label, evidence_ids, rationale, action, *, knowledge_refs=(),
 
 def deterministic_candidates(evidence_rows, knowledge_entries=()):
     results = []
-    # Only compare explicitly labelled total and detail subtotal; never infer self-pay deviation.
-    totals = []
-    details = []
-    for row in evidence_rows:
-        for pattern, target in (
-            (r"(?:医疗总费用|总费用)\s*[:：]?\s*[￥¥]?([0-9][0-9,.]*)\s*元?", totals),
-            (r"(?:明细合计|项目合计)\s*[:：]?\s*[￥¥]?([0-9][0-9,.]*)\s*元?", details),
-        ):
-            match = re.search(pattern, row["text"])
-            if match:
-                try: target.append((Decimal(match.group(1).replace(",", "")), row["evidence_id"]))
-                except InvalidOperation: pass
-    if totals and details and totals[0][0] != details[0][0]:
-        results.append(_insight(
-            "COST_AMOUNT_RECONCILIATION", [totals[0][1], details[0][1]],
-            "材料明确记载的总费用与明细合计不一致，尚需排除重复页、折扣和结算口径差异。",
-            "核对结算单原件、明细范围及折扣/支付口径。", severity="medium",
-            judgment="indeterminate"))
+    # Compare only explicit labels in the same physical source scope; a page is not proof of a bill.
+    scopes={}
+    for field in build_cost_breakdown(evidence_rows).fields:
+        if field.role in {'total','detail_subtotal'}:
+            scopes.setdefault(field.scope_ref,{'total':[],'detail_subtotal':[]})[field.role].append(field)
+    for scope in scopes.values():
+        if not scope['total'] or not scope['detail_subtotal']:
+            continue
+        if any(field.amount.status!='observed' for fields in scope.values() for field in fields):
+            continue
+        totals={field.amount.value.amount_minor for field in scope['total']}
+        details={field.amount.value.amount_minor for field in scope['detail_subtotal']}
+        if len(totals)==len(details)==1 and totals!=details:
+            results.append(_insight('COST_AMOUNT_RECONCILIATION',
+                [ref for fields in scope.values() for field in fields for ref in field.amount.evidence_ids],
+                '同页或同一原文块明确记载的总费用与明细合计金额不同，尚未确认两者是否属于同张单据及相同结算范围。',
+                '核对单据身份、明细范围、重复页及折扣/支付口径；不能据此认定收费错误。',
+                severity='medium',judgment='indeterminate'))
     # Important terminology appearing in supplied material creates an explanation need, not a claim about ability.
     seen_terms = set()
     for entry in knowledge_entries:

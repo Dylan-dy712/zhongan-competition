@@ -1,10 +1,12 @@
 """Conservative evidence-bound candidate extraction for the five REQ-03 fields."""
 
 import re
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 from uuid import uuid4
 
-EXTRACTOR_VERSION = "evidence-pattern-candidate-v4"
+from .cost_breakdown import CostAmount, LABEL_ROLES, NUMBER, cost_pairs
+
+EXTRACTOR_VERSION = "evidence-pattern-candidate-v5"
 FIELD_TYPES = ("diagnosis", "surgery", "medication", "stay_days", "total_cost")
 LABELS = {
     "diagnosis": r"(?:诊断|初步诊断|入院诊断|出院诊断)",
@@ -54,12 +56,15 @@ def normalize_value(fact_type: str, value):
         days = Decimal(match.group(1))
         return int(days) if days == days.to_integral_value() else float(days)
     if fact_type == "total_cost":
-        if isinstance(value, dict) and "amount_minor" in value:
-            return {"amount_minor": int(value["amount_minor"]), "currency": value.get("currency", "CNY")}
-        match = re.search(r"[0-9][0-9,]*(?:\.\d{1,2})?", str(value))
+        if isinstance(value, dict):
+            try:
+                return CostAmount.model_validate(value).model_dump()
+            except ValueError:
+                return None
+        match=re.fullmatch(r"\s*(?:人民币|CNY|￥|¥)?\s*("+NUMBER+r")\s*(?:元|CNY)?\s*",str(value),re.I)
         if match:
-            amount_minor = int((Decimal(match.group().replace(",", "")) * 100).quantize(Decimal("1")))
-            return {"amount_minor": amount_minor, "currency": "CNY"}
+            return {'amount_minor':int(Decimal(match.group(1).replace(',',''))*100),'currency':'CNY'}
+        return None
     return value
 
 
@@ -109,14 +114,12 @@ def extract_facts(evidence_rows):
             found["stay_days"] = _merge_fact(found.get("stay_days"), candidate("stay_days",
                 normalize_value("stay_days", stay.group(1)), clean_value(stay.group(0)),
                 evidence_id, unit="day", confidence=0.9))
-        for cost in re.finditer(r"(?:医疗总费用|总费用|费用合计|合计)\s*[:：]?\s*(?:人民币|CNY|￥|¥)?\s*([0-9][0-9,]*(?:\.\d{1,2})?)\s*元?", text, re.I):
-            try:
-                amount_minor = int((Decimal(cost.group(1).replace(",", "")) * 100).quantize(Decimal("1")))
-            except InvalidOperation:
-                continue
-            found["total_cost"] = _merge_fact(found.get("total_cost"), candidate("total_cost",
-                {"amount_minor": amount_minor, "currency": "CNY"}, clean_value(cost.group(0)),
-                evidence_id, unit="CNY", confidence=0.9))
+        for cost in cost_pairs(text):
+            # A category/detail subtotal or payment amount must not become the case total.
+            if LABEL_ROLES[cost['label']]=='total':
+                found['total_cost'] = _merge_fact(found.get('total_cost'), candidate('total_cost',
+                    {'amount_minor':cost['amount_minor'],'currency':cost['currency']},cost['quote'],
+                    evidence_id,unit='CNY',confidence=.9))
     for fact_type in FIELD_TYPES:
         if fact_type not in found:
             found[fact_type] = {
@@ -142,7 +145,15 @@ def merge_model_candidates(rule_facts, model_candidates, evidence_rows):
         model_value = normalize_value(fact_type, candidate_item["normalized_value"])
         if model_value is None or (isinstance(model_value, str) and not model_value.strip()):
             continue
-        incoming = candidate(fact_type, model_value, candidate_item["raw_value"], source["evidence_id"],
+        raw_value=candidate_item['raw_value']
+        if fact_type=='total_cost':
+            supported=[c for c in cost_pairs(quote) if LABEL_ROLES[c['label']]=='total' and
+                {'amount_minor':c['amount_minor'],'currency':c['currency']}==model_value]
+            if not supported or not any(c['label']==supported[0]['label'] and
+                {'amount_minor':c['amount_minor'],'currency':c['currency']}==model_value for c in cost_pairs(source['text'])):
+                continue
+            raw_value=supported[0]['quote']
+        incoming = candidate(fact_type, model_value, raw_value, source["evidence_id"],
             unit="day" if fact_type == "stay_days" else ("CNY" if fact_type == "total_cost" else None),
             confidence=candidate_item.get("confidence_score"))
         incoming['assertion'] = candidate_item['assertion']

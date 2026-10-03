@@ -14,6 +14,7 @@ import psycopg
 from services.api.app import main as api
 from services.api.app.release_repository import publish_report
 from services.api.app.fact_extractor import extract_facts
+from services.api.app.cost_breakdown import cost_fact
 from services.api.app.report_builder import SECTION_TYPES
 from services.api.app.repository import connect, request_digest, token_digest
 from services.api.app.knowledge_assembler import KnowledgeAssembler
@@ -137,6 +138,39 @@ def main():
             VALUES (%s,%s,%s,'report',%s,1,'pending','synthetic review')""",(task,case,run,report))
         denied(422,'pending review blocks release')
         conn.execute("UPDATE review_tasks SET status='cancelled' WHERE review_id=%s",(task,))
+        cost_source={'evidence_id':evidence,'document_id':document,'document_version':1,
+                     'page_index':0,'text':'医疗总费用：120元'}
+        expense=cost_fact([cost_source])
+        conn.execute("""INSERT INTO extracted_facts(fact_id,run_id,case_id,fact_type,value,status,assertion,evidence_ids,
+            derivation,alternatives,extractor_version) VALUES (%s,%s,%s,'cost_breakdown',%s::jsonb,'derived','present',
+            %s::jsonb,%s::jsonb,'[]',%s)""",(expense['fact_id'],run,case,json.dumps(expense['value']),
+            json.dumps(expense['evidence_ids']),json.dumps(expense['derivation']),expense['extractor_version']))
+        original=deepcopy(expense['value'])
+        altered=deepcopy(original)
+        altered['fields'][0]['amount']['value']['amount_minor']=99900
+        conn.execute("UPDATE extracted_facts SET value=%s::jsonb WHERE fact_id=%s",(json.dumps(altered),expense['fact_id']))
+        denied(422,'forged composite cost amount blocks release')
+        altered=deepcopy(original)
+        altered['fields'][0]['amount']['value']['amount_minor']=12100
+        altered['fields'][0]['sources'][0]['quote']='医疗总费用：121元'
+        conn.execute("UPDATE extracted_facts SET value=%s::jsonb WHERE fact_id=%s",(json.dumps(altered),expense['fact_id']))
+        denied(422,'valid-shaped cost quote absent from authoritative evidence blocks release')
+        altered=deepcopy(original)
+        foreign_doc=str(uuid4())
+        altered['fields'][0]['document_id']=foreign_doc
+        altered['fields'][0]['scope_ref']=f'{foreign_doc}@1:page:0'
+        conn.execute("UPDATE extracted_facts SET value=%s::jsonb WHERE fact_id=%s",(json.dumps(altered),expense['fact_id']))
+        denied(422,'cost field cannot cross its actual document scope')
+        conn.execute("UPDATE extracted_facts SET value=%s::jsonb,evidence_ids='[]' WHERE fact_id=%s",
+                     (json.dumps(original),expense['fact_id']))
+        denied(422,'cost field cannot discard its source references')
+        conflict=cost_fact([cost_source,{**cost_source,'text':'医疗总费用：130元'}])
+        conn.execute("UPDATE extracted_facts SET value=%s::jsonb,evidence_ids=%s::jsonb WHERE fact_id=%s",
+                     (json.dumps(conflict['value']),json.dumps(expense['evidence_ids']),expense['fact_id']))
+        denied(422,'nested cost component conflict blocks release')
+        check(publish().json()['message']=='cost component conflicts remain unresolved',
+              'nested cost conflicts have an explicit release rejection reason')
+        conn.execute("UPDATE extracted_facts SET value=%s::jsonb WHERE fact_id=%s",(json.dumps(original),expense['fact_id']))
         engine=conn.execute('SELECT version() AS version').fetchone()['version']
         sql_rollback='not_tested_pglite_protocol_limit'
         concurrency='not_tested_pglite_protocol_limit'
