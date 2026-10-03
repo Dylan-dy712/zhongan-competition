@@ -4,6 +4,7 @@ import {ApiError, continueAnalysis, createConversation, getConversation, getEvid
   listDeliveries, recordDeliveryReceipt, submitCareFeedback} from './api';
 import type {ChatSnapshot, ChatSubject, ChatTurn, Conversation, Evidence, ToolEvent, DeliveryNotice, FeedbackType,ReportSection} from './types';
 import {CareHome,CareRecords,CareReport,EvidencePanel,brand,reading} from './CarePages';
+import {ReviewWorkbench} from './ReviewWorkbench';
 import {publishedCare,type CarePanel} from './carePresentation';
 import './chat.css';
 import './care.css';
@@ -56,6 +57,7 @@ export default function App() {
   const currentReport = useRef('');
   currentReport.current=snapshot?.report.report_id || '';
   const [historyOpen,setHistoryOpen] = useState(false);
+  const [reviewOpen,setReviewOpen] = useState(false);
   const [sharingBusy,setSharingBusy]=useState(false);
   const active = useRef('');
   const epoch = useRef(0);
@@ -306,7 +308,7 @@ export default function App() {
     </aside>
     <section className="chat-workspace">
       <header className="chat-header"><button className="history-toggle" onClick={()=>setHistoryOpen(v=>!v)} aria-label="打开历史对话">☰</button>
-        <div><strong>{panel==='report'?'本次关怀':panel==='records'?'就医记录':panel==='chat'?'问暖暖':'暖愈智护'}</strong><span>{connected?'结合你的授权资料，慢慢理清楚':'从你最关心的事聊起'}</span></div>
+        <div><strong>{reviewOpen?'医学复核':panel==='report'?'本次关怀':panel==='records'?'就医记录':panel==='chat'?'问暖暖':'暖愈智护'}</strong><span>{connected?'结合你的授权资料，慢慢理清楚':'从你最关心的事聊起'}</span></div>
         {snapshot && <button className="care-header-report" onClick={()=>openReport()}>关怀指引</button>}
       </header>
       {delivery && snapshot?.report.report_id===delivery.report_id && <div className="analysis-status care-notice" role="status">{delivery.message}
@@ -327,6 +329,7 @@ export default function App() {
           <details><summary>接续已有案件（可选）</summary><input aria-label="已有案件ID" placeholder="已有案件 ID，不需要报告版本" value={caseInput} onChange={e=>setCaseInput(e.target.value)}/></details>
           <button disabled={busy || (!subjects.length && !caseInput)} onClick={()=>void newChat()}>{busy?'正在打开…':'开始新的对话'}</button>
           {!subjects.length && !caseInput && <small>当前账号没有可新建案件的授权，可以填写已有案件ID。</small>}</div></main>
+      : reviewOpen && connected ? <ReviewWorkbench token={token}/>
       : panel==='home' ? <CareHome snapshot={snapshot} onChat={()=>setPanel('chat')} onReport={openReport} onRecords={()=>setPanel('records')}/>
       : panel==='report' ? <main className="chat-report"><h1>本次关怀指引</h1>
           {publishedCare(snapshot.report) ? <><p className="care-report-version">第 {snapshot.report.report_version} 版 · 已审核发布</p>
@@ -367,7 +370,8 @@ export default function App() {
         </footer></>}
       {connected && <nav className="care-navigation" aria-label="关怀页面"><button aria-current={panel==='home'?'page':undefined} onClick={()=>setPanel('home')}><span aria-hidden="true">⌂</span>首页</button>
         <button aria-current={panel==='chat'?'page':undefined} onClick={()=>setPanel('chat')}><span aria-hidden="true">◌</span>问暖暖</button>
-        <button aria-current={panel==='records'?'page':undefined} onClick={()=>setPanel('records')}><span aria-hidden="true">▤</span>就医记录</button></nav>}
+        <button aria-current={panel==='records'?'page':undefined} onClick={()=>setPanel('records')}><span aria-hidden="true">▤</span>就医记录</button>
+        <button aria-current={reviewOpen?'page':undefined} onClick={()=>{setReviewOpen(v=>!v);setPanel('home');}}>✓ 复核工作台</button></nav>}
     </section>
     {evidence && <EvidencePanel evidence={evidence} onClose={()=>setEvidence(null)}/>}
   </div>;

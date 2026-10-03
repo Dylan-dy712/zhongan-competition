@@ -12,9 +12,28 @@ import psycopg
 OUTPUT = Path("/home/ubuntu/.config/zhongan/dev-fixture.env")
 
 
+def ensure_reviewer(conn, env_path: Path) -> None:
+    """Idempotent medical-reviewer identity for the review workbench."""
+    if "ZHONGAN_REVIEWER_TOKEN" in env_path.read_text(encoding="utf-8"):
+        print("Reviewer fixture already exists")
+        return
+    actor_id = uuid4()
+    token = secrets.token_urlsafe(48)
+    digest = hashlib.sha256(token.encode()).hexdigest()
+    conn.execute("INSERT INTO actors (actor_id, token_sha256, role) VALUES (%s, %s, 'medical_reviewer')",
+                 (actor_id, digest))
+    with env_path.open("a", encoding="utf-8") as env:
+        env.write(f"ZHONGAN_REVIEWER_ACTOR_ID={actor_id}" + chr(10))
+        env.write(f"ZHONGAN_REVIEWER_TOKEN={token}" + chr(10))
+    print("Reviewer fixture created")
+
+
 def main() -> None:
     if OUTPUT.exists():
         print("Synthetic fixture already exists")
+        dsn = os.environ["ZHONGAN_DATABASE_URL"]
+        with psycopg.connect(dsn) as conn:
+            ensure_reviewer(conn, OUTPUT)
         return
     dsn = os.environ["ZHONGAN_DATABASE_URL"]
     actor_id, subject_id, consent_id = uuid4(), uuid4(), uuid4()
