@@ -8,6 +8,55 @@ from services.api.app.report_llm import DraftReport
 
 
 class ReportBuilderTests(unittest.TestCase):
+    def test_user_quotes_bind_separately_from_medical_evidence_without_mutating_draft(self):
+        ref=str(uuid4())
+        sources={'case:user_context':'我担心恢复慢，希望核对费用'}
+        draft={'sections':[{'section_type':'emotional_support','claims':[{
+            'text':'我担心恢复慢，希望核对费用','claim_type':'patient_statement',
+            'source_quote':'我担心恢复慢','source_refs':[]}]}],
+            'actions':[{'action_text':'希望核对费用','source_quote':'希望核对费用','source_refs':[],
+                        'due_source':'unknown'}]}
+        original=deepcopy(draft)
+        mapped=map_report_sources(draft,{ref:'出院诊断：肺炎'},sources)
+        self.assertEqual(draft,original)
+        claim=mapped['sections'][0]['claims'][0]
+        self.assertEqual(claim['source_refs'],['case:user_context'])
+        self.assertEqual(claim['evidence_refs'],[])
+        self.assertEqual(mapped['actions'][0]['source_refs'],['case:user_context'])
+        sections,actions,errors=validate_and_complete(mapped,{ref:'出院诊断：肺炎'},set(),sources)
+        self.assertEqual(sections[4].claims[0].claim_type,'patient_statement')
+        self.assertEqual(sections[4].claims[0].review_status,'not_required')
+        self.assertEqual(len(actions),1)
+        self.assertNotIn('PATIENT_STATEMENT_WITHOUT_SOURCE',errors)
+        self.assertNotIn('ACTION_WITHOUT_SOURCE',errors)
+
+    def test_user_text_cannot_be_medical_evidence_and_medical_text_cannot_be_user_expression(self):
+        ref=str(uuid4())
+        draft={'sections':[{'section_type':'diagnosis_explanation','claims':[{
+            'text':'确诊肺炎','claim_type':'case_fact','evidence_quote':'确诊肺炎'}]},
+            {'section_type':'emotional_support','claims':[{
+                'text':'头孢曲松','claim_type':'patient_statement','source_quote':'头孢曲松'}]}]}
+        evidence={ref:'诊断：肺炎，住院用药：头孢曲松'}
+        sources={'case:user_context':'我觉得自己确诊肺炎'}
+        _,_,errors=validate_and_complete(map_report_sources(draft,evidence,sources),evidence,set(),sources)
+        self.assertIn('CASE_FACT_WITHOUT_VALID_EVIDENCE',errors)
+        self.assertIn('PATIENT_STATEMENT_WITHOUT_SOURCE',errors)
+
+    def test_user_paraphrase_cannot_discard_denial_or_invent_emotion(self):
+        sources={'case:user_context':'我不担心恢复慢，只想核对费用'}
+        for text in ['我担心恢复慢','你很焦虑，费用造成严重负担']:
+            sections,_,errors=validate_and_complete({'sections':[{'section_type':'emotional_support','claims':[{
+                'text':text,'claim_type':'patient_statement','source_refs':['case:user_context']}]}]}, {},set(),sources)
+            self.assertIn('PATIENT_STATEMENT_REQUIRES_REVIEW',errors)
+            self.assertEqual(sections[4].claims[0].review_status,'pending')
+
+    def test_service_label_cannot_auto_approve_clinical_or_cost_conclusion(self):
+        for text in ['每日服用阿司匹林100mg','现金支付就是个人自费','这种不确定让人困扰，可以把疑问列下来']:
+            sections,_,errors=validate_and_complete({'sections':[{'section_type':'emotional_support','claims':[{
+                'text':text,'claim_type':'service_suggestion','review_status':'approved'}]}]}, {},set(),{})
+            self.assertIn('SERVICE_SUGGESTION_REQUIRES_REVIEW',errors)
+            self.assertEqual(sections[4].claims[0].review_status,'pending')
+
     def test_invalid_fact_reference_is_removed_and_section_discloses_gap(self):
         sections, _, errors = validate_and_complete({"sections": [{
             "section_type": "diagnosis_explanation", "claims": [{"text": "确诊肺炎",

@@ -76,7 +76,7 @@ def main():
             'claim_type':'case_fact','evidence_refs':[str(evidence)],'review_status':'not_required'}]} for kind in SECTION_TYPES]
         conn.execute("""INSERT INTO reports(report_id,case_id,run_id,report_version,status,sections,input_hash,model_id,
             prompt_version,knowledge_version,policy_version,consent_refs) VALUES (%s,%s,%s,1,'ready',%s::jsonb,%s,
-            'synthetic','synthetic','knowledge:none','report-safety-v2',%s::jsonb)""",(report,case,run,json.dumps(sections),
+            'synthetic','synthetic','knowledge:none','report-safety-v3',%s::jsonb)""",(report,case,run,json.dumps(sections),
             digest,json.dumps([{'consent_id':str(consent),'version':1,'purpose':'case_guidance'}])))
         conn.commit()
         conn.autocommit=True
@@ -123,6 +123,22 @@ def main():
         conn.execute("UPDATE analysis_runs SET status='failed' WHERE run_id=%s",(run,))
         denied(422,'failed analysis blocks release')
         conn.execute("UPDATE analysis_runs SET status='completed' WHERE run_id=%s",(run,))
+        # A fabricated ready flag and empty stored errors must not bypass content revalidation.
+        for claim_type,text,source_refs in [
+            ('service_suggestion','现金支付等于个人自费',[]),
+            ('to_confirm','需要核对这两个金额',[]),
+            ('case_fact','医疗总费用：999元',[]),
+            ('patient_statement','我担心恢复慢',['case:user_context'])]:
+            conn.execute('UPDATE cases SET user_context=%s::jsonb WHERE case_id=%s',
+                         (json.dumps({'concern':'我不担心恢复慢'}),case))
+            unreviewed=deepcopy(sections)
+            unreviewed[0]['claims'][0].update(claim_type=claim_type,text=text,source_refs=source_refs,
+                                             evidence_refs=[str(evidence)] if claim_type=='case_fact' else [])
+            conn.execute('UPDATE reports SET sections=%s::jsonb,validation_errors=\'[]\' WHERE report_id=%s',
+                         (json.dumps(unreviewed),report))
+            denied(422,claim_type+' requires actual approval despite forged ready/status/errors')
+        conn.execute('UPDATE cases SET user_context=NULL WHERE case_id=%s',(case,))
+        conn.execute('UPDATE reports SET sections=%s::jsonb WHERE report_id=%s',(json.dumps(sections),report))
         conn.execute('UPDATE documents SET document_version=2 WHERE document_id=%s',(document,))
         denied(422,'changed document version blocks release')
         conn.execute('UPDATE documents SET document_version=1 WHERE document_id=%s',(document,))
