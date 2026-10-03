@@ -30,7 +30,11 @@ ready仅表示报告内容审核阶段完成；审核人不能用报告审批批
 
 `python -m scripts.check_release_integration`运行真实HTTP/SQL，覆盖上述主要拒绝条件、获授权发布、幂等重放/冲突、读取隔离、未获准知识不能被报告审批越过，以及失败不留下半发布状态。输入是明确合成SQL夹具，不能证明生成报告的医学质量或KR指标。
 
-PGlite协议适配器在数据库错误后存在回滚响应问题，因此该环境只验证应用异常引发的实际事务回滚，输出`sql_error_rollback=not_tested_pglite_protocol_limit`。测试脚本在原生PostgreSQL上保留触达表触发器异常的数据库回滚用例。发布/撤回并发当前输出`concurrency=not_tested`，仍须原生数据库验收；不能把outbox条数当作触达成功率。
+PGlite协议适配器在数据库错误后存在回滚响应问题，因此该环境只验证应用异常引发的实际事务回滚，输出`sql_error_rollback=not_tested_pglite_protocol_limit`与`concurrency=not_tested_pglite_protocol_limit`。原生PostgreSQL执行触达表触发器异常的数据库回滚用例，以及实际多连接的授权撤回/发布竞争和同键重复发布；不能把outbox条数当作触达成功率。
+
+2026-10-03，在用户提供的云服务器PostgreSQL 16.15隔离测试schema中通过94项单测、审核HTTP/SQL、43项聊天/Worker检查及64项发布/触达/反馈检查。发布检查输出`sql_error_rollback=passed, concurrency=passed`：真实SQL异常回滚发布记录和状态；撤回先持有行锁并提交则发布被阻断；发布先持有授权锁则撤回等待，随后患者读取立即隐藏；同时同键发布仅保存一份发布及outbox。竞争检查用`pg_blocking_pids`确认实际阻塞，不以线程启动或睡眠时间猜测发生竞争。此结果不覆盖所有数据库竞态、负载或部署恢复，也不是医学质量评分。
+
+远端隔离入口沿用`python -m scripts.check_conversation_remote --host <host> --key <本机私钥路径> --test-deps <远端临时测试依赖目录> --suite all`；suite也可选conversation/review/release，默认conversation。源码进入随机临时目录，各检查仅创建/清除自己的随机schema；不部署、不重启API/Worker，数据库与模型凭据不输出。未带`--live-model`时不调用真实模型，不能宣称本次真实模型已验收。
 
 ## APP提醒、回执与反馈
 

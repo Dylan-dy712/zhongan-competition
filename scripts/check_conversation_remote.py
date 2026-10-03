@@ -19,6 +19,7 @@ def main():
     parser.add_argument('--test-deps',default='')
     parser.add_argument('--live-model',action='store_true')
     parser.add_argument('--trace-synthetic',action='store_true')
+    parser.add_argument('--suite',choices=('conversation','review','release','all'),default='conversation')
     args=parser.parse_args()
     client=paramiko.SSHClient()
     client.load_system_host_keys()
@@ -35,19 +36,22 @@ def main():
                 for path in Path(root).rglob('*'):
                     if path.is_file() and '__pycache__' not in path.parts:
                         archive.add(path,arcname=path.as_posix())
-            archive.add('scripts/check_conversation_integration.py')
-            archive.add('scripts/migrate_database.py')
+            for path in Path('scripts').glob('*.py'):
+                archive.add(path,arcname=path.as_posix())
         artifact.seek(0)
         with client.open_sftp() as sftp:
             sftp.putfo(artifact,remote+'/source.tar.gz')
+        suites=('review','conversation','release') if args.suite=='all' else (args.suite,)
+        commands={'conversation':'check_conversation_integration','review':'check_review_integration','release':'check_release_integration'}
+        python='/home/ubuntu/zhongan-app/.venv/bin/python'
         command=(f'cd {shlex.quote(remote)} && tar -xzf source.tar.gz && '
             'set -a && . /home/ubuntu/.config/zhongan/database.env && set +a && '
             + (f'export PYTHONPATH={shlex.quote(args.test_deps)} && ' if args.test_deps else '')
             + ('set -a && . /home/ubuntu/.config/zhongan/llm.env && set +a && export CHAT_LIVE_SMOKE=1 && ' if args.live_model else '')
             + ('export CHAT_TRACE_SYNTHETIC=1 && ' if args.trace_synthetic else '')
             +
-            '/home/ubuntu/zhongan-app/.venv/bin/python -m unittest discover -s tests -q && '
-            '/home/ubuntu/zhongan-app/.venv/bin/python -m scripts.check_conversation_integration')
+            f'{python} -m unittest discover -s tests -q && '
+            + ' && '.join(f'{python} -m scripts.{commands[suite]}' for suite in suites))
         _,out,err=client.exec_command('bash -lc '+shlex.quote(command),timeout=240)
         stdout,stderr=out.read().decode(),err.read().decode()
         print(stdout)
