@@ -85,3 +85,42 @@ export interface DeliveryNotice {
 export interface DeliveryReceipt {receipt_id:string; receipt_version:number; state:'presented'|'read'}
 export type FeedbackType = 'helpful'|'not_helpful'|'inaccurate'|'needs_help';
 export interface FeedbackResult {feedback_id:string; triage_status:'not_required'|'pending'|'resolved'}
+
+export interface ReviewCorrection {
+  field_or_claim_id: "sections" | "actions" | "severity" | "rationale" | "uncertainty" | "suggested_action" | "judgment_status" | "knowledge_refs";
+  replacement: unknown;
+  source_refs?: string[];
+  reason: string;
+}
+
+export interface ReviewTask {
+  review_id: string;
+  case_id: string;
+  run_id: string;
+  target_type: "insight" | "report";
+  target_id: string;
+  target_version: number;
+  status: "pending" | "decided" | "cancelled";
+  reason: string;
+  target: Report | Record<string, unknown>;
+  created_at: string;
+}
+
+export interface ReviewDecision {
+  decision_id: string;
+  review_id: string;
+  target_type: string;
+  target_id: string;
+  target_version: number;
+  decision: "approve" | "correct" | "reject";
+  reason: string;
+  reviewer_id: string;
+  decided_at: string;
+}
+
+export interface ReleaseResult {
+  release_id: string;
+  report_id: string;
+  report_version: number;
+  status: string;
+}

@@ -59,3 +59,33 @@
 @media(max-width:760px){.evidence-overlay{align-items:flex-end}.evidence-overlay article{width:100%;max-height:80dvh;border-radius:24px 24px 0 0;padding:24px}.chat-shell .care-chat-intro{gap:14px}.chat-shell .care-chat-intro h1{font-size:23px}}
 @media(max-width:760px){.chat-header{padding:10px 14px}.chat-header span{font-size:12px}.care-header-report{font-size:13px;padding:8px 10px}.care-home,.care-records{padding-left:18px;padding-right:18px}.care-hero{min-height:265px}.care-hero h1{font-size:29px}.care-brand{width:126px}.care-mascot{right:-5px;width:37%}.care-hero-copy{max-width:70%}.care-hero p{font-size:13px}.care-next{padding:20px}.care-next h2{font-size:22px}.care-next>p{font-size:14px}.care-summary-links{gap:12px}.care-summary-links>button{padding:12px}.care-summary-links span{font-size:13px}.care-navigation{gap:0}.care-navigation button{flex:1;min-width:0}.care-records-intro img{width:105px}.care-records-intro h1{font-size:25px}.care-encounter{padding:16px}.care-chat-intro{gap:14px}.care-chat-intro h1{font-size:23px}.care-chat-intro>img{width:78px}.chat-scroll .message-bubble p{font-size:15px}.chat-report{padding:20px 16px}.care-report-section{padding:0 16px}.care-report-section summary{font-size:16px}.chat-options{flex-wrap:wrap}.chat-options button{max-width:none;text-align:left;min-height:36px}.chat-options label{min-height:36px}.chat-disclaimer{font-size:12px}.chat-footer{padding-bottom:8px}}
 @media(prefers-reduced-motion:reduce){.chat-shell button,.care-report-section summary{transition:none}}
+
+/* ---- 医学复核工作台 ---- */
+.review-workbench { padding: 18px 20px 48px; max-width: 1080px; margin: 0 auto; }
+.review-head { display: flex; align-items: baseline; gap: 14px; }
+.review-head h1 { font-size: 20px; }
+.review-note, .review-empty { color: #6b655c; font-size: 13.5px; }
+.review-notice { background: #e3efec; color: #3d7a6f; border-radius: 10px; padding: 8px 14px; font-size: 13.5px; margin: 8px 0; }
+.review-error { background: #fbe9e7; color: #b3543f; border-radius: 10px; padding: 8px 14px; font-size: 13.5px; margin: 8px 0; }
+.review-layout { display: grid; grid-template-columns: 300px 1fr; gap: 16px; margin-top: 12px; align-items: start; }
+.review-queue { list-style: none; display: grid; gap: 8px; }
+.review-queue button { width: 100%; text-align: left; background: #fff; border: 1px solid #ece6de; border-radius: 11px; padding: 10px 12px; cursor: pointer; display: grid; gap: 2px; }
+.review-queue button.selected { border-color: #c96f4a; background: #fdf6f1; }
+.review-queue small { color: #6b655c; font-size: 12px; }
+.review-queue .review-reason { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.review-detail { background: #fff; border: 1px solid #ece6de; border-radius: 14px; padding: 16px 18px; }
+.review-reason-box label { display: grid; gap: 4px; font-size: 13px; color: #6b655c; }
+.review-reason-box textarea, .review-detail textarea { width: 100%; border: 1px solid #ece6de; border-radius: 9px; padding: 7px 10px; font: inherit; }
+.review-actions-bar { display: flex; gap: 8px; margin: 10px 0; }
+.review-actions-bar button { border: 1px solid #3d7a6f; background: #3d7a6f; color: #fff; border-radius: 9px; padding: 6px 16px; cursor: pointer; }
+.review-actions-bar button.danger { border-color: #b3543f; background: #fff; color: #b3543f; }
+.review-section { border: 1px dashed #ece6de; border-radius: 11px; padding: 10px 14px; margin: 10px 0; }
+.review-section summary { cursor: pointer; font-weight: 600; font-size: 14px; }
+.review-section article { padding: 8px 0; border-bottom: 1px dashed #f0ebe4; }
+.review-claim-meta { display: flex; gap: 8px; font-size: 12px; color: #9a9287; flex-wrap: wrap; }
+.review-claim-meta strong { color: #2d2a26; }
+.citation { display: inline-block; border: 0; background: none; color: #c96f4a; cursor: pointer; font-size: 12.5px; text-decoration: underline dotted; padding: 2px 0; }
+.review-publish { margin-top: 18px; background: #fdf3dd; border: 1px solid #ecd9ae; border-radius: 12px; padding: 14px 18px; }
+.review-publish-item { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; font-size: 13.5px; }
+.review-publish-item button { border: 1px solid #3d7a6f; background: #fff; color: #3d7a6f; border-radius: 9px; padding: 5px 14px; cursor: pointer; }
+@media (max-width: 860px) { .review-layout { grid-template-columns: 1fr; } }

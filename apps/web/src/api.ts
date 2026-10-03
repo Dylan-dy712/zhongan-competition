@@ -1,5 +1,6 @@
 import type { AssistantAnswer, Evidence, Report, Conversation, ChatSnapshot, ChatSubject, ChatTurn,
-  DeliveryNotice, DeliveryReceipt, FeedbackType, FeedbackResult } from "./types";
+  DeliveryNotice, DeliveryReceipt, FeedbackType, FeedbackResult, ReviewTask, ReviewCorrection,
+  ReviewDecision, ReleaseResult } from "./types";
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
 
@@ -76,3 +77,9 @@ export const uploadChatDocument = (token: string, id: string, file: File) => {
   const data = new FormData(); data.append('file', file);
   return chatRequest<{document_id:string; source_ref:string}>(`/v1/conversations/${id}/documents`, token, 'POST', data);
 };
+export const listReviews = (token: string, status: "pending" | "decided" = "pending") =>
+  chatRequest<ReviewTask[]>(`/v1/reviews?status=${status}`, token);
+export const decideReview = (token: string, reviewId: string, body: {expected_version: number; decision: "approve" | "correct" | "reject"; reason: string; corrections?: ReviewCorrection[]}, key: string) =>
+  chatRequest<ReviewDecision>(`/v1/reviews/${encodeURIComponent(reviewId)}/decision`, token, "POST", body, key);
+export const publishReport = (token: string, caseId: string, version: number, expectedVersion: number, key: string) =>
+  chatRequest<ReleaseResult>(`/v1/cases/${encodeURIComponent(caseId)}/reports/${version}/publish`, token, "POST", {expected_version: expectedVersion}, key);
