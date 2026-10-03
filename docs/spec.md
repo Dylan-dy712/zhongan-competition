@@ -310,6 +310,8 @@ flowchart TD
 
 `ProfileMetric` 保留：`entity_id, entity_type, disease_group, cohort_filters, metric_name, numerator, denominator, value, unit, window_start, window_end, sample_count, missing_rate, computable, limitations, snapshot_id`；补充 `metric_version, dataset_version, comparison_group_id, uncertainty, eligibility_policy_version`。
 
+费用水平补充 `reference_sample_count, reference_eligible_count, reference_missing_rate, reference_median_minor`，参照组与实体均须通过冻结样本和缺失门槛。患者反馈先选该实体分层内每个受访者最新明确归因索引，再检查当前问项与回答，最新缺失不得用旧回答补齐。
+
 非比率指标的 `numerator/denominator` 可为空，但必须由指标字典定义聚合方式；比率分母为零时 `value=null, computable=false`。不可计算值不能写 0。每次统计保留纳入/排除条件及聚合样本数，不公开患者明细作为推荐理由。
 
 #### 6.5.2 候选指标字典
@@ -336,7 +338,7 @@ flowchart TD
 
 本版不定义未经论证的综合医疗质量分。排序策略与权重需在政策中固定；可以依据用户明确选定的偏好对可比维度排序，不能用 LLM 自由评分。缺失指标不按零或均值暗中补齐。
 
-必要风险变量缺失、实体不可归因、观察窗不完整、样本不足或排名对预定义扰动过于敏感时，应拒绝相应比较。仍可给事实性资源列表，明确 `ranking_allowed=false`；此类结果不得冒充有依据的完整推荐覆盖。
+必要风险变量缺失、实体不可归因、观察窗不完整、样本不足或排名对预定义扰动过于敏感时，应拒绝相应比较。删一验证须重查样本、缺失和不可判定门槛（费用含参照组）；所有明确需求和至少五个有效维度均须保留各自有效依据，不能仅检查首选排序维度。仍可给事实性资源列表，明确 `ranking_allowed=false`；此类结果不得冒充有依据的完整推荐覆盖。
 
 输出三病种×机构覆盖矩阵，并分别列出已有记录、画像可计算、可比较、满足两条理由的有效机构数量。五个空雷达轴不算五维画像。
 

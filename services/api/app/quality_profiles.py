@@ -23,7 +23,7 @@ METRICS = {
 MetricName = Literal['cost_level','self_paid_burden','medication_conformity','treatment_conformity',
                      'guidance_completeness','readmission_rate','patient_feedback']
 EntityType = Literal['hospital','doctor','treatment_plan']
-VERSION='claim-cohort-metrics-v1'
+VERSION='claim-cohort-metrics-v2'
 
 
 class QualityContract(Contract):
@@ -178,6 +178,13 @@ def _group(record):
 
 
 def _observations(rows, name, policy):
+    # Choose the latest attributed index BEFORE testing response availability/version.
+    # A missing response on the latest index must not revive an older satisfaction score.
+    if name=='patient_feedback':
+        latest={}
+        for row in sorted(rows,key=lambda r:(r.discharged_at,str(r.encounter_id))):
+            latest[row.subject_ref]=row
+        rows=list(latest.values())
     values=[]
     for row in rows:
         if name=='cost_level' and row.total_cost_minor:
@@ -189,7 +196,7 @@ def _observations(rows, name, policy):
             expected=getattr(policy,{'medication_conformity':'medication_rule_version',
                 'treatment_conformity':'treatment_rule_version','guidance_completeness':'guidance_rule_version'}[name])
             if audit and audit.applicable>0 and audit.decidable>0 and audit.rule_version==expected:
-                values.append((row,audit.passed,audit.decidable,1-audit.decidable/audit.applicable))
+                values.append((row,audit.passed,audit.decidable,(audit.applicable-audit.decidable)/audit.applicable))
         elif name=='readmission_rate':
             followup=row.followup
             if (followup and followup.complete and followup.unplanned_readmission is not None and followup.planned_excluded
@@ -198,12 +205,6 @@ def _observations(rows, name, policy):
                 values.append((row,int(followup.unplanned_readmission),1,0))
         elif name=='patient_feedback' and row.feedback and row.feedback.question_version==policy.feedback_question_version:
             values.append((row,row.feedback.value,None,0))
-    if name=='patient_feedback':
-        # Latest index encounter per respondent; repeated admissions do not multiply their vote.
-        unique={}
-        for value in sorted(values,key=lambda x:(x[0].discharged_at,str(x[0].encounter_id))):
-            unique[value[0].subject_ref]=value
-        values=list(unique.values())
     return values
 
 
@@ -251,6 +252,8 @@ class ProfileMetric(QualityContract):
     comparison_group_id: str
     metric_ref: str
     reference_sample_count: int | None
+    reference_eligible_count: int | None
+    reference_missing_rate: float | None = Field(ge=0,le=1)
     reference_median_minor: float | None
     uncertainty: Sensitivity
     eligibility_policy_version: str
@@ -281,6 +284,8 @@ def build_profiles(data: QualityInput):
         comparison_id=hashlib.sha256(json.dumps(group).encode()).hexdigest()
         baseline_costs=[r.total_cost_minor.value for r in groups[group] if r.total_cost_minor]
         baseline=median(baseline_costs) if baseline_costs else None
+        reference_possible=len(groups[group])
+        reference_missing=(reference_possible-len(baseline_costs))/reference_possible
         unknown={'unknown','undetermined','missing','未知','不详','未分层'}
         comparable=all(value and value.casefold() not in unknown for value in group[2:4])
         metrics=[]
@@ -288,13 +293,16 @@ def build_profiles(data: QualityInput):
             rows=[r for r,names in items if name in names]
             values=_observations(rows,name,data.policy)
             possible=len({r.subject_ref for r in rows}) if name=='patient_feedback' else len(rows)
-            missing=1-len(values)/possible if possible else 1
+            missing=(possible-len(values))/possible if possible else 1
             uncertain=max([v[3] for v in values],default=0)
             value=_value(values,name,baseline)
             limitations=[]
             if not comparable: limitations.append('必要风险或医保分层缺失，不能比较')
             if len(values)<data.policy.min_sample_size: limitations.append('有效样本不足')
             if max(missing,uncertain)>data.policy.max_missing_rate: limitations.append('缺失或不可判定比例超限')
+            if name=='cost_level':
+                if len(baseline_costs)<data.policy.min_sample_size: limitations.append('费用参照组有效样本不足')
+                if reference_missing>data.policy.max_missing_rate: limitations.append('费用参照组缺失比例超限')
             if not rows: limitations.append('该维度未明确归因，不能继承医院统计')
             if value is None: limitations.append('缺有效观测或参照分母')
             valid=value is not None and comparable and not limitations
@@ -304,8 +312,15 @@ def build_profiles(data: QualityInput):
                 for i,value_row in enumerate(values):
                     remaining_reference=[r.total_cost_minor.value for r in groups[group] if r.total_cost_minor and
                                          r.encounter_id!=value_row[0].encounter_id] if name=='cost_level' else []
-                    reference=median(remaining_reference) if remaining_reference else baseline
-                    perturbed.append(_value(values[:i]+values[i+1:],name,reference))
+                    remaining=values[:i]+values[i+1:]
+                    reference=median(remaining_reference) if remaining_reference else None
+                    valid_remaining=(len(remaining)>=data.policy.min_sample_size and
+                        (possible-1-len(remaining))/(possible-1)<=data.policy.max_missing_rate and
+                        max((v[3] for v in remaining),default=0)<=data.policy.max_missing_rate)
+                    if name=='cost_level':
+                        valid_remaining=valid_remaining and len(remaining_reference)>=data.policy.min_sample_size and (
+                            (reference_possible-1-len(remaining_reference))/(reference_possible-1)<=data.policy.max_missing_rate)
+                    perturbed.append(_value(remaining,name,reference) if valid_remaining else None)
             bounds=[v for v in perturbed if v is not None]
             metric={'entity_id':key,'entity_type':kind,'disease_group':group[0],'cohort_filters':filters,
                 'metric_name':name,'label':label,'numerator':sum(v[1] for v in values) if unit=='ratio' and name!='cost_level' else None,
@@ -314,6 +329,8 @@ def build_profiles(data: QualityInput):
                 'sample_count':len(values),'eligible_count':possible,'missing_rate':missing,'undetermined_rate':uncertain,
                 'computable':value is not None,'comparison_allowed':valid,'limitations':limitations,'snapshot_id':snapshot,'metric_version':VERSION,
                 'reference_sample_count':len(baseline_costs) if name=='cost_level' else None,
+                'reference_eligible_count':reference_possible if name=='cost_level' else None,
+                'reference_missing_rate':reference_missing if name=='cost_level' else None,
                 'reference_median_minor':baseline if name=='cost_level' else None,
                 'dataset_version':data.dataset_version,'comparison_group_id':comparison_id,
                 'metric_ref':':'.join((snapshot,comparison_id,kind,key,name)),
@@ -394,13 +411,18 @@ def match_profiles(snapshot, *, disease_group, treatment_group, risk_group, paye
             'match_reasons':reasons if eligible else [],'limitations':['记录统计不等于全面医疗质量；临床结论需独立医学审核'],
             'metric_snapshot_refs':[snapshot['snapshot_id']],'ranking_allowed':False,'rejection_reason':';'.join(rejection) or None,
             'policy_version':policy['version'],'values':{n.metric_name:metrics[n.metric_name]['value'] for n in usable},
-            'bounds':{n.metric_name:metrics[n.metric_name]['uncertainty'] for n in usable}})
+            'bounds':{n.metric_name:metrics[n.metric_name]['uncertainty'] for n in usable},
+            'stable_dimensions':sum(m['comparison_allowed'] and m['uncertainty']['lower'] is not None and
+                not m['uncertainty']['undefined_perturbations'] for m in metrics.values())})
     for kind in ('hospital','doctor','treatment_plan'):
         candidates=[r for r in results if r['eligible'] and r['entity_type']==kind]
         primary=needs[0].metric_name
         direction=METRICS[primary][2]
         candidates.sort(key=lambda r:direction*-r['values'][primary])
-        stable=(len(candidates)>=2 and all(not r['bounds'][primary]['undefined_perturbations'] for r in candidates) and
+        robust_basis=all(r['stable_dimensions']>=policy['min_computable_dimensions'] and
+            all(not bound['undefined_perturbations'] and bound['lower'] is not None for bound in r['bounds'].values())
+            for r in candidates)
+        stable=(len(candidates)>=2 and robust_basis and
             all(a['bounds'][primary]['lower'] is not None and b['bounds'][primary]['lower'] is not None and
             (a['bounds'][primary]['upper']<b['bounds'][primary]['lower'] if direction<0 else
              a['bounds'][primary]['lower']>b['bounds'][primary]['upper']) for a,b in zip(candidates,candidates[1:])))
@@ -410,9 +432,10 @@ def match_profiles(snapshot, *, disease_group, treatment_group, risk_group, paye
             candidate['rank']=index+1 if allowed else None
             if not allowed:
                 candidate['rejection_reason']=('合成数据仅供原型验证' if snapshot['data_origin']=='synthetic' else
-                    '可比候选不足' if len(candidates)<2 else '次序对删一观测扰动敏感')
+                    '可比候选不足' if len(candidates)<2 else
+                    '删一后画像维度或明确需求依据不再有效' if not robust_basis else '次序对删一观测扰动敏感')
     for result in results:
-        result.pop('values');result.pop('bounds')
+        result.pop('values');result.pop('bounds');result.pop('stable_dimensions')
     return [Recommendation.model_validate(result).model_dump(mode='json') for result in results]
 
 
