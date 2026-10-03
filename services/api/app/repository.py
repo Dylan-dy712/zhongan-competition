@@ -16,6 +16,7 @@ from .contracts.core import (
 )
 from .report_builder import POLICY_VERSION
 from .review_service import check_report_knowledge
+from .report_context import capture_context, context_sources
 
 
 class AccessDenied(Exception):
@@ -189,7 +190,7 @@ def get_document(conn, *, actor_id: UUID, case_id: UUID,
 
 def create_analysis_run(conn, *, actor_id: UUID, case_id: UUID,
                         document_versions: list[DocumentVersionRef],
-                        pipeline_version: str, force_new: bool) -> tuple[AnalysisRun, bool]:
+                        pipeline_version: str, force_new: bool, conversation_id=None, turn_id=None) -> tuple[AnalysisRun, bool]:
     with conn.transaction():
         allowed = conn.execute(
             """SELECT 1 FROM cases c JOIN actor_subject_access a
@@ -224,7 +225,9 @@ def create_analysis_run(conn, *, actor_id: UUID, case_id: UUID,
                 "source_hash": row["source_hash"],
             })
         snapshot.sort(key=lambda item: (item["document_id"], item["document_version"]))
-        input_hash = request_digest({"documents": snapshot, "pipeline_version": pipeline_version})
+        context=capture_context(conn,case_id,actor_id,conversation_id,turn_id)
+        context_sources(conn,{'case_id':case_id,'context_snapshot':context},lock=True)
+        input_hash = run_input_hash(snapshot,pipeline_version,context)
         conn.execute(
             "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
             (f"run:{case_id}:{input_hash}",),
@@ -242,12 +245,19 @@ def create_analysis_run(conn, *, actor_id: UUID, case_id: UUID,
         row = conn.execute(
             """INSERT INTO analysis_runs
                (run_id, case_id, input_hash, schema_version, pipeline_version,
-                document_versions, status, current_stage, execution_mode)
-               VALUES (%s, %s, %s, '0.1.0', %s, %s::jsonb, 'queued', 'parse', 'live')
+                document_versions, status, current_stage, execution_mode, context_snapshot)
+               VALUES (%s, %s, %s, '0.1.0', %s, %s::jsonb, 'queued', 'parse', 'live',%s::jsonb)
                RETURNING *""",
-            (run_id, case_id, input_hash, pipeline_version, json.dumps(snapshot)),
+            (run_id, case_id, input_hash, pipeline_version, json.dumps(snapshot),json.dumps(context)),
         ).fetchone()
         return _to_run(row), True
+
+
+def run_input_hash(documents,pipeline_version,context=None):
+    payload={'documents':documents,'pipeline_version':pipeline_version}
+    if context is not None:
+        payload['context_snapshot']=context
+    return request_digest(payload)
 
 
 def get_analysis_run(conn, *, actor_id: UUID, run_id: UUID) -> AnalysisRun | None:
@@ -399,6 +409,15 @@ def get_report(conn, *, actor_id: UUID, case_id: UUID, version: int, patient_vie
     ).fetchone()
     if not row:
         return None
+    if row['role']=='medical_reviewer' and not patient_view:
+        try:
+            run=conn.execute('SELECT case_id,context_snapshot FROM analysis_runs WHERE run_id=%s AND case_id=%s',
+                             (row['run_id'],row['case_id'])).fetchone()
+            if not run:
+                return None
+            context_sources(conn,run)
+        except ValueError:
+            return None
     if (patient_view or row['role']!='medical_reviewer') and not patient_report_visible(conn,row):
         return None
     return _to_report(row)
@@ -418,6 +437,11 @@ def patient_report_visible(conn, row) -> bool:
     if any(c['review_status'] in {'pending','rejected'} for s in row['sections'] for c in s['claims']):
         return False
     try:
+        run=conn.execute('SELECT case_id,context_snapshot FROM analysis_runs WHERE run_id=%s AND case_id=%s',
+                         (row['run_id'],row['case_id'])).fetchone()
+        if not run:
+            return False
+        context_sources(conn,run)
         material = '\n'.join(e['text_value'] or '' for e in conn.execute(
             'SELECT text_value FROM evidence WHERE case_id=%s AND run_id=%s',
             (row['case_id'],row['run_id'])).fetchall())

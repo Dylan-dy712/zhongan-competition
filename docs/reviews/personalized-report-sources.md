@@ -9,3 +9,11 @@
 `report-safety-v3` 发布重新校验实际内容。未解决硬错误仍不能批准；可复核改写经对应报告版本的审批后才可发布。旧报告需按新政策重新生成，不在本次迁移中批量修改原文或审批记录。
 
 `python -m scripts.check_report_provider` 是手动运行的真实配置模型测试，仅发送脚本内固定合成文本，检查六段、保留用户关切/相关行动、费用引文、没有编造提醒时间及无来源硬错误。只输出计数和检查状态，不输出模型原始响应或凭据；不会切换 mock 或自动补齐模型失败结果。它不是完整生产端到端验收、真实 OCR 测试、官方 F1、医学一致率或温度盲评。
+
+## 冻结聊天快照（report-context，v5）
+
+PR22 起用户可以选择把"本次对话的本人原话"冻结进分析输入：默认关闭；开启后由会话所有者对每个会话显式授权，分析创建时通过 `capture_context` 在数据库事务内捕获（cases.user_context + 发起 turn 及之前的本人用户消息，最多 12 条并带截断标记），连同授权版本、政策与 Prompt 版本一起写入 `analysis_runs.context_snapshot`，落库后由触发器保证不可变。模型答案、其他会话与其他主体内容永不进入快照；自述仍是自述，不因进入快照而变成医学证据。
+
+`prompt v5` 接收冻结的 `user_sources` 映射（`conversation:<id>:turn:<id>:user` 键），与 v4 的 `case:user_context` 键并存；`patient_statement` 的 `source_quote` 必须逐字来自该映射。生成（Worker）、审核读取、批准、发布与患者读取在各自身份与授权视角下重新执行 `context_sources`（共享关闭、授权版本变化、同意撤回即失败）；失败时报告隐藏、复核队列排除、发布阻断，已入队 run 在生成前被拒绝（错误码 `REPORT_CONTEXT_UNAUTHORIZED`）。关闭后新建的分析不携带聊天内容；重新开启递增 sharing_version，旧快照不复活。
+
+验证边界：原生 PostgreSQL 集成（`scripts/check_conversation_integration.py`，87 项检查）覆盖默认关闭、跨主体拒绝、截断、模型答案排除、不可变触发器、同 turn 幂等、新 turn 新 run、关闭后新 run 不含聊天、在途 run 生成拒绝与版本递增；`scripts/check_report_provider` 以 v5 真实模型合成冒烟通过（6 段、用户声明/行动保留、费用引文、无硬错误）。尚未覆盖：发布后撤回的患者端可见性联动（属发布套件）、并发竞争专项与真实浏览器交互验收。

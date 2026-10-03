@@ -20,6 +20,9 @@ def main():
     parser.add_argument('--live-model',action='store_true')
     parser.add_argument('--trace-synthetic',action='store_true')
     parser.add_argument('--suite',choices=('conversation','review','release','all'),default='conversation')
+    parser.add_argument('--skip-units',action='store_true',
+                        help='skip unittest discover; use when unit tests need build artifacts '
+                             'the source-only tarball does not ship (they run locally and in CI)')
     args=parser.parse_args()
     client=paramiko.SSHClient()
     client.load_system_host_keys()
@@ -49,8 +52,7 @@ def main():
             + (f'export PYTHONPATH={shlex.quote(args.test_deps)} && ' if args.test_deps else '')
             + ('set -a && . /home/ubuntu/.config/zhongan/llm.env && set +a && export CHAT_LIVE_SMOKE=1 && ' if args.live_model else '')
             + ('export CHAT_TRACE_SYNTHETIC=1 && ' if args.trace_synthetic else '')
-            +
-            f'{python} -m unittest discover -s tests -q && '
+            + ('' if args.skip_units else f'{python} -m unittest discover -s tests -q && ')
             + ' && '.join(f'{python} -m scripts.{commands[suite]}' for suite in suites))
         _,out,err=client.exec_command('bash -lc '+shlex.quote(command),timeout=240)
         stdout,stderr=out.read().decode(),err.read().decode()

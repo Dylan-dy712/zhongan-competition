@@ -2,7 +2,8 @@
 
 from uuid import uuid4
 
-from .repository import _to_report, request_digest
+from .repository import _to_report, request_digest, run_input_hash
+from .report_context import context_sources
 from .report_builder import POLICY_VERSION
 from .fact_extractor import FIELD_TYPES
 from .cost_breakdown import CostBreakdown, validate_cost_sources
@@ -74,7 +75,7 @@ def publish_report(conn, *, actor_id, case_id, version, expected_version, idempo
                      'source_hash':d['source_hash']} for d in documents]
         if (not snapshot or any(d['status']!='parsed' for d in documents) or
             snapshot!=sorted(run['document_versions'],key=lambda d:(d['document_id'],d['document_version'])) or
-            request_digest({'documents':snapshot,'pipeline_version':run['pipeline_version']})!=report.input_hash):
+            run_input_hash(snapshot,run['pipeline_version'],run.get('context_snapshot'))!=report.input_hash):
             raise ReleaseBlocked('current materials differ from reviewed input')
         if conn.execute("""SELECT 1 FROM analysis_runs WHERE case_id=%s AND run_id<>%s
             AND status IN ('queued','running') LIMIT 1""",(case_id,report.run_id)).fetchone():
@@ -117,7 +118,7 @@ def publish_report(conn, *, actor_id, case_id, version, expected_version, idempo
                 validate_cost_sources(cost,evidence_rows)
             except ValueError:
                 raise ReleaseBlocked('cost field is not supported by current source evidence') from None
-        sources = {'case:user_context': str(scope['user_context'])} if scope['user_context'] else {}
+        sources = context_sources(conn,run,lock=True)
         checked_sections, _, content_errors = checked_report_content(report,[],evidence,sources)
         # Recompute from actual content: stale/forged statuses and an empty saved error list
         # cannot turn a model label or paraphrase into an automatic approval.
