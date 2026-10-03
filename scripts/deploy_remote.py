@@ -1,5 +1,6 @@
 """Upload an allowlisted committed release plus the production web build, then update."""
 import argparse
+import hashlib
 import io
 import json
 import shlex
@@ -9,6 +10,23 @@ import threading
 import sys
 import tempfile
 from pathlib import Path
+
+
+def validated_build(root, revision, *, mobile=False):
+    if not (root/'index.html').is_file() or (root/'CI_REVISION').read_text().strip()!=revision:
+        raise SystemExit('CI artifact does not match the deployed revision')
+    paths = sorted(p for p in root.rglob('*') if p.is_file())
+    if any(p.is_symlink() or not p.resolve().is_relative_to(root.resolve()) for p in root.rglob('*')):
+        raise SystemExit('Linked or escaped CI artifact path')
+    if mobile:
+        manifest = json.loads((root/'manifest.json').read_text())
+        actual = {p.relative_to(root).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
+                  for p in paths if p!=root/'manifest.json'}
+        if manifest!=actual:
+            raise SystemExit('Mobile artifact manifest mismatch')
+        if '<base href="/.mobile-demo-releases/'+revision+'/">' not in (root/'index.html').read_text(encoding='utf-8'):
+            raise SystemExit('Mobile artifact must use its immutable release base')
+    return paths
 
 def verified_ci_run(revision):
     remote=subprocess.check_output(['git','ls-remote','origin','refs/heads/main'],text=True).split()
@@ -45,15 +63,13 @@ def main():
                     data = data.replace(b'\r\n', b'\n')
                     member.size = len(data)
                 archive.addfile(member, io.BytesIO(data) if data is not None else None)
-        with tempfile.TemporaryDirectory(prefix='zhongan-ci-web-') as build:
-            subprocess.check_call(['gh','run','download',str(ci_run),'--repo','Dylan-dy712/zhongan-competition',
-                                   '--name','web-dist','--dir',build])
-            root=Path(build)
-            if not (root/'index.html').is_file() or (root/'CI_REVISION').read_text().strip()!=revision:
-                raise SystemExit('CI web artifact does not match the deployed revision')
-            for path in root.rglob('*'):
-                if path.is_file():
-                    archive.add(path,arcname='apps/web/dist/'+path.relative_to(root).as_posix())
+        for name, destination in [('web-dist','apps/web/dist/'),('mobile-dist','output_dir/mobile-demo/dist/')]:
+            with tempfile.TemporaryDirectory(prefix='zhongan-ci-'+name+'-') as build:
+                subprocess.check_call(['gh','run','download',str(ci_run),'--repo','Dylan-dy712/zhongan-competition',
+                                       '--name',name,'--dir',build])
+                root=Path(build)
+                for path in validated_build(root, revision, mobile=name=='mobile-dist'):
+                    archive.add(path,arcname=destination+path.relative_to(root).as_posix())
         info = tarfile.TarInfo('REVISION')
         content = (revision+'\n').encode()
         info.size = len(content)

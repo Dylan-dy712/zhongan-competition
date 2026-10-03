@@ -15,3 +15,7 @@ deploy_remote拒绝脏工作树、非当前远端main、没有对应ci.yml成功
 远端沿用deploy_update_ubuntu：flock拒绝重叠部署，先备份应用/网页/配置，停API与Worker后备份数据库，再执行事务迁移、依赖一致性和Nginx检查，启动服务并核验health。失败恢复应用和配置，数据库备份保留供人工处理，不自动覆盖业务数据库。数据库和模型密钥仍只从远端既有受限配置读取；不打印或回传密钥。
 
 部署后必须读回远端REVISION、API/Worker/Nginx状态、公开health与网页资源。CI成功只代表覆盖的合成程序路径通过，不代表官方KR、医学盲评或所有上线回滚条件已验收。
+
+## 移动端原型预览
+
+`output_dir/product-design` 是独立的虚构交互原型，集成后 CI 增加病例隔离检查和 `mobile-dist` 构建产物。它与主聊天应用共同接受同一 main 提交 CI 门禁，部署到 `/mobile-demo/`；默认显示首页。产物包含提交 SHA 与文件哈希，资源地址为 `/.mobile-demo-releases/<sha>/`，旧浏览器继续使用旧资源。发布切换 symlink 并保留旧版，失败恢复前一入口；不会把原型静态内容当作真实医疗报告。`output_dir/医疗费用` 知识草稿不在部署白名单中，未注册成已审核知识。
