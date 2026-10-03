@@ -17,6 +17,7 @@ export interface ReportSection {
 
 export interface CareAction {
   action_id: string;
+  report_id: string;
   action_text: string;
   owner_role: "patient" | "caregiver" | "clinician" | "customer_service";
   due_at: string | null;

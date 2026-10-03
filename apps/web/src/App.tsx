@@ -2,8 +2,11 @@ import {useCallback, useEffect, useRef, useState, type FormEvent} from 'react';
 import {ApiError, continueAnalysis, createConversation, getConversation, getEvidence, getOlderTurns,
   listConversations, listSubjects, sendChatMessage, setRecall, uploadChatDocument,
   listDeliveries, recordDeliveryReceipt, submitCareFeedback} from './api';
-import type {ChatSnapshot, ChatSubject, ChatTurn, Conversation, Evidence, ToolEvent, DeliveryNotice, FeedbackType} from './types';
+import type {ChatSnapshot, ChatSubject, ChatTurn, Conversation, Evidence, ToolEvent, DeliveryNotice, FeedbackType,ReportSection} from './types';
+import {CareHome,CareRecords,CareReport,EvidencePanel,brand,reading} from './CarePages';
+import {publishedCare,type CarePanel} from './carePresentation';
 import './chat.css';
+import './care.css';
 
 // randomUUID requires HTTPS in some browsers; retain a cryptographic HTTP development fallback.
 function requestId() {
@@ -18,8 +21,6 @@ const statusLabels: Record<string,string> = {not_started:'尚未分析',queued:'
   waiting_review:'材料已解析，部分结论待专业复核',completed:'材料分析已完成',failed:'材料分析失败',cancelled:'分析已取消',
   found:'已找到',empty:'暂无记录',available:'可读取',needs_materials:'需要补充材料',not_generated:'尚无报告',
   disabled:'历史回忆已关闭',published:'已发布',ready:'报告待发布',pending_review:'等待复核'};
-const sectionLabels: Record<string,string> = {diagnosis_explanation:'病情说明',treatment_review:'治疗回顾',
-  cost_explanation:'费用解读',recovery_plan:'康复计划',emotional_support:'情绪关怀',next_visit_advice:'复诊提醒'};
 const errorText = (e:unknown) => e instanceof Error ? e.message : '连接失败，请稍后重试。';
 
 function ToolActivity({events}:{events:ToolEvent[]}) {
@@ -45,7 +46,8 @@ export default function App() {
   const [uploading,setUploading] = useState(false);
   const [error,setError] = useState('');
   const [evidence,setEvidence] = useState<Evidence|null>(null);
-  const [panel,setPanel] = useState<'chat'|'report'>('chat');
+  const [panel,setPanel] = useState<CarePanel>('home');
+  const [reportFocus,setReportFocus] = useState<ReportSection['section_type']>();
   const [delivery,setDelivery] = useState<DeliveryNotice|null>(null);
   const [feedbackNotice,setFeedbackNotice] = useState('');
   const [feedbackBusy,setFeedbackBusy] = useState(false);
@@ -64,13 +66,26 @@ export default function App() {
   const bottom = useRef<HTMLDivElement>(null);
   const pendingSend = useRef<{id:string; text:string; docs:string[]}|null>(null);
 
+  const invalidateAccess = useCallback((e:unknown,id:string,generation:number,auth=token) => {
+    if(!(e instanceof ApiError) || ![401,403,404].includes(e.status) || epoch.current!==generation || active.current!==id)return false;
+    const fresh=++epoch.current;active.current='';busyRef.current=false;
+    setSnapshot(null);setOlder([]);setEvidence(null);setAttachments([]);setInput('');setDelivery(null);
+    setConversations([]);setSubjects([]);setSubject('');setCaseInput('');setTokenInput('');setFeedbackNotice('');setBusy(false);setUploading(false);
+    localStorage.removeItem('zhongan_last_conversation');
+    pendingSend.current=null;careKeys.current.clear();
+    setError(e.status===401?'连接已失效，请重新连接。':'这次就医目前不可访问，已清除页面内容。');
+    if(e.status===401 || e.status===403){sessionStorage.removeItem('zhongan_chat_token');setToken('');setConnected(false);}
+    else void Promise.all([listConversations(auth),listSubjects(auth)]).then(([items,allowed])=>{
+      if(epoch.current===fresh){setConversations(items);setSubjects(allowed);setSubject(allowed[0]?.subject_id || '');}
+    }).catch(()=>{if(epoch.current===fresh)setError('当前记录不可访问，请重新连接后查看授权范围。');});
+    return true;
+  },[token]);
+
   const refresh = useCallback(async (id:string, auth:string, generation:number) => {
     let state:ChatSnapshot;
     try {state = await getConversation(auth,id);}
     catch(e) {
-      if(epoch.current===generation && active.current===id && e instanceof ApiError && [401,404].includes(e.status)) {
-        active.current='';setSnapshot(null);setOlder([]);setEvidence(null);setAttachments([]);
-      }
+      invalidateAccess(e,id,generation,auth);
       throw e;
     }
     if (epoch.current === generation && active.current === id) {
@@ -78,14 +93,14 @@ export default function App() {
       setHasOlder(state.turns.length === 50 && !olderExhausted.current);
     }
     return state;
-  },[]);
+  },[invalidateAccess]);
 
   const openConversation = useCallback(async (id:string, auth=token) => {
     const generation = ++epoch.current;
     active.current = id;
     olderExhausted.current = false;
     setSnapshot(null); setOlder([]); setAttachments([]); setInput(''); setEvidence(null); setError('');
-    setPanel('chat'); setHistoryOpen(false); pendingSend.current = null;
+    setPanel('home');setReportFocus(undefined); setHistoryOpen(false); pendingSend.current = null;
     try {
       await refresh(id,auth,generation);
       if (epoch.current===generation) localStorage.setItem('zhongan_last_conversation',id);
@@ -117,32 +132,33 @@ export default function App() {
   useEffect(()=>{
     let cancelled=false;
     setDelivery(null);setFeedbackNotice('');
-    const reportId=snapshot?.report.report_id,caseId=snapshot?.conversation.case_id;
+    const reportId=snapshot?.report.report_id,caseId=snapshot?.conversation.case_id,id=active.current,generation=epoch.current;
     if(!reportId || !caseId) return;
     void listDeliveries(token,caseId).then(items=>{
-      if(!cancelled) setDelivery(items.find(item=>item.report_id===reportId) || null);
+      if(!cancelled && epoch.current===generation) setDelivery(items.find(item=>item.report_id===reportId) || null);
     }).catch(e=>{
-      if(!cancelled){setError(errorText(e));if(e instanceof ApiError && [401,404].includes(e.status))setSnapshot(null);}
+      if(!cancelled && epoch.current===generation && !invalidateAccess(e,id,generation))setError(errorText(e));
     });
     return ()=>{cancelled=true;};
-  },[snapshot?.report.report_id,snapshot?.conversation.case_id,token]);
+  },[snapshot?.report.report_id,snapshot?.conversation.case_id,token,invalidateAccess]);
   useEffect(()=>{
     let cancelled=false;
     if(!delivery) return;
+    const id=active.current,generation=epoch.current;
     const state=delivery.receipt_version===0 ? 'presented' :
       delivery.receipt_state==='presented' && panel==='report' ? 'read' : null;
     if(!state) return;
     void recordDeliveryReceipt(token,delivery.outbox_id,state,delivery.receipt_version,
       careKey(`receipt:${delivery.outbox_id}:${state}`)).then(result=>{
-        if(!cancelled && currentReport.current===delivery.report_id)setDelivery({...delivery,receipt_state:result.state,receipt_version:result.receipt_version});
+        if(!cancelled && epoch.current===generation && currentReport.current===delivery.report_id)setDelivery({...delivery,receipt_state:result.state,receipt_version:result.receipt_version});
       }).catch(e=>{
-        if(!cancelled && currentReport.current===delivery.report_id){setError(errorText(e));if(e instanceof ApiError && [401,404].includes(e.status)){setDelivery(null);setSnapshot(null);}}
+        if(!cancelled && epoch.current===generation && currentReport.current===delivery.report_id && !invalidateAccess(e,id,generation))setError(errorText(e));
       });
     return ()=>{cancelled=true;};
-  },[delivery,token,panel]);
+  },[delivery,token,panel,invalidateAccess]);
   const feedback = async (type:FeedbackType) => {
     if(feedbackBusyRef.current || !snapshot?.report.report_id || !snapshot.report.report_version)return;
-    const report=snapshot.report,generation=epoch.current;
+    const report=snapshot.report,generation=epoch.current,id=active.current;
     feedbackBusyRef.current=true;setFeedbackBusy(true);setFeedbackNotice('');
     try{
       const result=await submitCareFeedback(token,report.report_id!,report.report_version!,type,
@@ -150,7 +166,7 @@ export default function App() {
       if(epoch.current===generation && currentReport.current===report.report_id)setFeedbackNotice(result.triage_status==='pending' ?
         '反馈已记录，正在等待处理。' : '谢谢你的反馈，已记录。');
     }catch(e){
-      if(epoch.current===generation && currentReport.current===report.report_id){setError(errorText(e));if(e instanceof ApiError && [401,404].includes(e.status)){setDelivery(null);setSnapshot(null);}}
+      if(epoch.current===generation && currentReport.current===report.report_id && !invalidateAccess(e,id,generation))setError(errorText(e));
     }finally{feedbackBusyRef.current=false;setFeedbackBusy(false);}
   };
 
@@ -162,6 +178,7 @@ export default function App() {
         sameCase ? snapshot?.conversation.case_id : caseInput.trim() || undefined);
       setConversations(await listConversations(token));
       await openConversation(item.conversation_id);
+      setPanel('chat');
       setCaseInput('');
     } catch(e) {setError(errorText(e));} finally {setBusy(false);}
   };
@@ -189,7 +206,7 @@ export default function App() {
           resumed.current.add(key);busyRef.current=true;setBusy(true);
           try {await continueAnalysis(token,id,run.run_id!);await refresh(id,token,generation);}
           catch(e){if(epoch.current===generation)setError(errorText(e));}
-          finally{busyRef.current=false;if(epoch.current===generation)setBusy(false);}
+          finally{if(epoch.current===generation){busyRef.current=false;setBusy(false);}}
         }
       } catch(e) {if(!stopped && epoch.current===generation)setError(errorText(e));}
       if(!stopped)timer=setTimeout(tick,3500);
@@ -214,11 +231,11 @@ export default function App() {
         await sendChatMessage(token,id,req,text,docs);
       }
       if(epoch.current===generation){setInput('');setAttachments([]);pendingSend.current=null;}
-    } catch(e){if(epoch.current===generation)setError(errorText(e));}
+    } catch(e){if(!invalidateAccess(e,id,generation) && epoch.current===generation)setError(errorText(e));}
     finally {
       try {await refresh(id,token,generation);if(epoch.current===generation)setConversations(await listConversations(token));}
       catch(e){if(epoch.current===generation)setError(errorText(e));}
-      busyRef.current=false;if(epoch.current===generation)setBusy(false);
+      if(epoch.current===generation){busyRef.current=false;setBusy(false);}
     }
   };
 
@@ -232,40 +249,42 @@ export default function App() {
         const doc=await uploadChatDocument(token,id,file);
         if(epoch.current===generation)setAttachments(v=>v.some(x=>x.document_id===doc.document_id)?v:[...v,{document_id:doc.document_id,name:file.name}]);
       }
-    } catch(e){if(epoch.current===generation)setError(errorText(e));}
-    finally {setUploading(false);if(uploadInput.current)uploadInput.current.value='';}
+    } catch(e){if(!invalidateAccess(e,id,generation) && epoch.current===generation)setError(errorText(e));}
+    finally {if(epoch.current===generation){setUploading(false);if(uploadInput.current)uploadInput.current.value='';}}
   };
 
   const showEvidence = async(id:string) => {
-    const generation=epoch.current;setError('');
+    const generation=epoch.current,conversationId=active.current;setError('');setEvidence(null);
     try {const result=await getEvidence(id,token);if(epoch.current===generation)setEvidence(result);}
-    catch(e){if(epoch.current===generation)setError(errorText(e));}
+    catch(e){if(!invalidateAccess(e,conversationId,generation) && epoch.current===generation)setError(errorText(e));}
   };
   const loadOlder = async()=>{
     if(!snapshot)return;
     const id=active.current,generation=epoch.current,first=older[0] || snapshot.turns[0];
     try {const rows=await getOlderTurns(token,id,first.turn_id);if(epoch.current===generation){setOlder(v=>[...rows,...v]);olderExhausted.current=rows.length<50;setHasOlder(rows.length===50);}}
-    catch(e){if(epoch.current===generation)setError(errorText(e));}
+    catch(e){if(!invalidateAccess(e,id,generation) && epoch.current===generation)setError(errorText(e));}
   };
   const logout = ()=>{
     ++epoch.current;active.current='';sessionStorage.removeItem('zhongan_chat_token');
     setToken('');setTokenInput('');setConnected(false);setConversations([]);setSnapshot(null);
     setOlder([]);setAttachments([]);setEvidence(null);setError('');setHistoryOpen(false);pendingSend.current=null;
+    setSubjects([]);setSubject('');setCaseInput('');setInput('');localStorage.removeItem('zhongan_last_conversation');
     setDelivery(null);setFeedbackNotice('');careKeys.current.clear();
   };
   const toggleRecall=async()=>{
     if(!snapshot)return;
     const id=active.current,generation=epoch.current;
     try {await setRecall(token,id,!snapshot.conversation.recall_enabled);await refresh(id,token,generation);}
-    catch(e){setError(errorText(e));}
+    catch(e){if(!invalidateAccess(e,id,generation) && epoch.current===generation)setError(errorText(e));}
   };
   const turns=[...older,...(snapshot?.turns || [])].filter((t,i,all)=>all.findIndex(x=>x.turn_id===t.turn_id)===i);
   const working=busy || uploading || !!snapshot?.turns.some(t=>t.status==='running');
   const submit=(e:FormEvent)=>{e.preventDefault();void send();};
+  const openReport=(section?:ReportSection['section_type'])=>{setReportFocus(section);setPanel('report');};
 
   return <div className="chat-shell">
     <aside className={`chat-sidebar ${historyOpen?'is-open':''}`}>
-      <div className="brand"><span>暖</span><div><strong>暖愈</strong><small>每一次关怀，都能接着聊</small></div></div>
+      <div className="brand"><img src={brand} alt="暖愈智护"/></div>
       {connected && <><button className="new-chat" disabled={working} onClick={prepareNewChat}>＋ 新的关怀对话</button>
         <div className="history-list"><p>以前的对话</p>{conversations.map(c=><button disabled={working} key={c.conversation_id}
           className={active.current===c.conversation_id?'selected':''} onClick={()=>void openConversation(c.conversation_id)}>
@@ -274,29 +293,31 @@ export default function App() {
     </aside>
     <section className="chat-workspace">
       <header className="chat-header"><button className="history-toggle" onClick={()=>setHistoryOpen(v=>!v)} aria-label="打开历史对话">☰</button>
-        <div><strong>暖暖</strong><span>{connected?'你的医护关怀助手':'从你最关心的事聊起'}</span></div>
-        {snapshot && <div className="chat-tabs"><button className={panel==='chat'?'selected':''} onClick={()=>setPanel('chat')}>对话</button>
-          <button className={panel==='report'?'selected':''} onClick={()=>setPanel('report')}>分析报告</button></div>}
+        <div><strong>{panel==='report'?'本次关怀':panel==='records'?'就医记录':panel==='chat'?'问暖暖':'暖愈智护'}</strong><span>{connected?'结合你的授权资料，慢慢理清楚':'从你最关心的事聊起'}</span></div>
+        {snapshot && <button className="care-header-report" onClick={()=>openReport()}>关怀指引</button>}
       </header>
       {delivery && snapshot?.report.report_id===delivery.report_id && <div className="analysis-status care-notice" role="status">{delivery.message}
-        {delivery.receipt_state==='read' ? <span>已查看</span> : <button onClick={()=>setPanel('report')}>查看报告</button>}</div>}
+        {delivery.receipt_state==='read' ? <span>已查看</span> : <button onClick={()=>openReport()}>查看指引</button>}</div>}
       {error && <div role="alert" className="chat-error persistent-error">{error}<button aria-label="关闭提示" onClick={()=>setError('')}>×</button></div>}
-      {!connected ? <main className="start-screen"><div className="welcome-symbol">✦</div><h1>有什么担心，慢慢说</h1>
+      {!connected ? <main className="start-screen care-connect"><img className="care-login-art" src={reading} alt="捧着笔记本陪伴你的暖暖"/><h1>看懂一点，安心一点。</h1>
         <p>把病历、检查单或发票放进对话。我们一起看清楚发生了什么，下一步可以做什么。</p>
         <form className="connect-form" onSubmit={e=>{e.preventDefault();void connect(tokenInput.trim());}}>
           <label htmlFor="access-token">访问令牌</label><input id="access-token" type="password" autoComplete="off" value={tokenInput} onChange={e=>setTokenInput(e.target.value)} placeholder="输入你的开发访问令牌" required/>
           <button disabled={busy}>{busy?'正在连接…':'开始对话'}</button>
           <small>当前开发环境仅接收合成材料。聊天保存在你的授权空间，重新连接后可以继续。</small>
         </form></main>
-      : !snapshot ? <main className="start-screen"><div className="welcome-symbol">✦</div><h1>你好，我是暖暖</h1><p>可以先聊聊，也可以上传材料。没有报告也能开始。</p>
+      : panel==='records' ? <CareRecords conversations={conversations} currentCase={snapshot?.conversation.case_id} busy={working}
+          onOpen={id=>void openConversation(id)} onNew={()=>{prepareNewChat();setPanel('home');}}/>
+      : !snapshot ? <main className="start-screen"><img className="care-login-art" src={reading} alt="陪你整理看病资料的暖暖"/><h1>你好，我是暖暖</h1><p>可以先聊聊，也可以上传材料。没有报告也能开始。</p>
         <div className="connect-form">{subjects.length>1 && <label>关怀对象<select value={subject} onChange={e=>setSubject(e.target.value)}>
           {Array.from(new Map(subjects.map(s=>[s.subject_id,s])).values()).map((s,i)=><option key={s.subject_id} value={s.subject_id}>已授权对象 {i+1} · {s.subject_id.slice(0,8)}</option>)}</select></label>}
           <details><summary>接续已有案件（可选）</summary><input aria-label="已有案件ID" placeholder="已有案件 ID，不需要报告版本" value={caseInput} onChange={e=>setCaseInput(e.target.value)}/></details>
           <button disabled={busy || (!subjects.length && !caseInput)} onClick={()=>void newChat()}>{busy?'正在打开…':'开始新的对话'}</button>
           {!subjects.length && !caseInput && <small>当前账号没有可新建案件的授权，可以填写已有案件ID。</small>}</div></main>
-      : panel==='report' ? <main className="chat-report"><h1>本次分析报告</h1>
-          {snapshot.report.sections ? <><p>第 {snapshot.report.report_version} 版 · 已发布</p><div className="report-grid">{snapshot.report.sections.map(s=><article className="report-tile" key={s.section_type}>
-            <h2>{sectionLabels[s.section_type] || s.section_type}</h2>{s.claims.map(c=><div key={c.claim_id}><p>{c.text}</p>{c.evidence_refs.map(id=><button className="citation" key={id} onClick={()=>void showEvidence(id)}>查看原始依据</button>)}</div>)}</article>)}</div>
+      : panel==='home' ? <CareHome snapshot={snapshot} onChat={()=>setPanel('chat')} onReport={openReport} onRecords={()=>setPanel('records')}/>
+      : panel==='report' ? <main className="chat-report"><h1>本次关怀指引</h1>
+          {publishedCare(snapshot.report) ? <><p className="care-report-version">第 {snapshot.report.report_version} 版 · 已审核发布</p>
+            <CareReport report={snapshot.report} initialSection={reportFocus} onEvidence={id=>void showEvidence(id)}/>
             {snapshot.report.report_id && <div className="report-feedback"><p>这份指引对你有帮助吗？</p>
               <button disabled={feedbackBusy} onClick={()=>void feedback('helpful')}>有帮助</button>
               <button disabled={feedbackBusy} onClick={()=>void feedback('not_helpful')}>还不够清楚</button>
@@ -305,13 +326,13 @@ export default function App() {
               {feedbackNotice && <p role="status">{feedbackNotice}</p>}</div>}</>
           : <div className="empty-report"><p>{snapshot.report.status==='not_generated'?'还没有报告。你可以在对话中上传材料，让暖暖帮你分析。':'报告尚未发布，部分内容可能需要复核。你仍可以在对话中查阅材料、核对事实。'}</p>
             <button onClick={()=>setPanel('chat')}>回到对话</button></div>}</main>
-      : <><main className="chat-scroll"><div className="conversation-intro"><div className="welcome-symbol">✦</div><h1>有什么担心，<em>慢慢说给我听</em></h1><span>你说的、材料写的，我们一起核对清楚</span></div>
+      : <><main className="chat-scroll"><div className="conversation-intro care-chat-intro"><img src={reading} alt=""/><div><h1>有不明白的，<em>慢慢问</em></h1><span>你说的、材料写的，我们一起核对清楚</span></div></div>
         {hasOlder && turns.length>0 && <button className="load-history" onClick={()=>void loadOlder()}>查看更早的聊天</button>}
         <div className="messages">{turns.length===0 && <div className="message-row assistant"><div className="avatar">✦</div><div className="message-bubble"><p>你好，我是暖暖。你可以告诉我现在最关心什么，也可以直接上传病历或发票，我会结合材料帮你梳理。</p></div></div>}
           {turns.map(t=><div className="chat-turn" key={t.turn_id} id={`turn-${t.turn_id}`}>
             {t.input_kind==='analysis_ready' ? <p className="analysis-continuation">材料分析结束 · 暖暖继续为你解释</p> : <div className="message-row user"><div className="message-bubble"><p>{t.question}</p>
             {t.attachments.map(a=><span className="attachment" key={a.document_id}>▤ {a.name}</span>)}</div></div>}
-            <div className="message-row assistant"><div className="avatar">✦</div><div className="message-bubble"><ToolActivity events={t.tool_events}/>
+            <div className="message-row assistant"><img className="avatar care-avatar" src={reading} alt="暖暖"/><div className="message-bubble"><ToolActivity events={t.tool_events}/>
               {t.answer ? <><p>{t.answer.text}</p><div className="citation-group">{t.answer.evidence_refs.map(id=><button className="citation" key={id} onClick={()=>void showEvidence(id)}>查看原始依据</button>)}</div>
                 {t.answer.history_refs.length>0 && <small className="history-reference">参考了 {t.answer.history_refs.length} 条你允许回忆的历史记录</small>}</>
                 : t.status==='failed' ? <><p>这次回答没有完成，你的消息已保存。</p><button disabled={working} onClick={()=>void send(t)}>重试这条消息</button></>
@@ -329,8 +350,10 @@ export default function App() {
             <button disabled={working} onClick={()=>void newChat(true)}>另开对话，接着聊这次就医</button></div>
           <p className="chat-disclaimer">开发环境仅使用合成材料 · 解释与关怀不能替代医生诊疗</p>
         </footer></>}
+      {connected && <nav className="care-navigation" aria-label="关怀页面"><button aria-current={panel==='home'?'page':undefined} onClick={()=>setPanel('home')}><span aria-hidden="true">⌂</span>首页</button>
+        <button aria-current={panel==='chat'?'page':undefined} onClick={()=>setPanel('chat')}><span aria-hidden="true">◌</span>问暖暖</button>
+        <button aria-current={panel==='records'?'page':undefined} onClick={()=>setPanel('records')}><span aria-hidden="true">▤</span>就医记录</button></nav>}
     </section>
-    {evidence && <div className="evidence-overlay" role="dialog" aria-modal="true" aria-label="原始依据"><button className="evidence-backdrop" aria-label="关闭原始依据" onClick={()=>setEvidence(null)}/>
-      <article><button className="close-evidence" onClick={()=>setEvidence(null)}>关闭</button><h2>原始材料依据</h2><p>第 {(evidence.page_index??0)+1} 页 · 材料版本 {evidence.document_version}</p><blockquote>{evidence.text_span?.text || '此证据暂无文字片段。'}</blockquote></article></div>}
+    {evidence && <EvidencePanel evidence={evidence} onClose={()=>setEvidence(null)}/>}
   </div>;
 }
