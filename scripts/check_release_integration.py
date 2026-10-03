@@ -139,6 +139,7 @@ def main():
         conn.execute("UPDATE review_tasks SET status='cancelled' WHERE review_id=%s",(task,))
         engine=conn.execute('SELECT version() AS version').fetchone()['version']
         sql_rollback='not_tested_pglite_protocol_limit'
+        concurrency='not_tested_pglite_protocol_limit'
         if 'wasm32' not in engine:
             conn.execute("""CREATE FUNCTION release_fault() RETURNS trigger LANGUAGE plpgsql AS
                 $$ BEGIN RAISE EXCEPTION 'synthetic outbox fault'; END $$""")
@@ -169,6 +170,11 @@ def main():
             check(conn.execute('SELECT count(*) AS n FROM report_releases').fetchone()['n']==0 and
                   conn.execute('SELECT status FROM reports WHERE report_id=%s',(report,)).fetchone()['status']=='ready',
                   'application failure before outbox insert rolls back release record and published status')
+        if 'wasm32' not in engine:
+            from scripts.check_release_concurrency import check_concurrency
+            check_concurrency(conn,dsn,schema,reviewer=reviewer,patient=patient,case=case,consent=consent,
+                              report=report,check=check)
+            concurrency='passed'
         released=publish()
         check(released.status_code==200,'validated report publishes through actual API')
         check(conn.execute('SELECT count(*) AS n FROM report_releases').fetchone()['n']==1 and
@@ -279,7 +285,7 @@ def main():
         check(client.get('/v1/feedback/triage',headers=headers).json()==[],
               'revoked feedback is hidden from staff triage')
         print(json.dumps({'status':'passed','checks':checks,'count':len(checks),
-                          'mode':'synthetic-fixtures/real-HTTP/SQL','engine':engine,'sql_error_rollback':sql_rollback,'concurrency':'not_tested'},ensure_ascii=False))
+                          'mode':'synthetic-fixtures/real-HTTP/SQL','engine':engine,'sql_error_rollback':sql_rollback,'concurrency':concurrency},ensure_ascii=False))
     finally:
         api.app.dependency_overrides.pop(api.database,None)
         conn.rollback()
