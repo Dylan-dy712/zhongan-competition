@@ -24,7 +24,9 @@ def validated_build(root, revision, *, mobile=False):
                   for p in paths if p!=root/'manifest.json'}
         if manifest!=actual:
             raise SystemExit('Mobile artifact manifest mismatch')
-        if '<base href="/.mobile-demo-releases/'+revision+'/">' not in (root/'index.html').read_text(encoding='utf-8'):
+        html = (root/'index.html').read_text(encoding='utf-8')
+        if ('<meta name="artifact-base" content="/.mobile-demo-releases/'+revision+'/">' not in html
+            or '<base' in html.lower()):
             raise SystemExit('Mobile artifact must use its immutable release base')
     return paths
 

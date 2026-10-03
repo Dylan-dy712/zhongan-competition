@@ -17,7 +17,8 @@ def build_preview(source, output, revision, base='/mobile-demo/'):
     if entry.is_symlink() or not entry.resolve().is_relative_to(source.resolve()):
         raise ValueError('Linked or escaped entry')
     html = entry.read_text(encoding='utf-8')
-    html = html.replace('<head>', '<head>\n<base href="'+base+'">\n'
+    # Resource URLs are immutable; a <base> would also redirect hash-only history URLs.
+    html = html.replace('<head>', '<head>\n<meta name="artifact-base" content="'+base+'">\n'
                         '<script>if(!location.hash)location.hash="/home";</script>', 1)
     html = re.sub(r'(?<=\?v=)[\w-]+', revision, html)
     files = set(re.findall(r'(?:src|href)="([\w-]+\.(?:js|css))\?', html))
@@ -34,11 +35,15 @@ def build_preview(source, output, revision, base='/mobile-demo/'):
         path = source/'assets'/name
         if path.is_symlink() or not path.is_file() or not path.resolve().is_relative_to(source.resolve()):
             raise ValueError('Missing or linked asset: '+name)
+    for name in files:
+        html = html.replace('"'+name+'?', '"'+base+name+'?')
+    html = html.replace('assets/', base+'assets/')
     output.mkdir(parents=True, exist_ok=False)
     (output/'index.html').write_text(html, encoding='utf-8')
     (output/'CI_REVISION').write_text(revision+'\n', encoding='utf-8')
     for name in files:
-        shutil.copyfile(source/name, output/name)
+        content = (source/name).read_text(encoding='utf-8')
+        (output/name).write_text(content.replace('assets/', base+'assets/'), encoding='utf-8')
     (output/'assets').mkdir()
     for name in assets:
         shutil.copyfile(source/'assets'/name, output/'assets'/name)
