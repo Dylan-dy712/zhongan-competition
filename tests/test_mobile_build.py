@@ -1,6 +1,8 @@
 import json
 import tempfile
 import unittest
+from html.parser import HTMLParser
+from urllib.parse import urljoin
 from pathlib import Path
 from scripts.build_proposal_preview import build_preview
 from scripts.deploy_remote import validated_build
@@ -16,7 +18,26 @@ class MobileBuildTests(unittest.TestCase):
             paths = validated_build(output, revision, mobile=True)
             self.assertEqual(len(paths), result['file_count']+1)
             self.assertTrue((output/'assets/onboard-document.webp').is_file())
-            self.assertIn('location.hash="/home"', (output/'index.html').read_text(encoding='utf-8'))
+            html = (output/'index.html').read_text(encoding='utf-8')
+            self.assertIn('location.hash="/home"', html)
+            class References(HTMLParser):
+                def __init__(self):
+                    super().__init__(); self.base = None; self.resources = []
+                def handle_starttag(self, tag, attrs):
+                    attrs = dict(attrs)
+                    if tag=='base': self.base = attrs.get('href')
+                    if tag=='script' and 'src' in attrs: self.resources.append(attrs['src'])
+                    if tag=='link' and 'href' in attrs: self.resources.append(attrs['href'])
+            parsed = References(); parsed.feed(html)
+            self.assertIsNone(parsed.base)
+            page = 'http://example.test/mobile-demo/'
+            self.assertEqual(urljoin(parsed.base or page, '#/records'), page+'#/records')
+            self.assertTrue(parsed.resources)
+            for resource in parsed.resources:
+                self.assertTrue(resource.startswith('/.mobile-demo-releases/'+revision+'/'))
+                self.assertTrue((output/resource.split('/')[-1].split('?')[0]).is_file())
+            self.assertIn('/.mobile-demo-releases/'+revision+'/assets/',
+                          (output/'care-home.js').read_text(encoding='utf-8'))
             self.assertNotIn('README.md', {p.name for p in paths})
             self.assertFalse(any(p.suffix not in {'.html','.css','.js','.webp','.json',''} for p in paths))
             with self.assertRaises(FileExistsError):
