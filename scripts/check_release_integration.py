@@ -193,10 +193,9 @@ def main():
             'review_status':'pending'})
         conn.execute("UPDATE reports SET status='pending_review',sections=%s::jsonb WHERE report_id=%s",
                      (json.dumps(reviewed_sections),report))
-        service_review=uuid4()
-        conn.execute("""INSERT INTO review_tasks(review_id,case_id,run_id,target_type,target_id,target_version,status,reason)
-            VALUES (%s,%s,%s,'report',%s,1,'pending','synthetic service suggestion review')""",
-            (service_review,case,run,report))
+        service_review=task
+        conn.execute("UPDATE review_tasks SET status='pending',reason='synthetic service suggestion review' WHERE review_id=%s",
+                     (service_review,))
         approved=client.post(f'/v1/reviews/{service_review}/decision',
             headers={**headers,'Idempotency-Key':'approve-service-suggestion'},
             json={'expected_version':1,'decision':'approve','reason':'合成测试：核对用户服务建议'})
