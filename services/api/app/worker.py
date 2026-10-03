@@ -7,6 +7,7 @@ import os
 import re
 import signal
 import time
+from datetime import date
 from pathlib import Path
 from uuid import uuid4
 
@@ -15,7 +16,9 @@ from PIL import Image
 from pypdf import PdfReader
 
 from .repository import connect
-from .fact_extractor import EXTRACTOR_VERSION, extract_facts, merge_model_candidates
+from .fact_extractor import (ADMISSION_RE, DATE_TOKEN, DISCHARGE_RE, EXTRACTOR_VERSION,
+                             UNATTRIBUTED, collect_encounter_dates, extract_facts,
+                             merge_model_candidates, normalized_date)
 from .event_builder import BUILDER_VERSION, build_events
 from .cost_breakdown import cost_fact, has_cost_conflicts, report_cost_context
 from .report_context import context_sources
@@ -82,6 +85,49 @@ def evidence_for_page(document,page):
     return [{'evidence_id':uuid4(),'text':value,'document_id':document['document_id'],
              'document_version':document['document_version'],'page_index':page['page_index'],
              'start':start,'end':end,'bbox':bbox} for start,end,value,bbox in spans]
+
+
+VISIT_RE = re.compile(r"(?:就诊|门诊|开单|开立|申请|检查)(?:时间|日期)\s*[:：]?\s*(" + DATE_TOKEN + r")")
+STAY_MATCH_WINDOW_DAYS = 90
+
+
+def assign_encounter_keys(parsed_documents) -> dict:
+    """Group parsed pages into per-visit encounter keys.
+
+    A page joins the admission stay whose date it carries (a discharge-only page may
+    join a stay that started shortly before); visit-dated pages stay outpatient and
+    everything else stays explicitly unattributed. Over-splitting is preferred over
+    silently merging distinct visits.
+    """
+    markers = {}
+    for document, pages in parsed_documents:
+        for page in pages:
+            text = page.get("text") or ""
+            kind, iso = None, None
+            admission, discharge, visit = (ADMISSION_RE.search(text), DISCHARGE_RE.search(text),
+                                           VISIT_RE.search(text))
+            if admission and (iso := normalized_date(admission.group(1))):
+                kind = "inpatient"
+            elif discharge and (iso := normalized_date(discharge.group(1))):
+                kind = "discharge"
+            elif visit and (iso := normalized_date(visit.group(1))):
+                kind = "outpatient"
+            markers[(document["document_id"], document["document_version"], page["page_index"])] = (kind, iso)
+    admissions = {iso for kind, iso in markers.values() if kind == "inpatient"}
+    keys = {}
+    for identity, (kind, iso) in markers.items():
+        if kind == "inpatient":
+            keys[identity] = f"encounter:inpatient:{iso}"
+        elif kind == "discharge":
+            earlier = sorted((day for day in admissions if day <= iso), reverse=True)
+            matched = bool(earlier) and (date.fromisoformat(iso) -
+                                         date.fromisoformat(earlier[0])).days <= STAY_MATCH_WINDOW_DAYS
+            keys[identity] = f"encounter:inpatient:{earlier[0]}" if matched else UNATTRIBUTED
+        elif kind == "outpatient":
+            keys[identity] = f"encounter:outpatient:{iso}"
+        else:
+            keys[identity] = UNATTRIBUTED
+    return keys
 
 
 def page_image_count(page) -> int:
@@ -264,8 +310,14 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
         prepared_by_page={(document['document_id'],document['document_version'],page['page_index']):evidence_for_page(document,page)
             for document,pages in parsed_documents for page in pages}
         fact_inputs=[row for rows in prepared_by_page.values() for row in rows]
+        encounter_keys = assign_encounter_keys(parsed_documents)
+        for row in fact_inputs:
+            row["encounter_key"] = encounter_keys[(row["document_id"], row["document_version"],
+                                                   row["page_index"])]
+        encounter_dates = collect_encounter_dates(fact_inputs)
         model_result = {"status": "not_configured", "raw_output": None,
                         "repaired_output": None, "candidates": {"candidates": []},
+                        "personnel": [],
                         "usage_metadata": {}, "error_code": "LLM_NOT_CONFIGURED"}
         model_provider = os.environ.get("LLM_PROVIDER", "openai_compatible")
         model_id = os.environ.get("LLM_MODEL_ID", "unconfigured")
@@ -314,7 +366,9 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
                                                 run['context_snapshot']['case_user_context'] if run.get('context_snapshot') else
                                                 (case_meta["user_context"] if case_meta else None),
                                                 user_sources=source_refs,structured_costs=report_cost_context(fact_inputs,
-                                                    model_result['candidates'].get('cost_lines',[])))
+                                                    model_result['candidates'].get('cost_lines',[])),
+                                                personnel=model_result.get("personnel", []),
+                                                normalized_dates=encounter_dates)
 
         evidence_ids = [str(row['evidence_id']) for row in fact_inputs]
         routing = []
@@ -461,6 +515,7 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
             sections, action_drafts, report_errors = validate_and_complete(
                 mapped_draft, evidence_texts,
                 {e.entry_id for e in knowledge_entries}, source_refs,
+                structured_dates=encounter_dates,
             )
             report_id = uuid4()
             actions = []
@@ -507,17 +562,18 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
                     """INSERT INTO extracted_facts
                        (fact_id, run_id, case_id, fact_type, value, raw_value, status,
                         assertion, evidence_ids, confidence_score, confidence_method, unit,
-                        derivation, alternatives, missing_reason, extractor_version)
+                        derivation, alternatives, missing_reason, extractor_version, encounter_key)
                        VALUES (%s,%s,%s,%s,%s::jsonb,%s,%s,%s,%s::jsonb,%s,%s,%s,
-                               %s::jsonb,%s::jsonb,%s,%s)""",
+                               %s::jsonb,%s::jsonb,%s,%s,%s)""",
                     (fact["fact_id"], run["run_id"], run["case_id"], fact["fact_type"],
                      json.dumps(fact["value"], ensure_ascii=False), fact["raw_value"],
                      fact["status"], fact["assertion"], json.dumps(fact["evidence_ids"]),
                      fact["confidence_score"], fact["confidence_method"], fact["unit"],
                      json.dumps(fact["derivation"]), json.dumps(fact["alternatives"]),
-                     fact["missing_reason"], fact["extractor_version"]),
+                     fact["missing_reason"], fact["extractor_version"],
+                     fact.get("encounter_key")),
                 )
-            encounter_id, events, relations = build_events(run["run_id"], facts)
+            encounters, events, relations = build_events(run["run_id"], facts, encounter_dates)
             for event in events:
                 conn.execute(
                     """INSERT INTO medical_events
@@ -544,18 +600,22 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
                 """INSERT INTO model_extractions
                    (extraction_id, run_id, case_id, provider, model_id, prompt_version,
                     schema_version, status, raw_output, repaired_output, candidates,
-                    usage_metadata, error_code)
-                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s::jsonb,%s::jsonb,%s::jsonb,%s)
+                    usage_metadata, error_code, personnel)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s::jsonb,%s::jsonb,%s::jsonb,%s,%s::jsonb)
                    ON CONFLICT (run_id, provider, model_id, prompt_version) DO UPDATE SET
                     status=excluded.status, raw_output=excluded.raw_output,
                     repaired_output=excluded.repaired_output, candidates=excluded.candidates,
-                    usage_metadata=excluded.usage_metadata, error_code=excluded.error_code""",
+                    usage_metadata=excluded.usage_metadata, error_code=excluded.error_code,
+                    personnel=excluded.personnel""",
                 (uuid4(), run["run_id"], run["case_id"], model_provider, model_id,
                  PROMPT_VERSION, MODEL_SCHEMA_VERSION, model_result["status"],
                  json.dumps(model_result.get("raw_output"), ensure_ascii=False),
                  json.dumps(model_result.get("repaired_output"), ensure_ascii=False),
                  json.dumps(model_result["candidates"].get("candidates", []), ensure_ascii=False),
-                 json.dumps(model_result.get("usage_metadata", {})), model_result.get("error_code")),
+                 json.dumps(model_result.get("usage_metadata", {})), model_result.get("error_code"),
+                 # The name/role/quote bindings the report relied on stay auditable,
+                 # while candidates keeps its historical list shape.
+                 json.dumps(model_result.get("personnel", []), ensure_ascii=False)),
             )
             conn.execute(
                 """INSERT INTO model_extractions
@@ -601,8 +661,12 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
                 "prompt_version": PROMPT_VERSION,
             }, "reconcile": {
                 "status": "completed", "builder_version": BUILDER_VERSION,
-                "encounter_id": str(encounter_id), "event_count": len(events),
+                "encounter_ids": sorted({str(value) for value in encounters.values()}),
+                "encounter_count": len(encounters), "event_count": len(events),
                 "relation_count": len(relations),
+                # Persisted so review and release paths re-check date claims against
+                # the same normalized timeline the report was drafted with.
+                "structured_dates": encounter_dates,
             }, "insights": {
                 "status": "waiting_review" if any(i["review_required"] for i in insights) or knowledge_excluded else "completed",
                 "rule_version": RULE_VERSION, "insight_count": len(insights),

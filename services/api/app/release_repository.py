@@ -119,7 +119,9 @@ def publish_report(conn, *, actor_id, case_id, version, expected_version, idempo
             except ValueError:
                 raise ReleaseBlocked('cost field is not supported by current source evidence') from None
         sources = context_sources(conn,run,lock=True)
-        checked_sections, _, content_errors = checked_report_content(report,[],evidence,sources)
+        structured_dates = (run.get('stage_results') or {}).get('reconcile', {}).get('structured_dates')
+        checked_sections, _, content_errors = checked_report_content(
+            report,[],evidence,sources,structured_dates=structured_dates)
         # Recompute from actual content: stale/forged statuses and an empty saved error list
         # cannot turn a model label or paraphrase into an automatic approval.
         if (content_errors or any(c['review_status']=='pending' for s in checked_sections for c in s['claims'])) and not conn.execute("""SELECT 1 FROM review_decisions

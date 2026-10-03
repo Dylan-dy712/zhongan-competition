@@ -62,6 +62,12 @@ def predictions(run):
         if value is None:
             continue
         if field in SETS:
+            if isinstance(value, dict):
+                # Structured medication facts contribute their bound drug name only.
+                if field != 'medications' or not isinstance(value.get('drug_name'), str) \
+                        or not value['drug_name'].strip():
+                    continue
+                value = value['drug_name']
             values[field].append(entity({'value': value, 'assertion': fact['assertion']}))
         else:
             if field == 'total_cost_minor':

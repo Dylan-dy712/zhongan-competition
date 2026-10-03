@@ -43,7 +43,8 @@ REVIEWABLE_REPORT_ERRORS = {'CASE_FACT_REQUIRES_REVIEW', 'ACTION_REQUIRES_REVIEW
 
 
 def checked_report_content(current: Report, corrections: list[ReviewCorrection],
-                           evidence: dict[str, str], sources: dict[str, str]):
+                           evidence: dict[str, str], sources: dict[str, str],
+                           structured_dates: dict | None = None):
     """Re-run existing report guards; corrections cannot grant new source permissions."""
     payload = deepcopy(current.model_dump(mode='json'))
     seen = set()
@@ -62,7 +63,8 @@ def checked_report_content(current: Report, corrections: list[ReviewCorrection],
             action.get('feedback_ref') is not None):
             raise ValueError('review cannot import action identity or execution state')
     knowledge = {ref for section in current.sections for claim in section.claims for ref in claim.knowledge_refs}
-    sections, actions, errors = validate_and_complete(payload, evidence, knowledge, sources)
+    sections, actions, errors = validate_and_complete(payload, evidence, knowledge, sources,
+                                                      structured_dates=structured_dates)
     if len(actions) != len(payload['actions']) or errors and set(errors) - REVIEWABLE_REPORT_ERRORS:
         raise ValueError('report content failed safety or source validation')
     # A filtered unknown reference must not survive through a second valid reference.
@@ -80,10 +82,12 @@ def checked_report_content(current: Report, corrections: list[ReviewCorrection],
 
 def corrected_report_payload(current: Report, corrections: list[ReviewCorrection],
                              evidence: dict[str, str], sources: dict[str, str],
-                             report_id, version: int) -> dict:
+                             report_id, version: int,
+                             structured_dates: dict | None = None) -> dict:
     if not corrections:
         raise ValueError('correct decision requires corrections')
-    sections, action_drafts, errors = checked_report_content(current, corrections, evidence, sources)
+    sections, action_drafts, errors = checked_report_content(current, corrections, evidence, sources,
+                                                             structured_dates=structured_dates)
     payload = current.model_dump(mode='json')
     actions = [Action(action_id=uuid4(), report_id=report_id,
         **{key: item[key] for key in ('source_refs', 'owner_role', 'action_text', 'due_at',

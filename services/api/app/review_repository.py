@@ -165,6 +165,12 @@ def decide_review(conn, *, actor_id: UUID, review_id: UUID, expected_version: in
         reviewer_id=actor_id, decided_at=result["decided_at"], result_report_id=result_report_id)
 
 
+def _run_structured_dates(conn, run_id) -> dict | None:
+    """Normalized admission/discharge dates recorded by the run's reconcile stage."""
+    row = conn.execute('SELECT stage_results FROM analysis_runs WHERE run_id=%s', (run_id,)).fetchone()
+    return ((row or {}).get('stage_results') or {}).get('reconcile', {}).get('structured_dates')
+
+
 def _decide_report(conn, task, target, decision, corrections):
     current = _to_report(target)
     latest = conn.execute('SELECT max(report_version) AS version FROM reports WHERE case_id=%s',
@@ -174,6 +180,7 @@ def _decide_report(conn, task, target, decision, corrections):
     if decision=='reject':
         conn.execute("UPDATE reports SET status='rejected' WHERE report_id=%s", (current.report_id,))
         return None
+    structured_dates = _run_structured_dates(conn, task['run_id'])
     evidence = {str(r['evidence_id']): r['text_value'] or '' for r in conn.execute(
         'SELECT evidence_id,text_value FROM evidence WHERE case_id=%s AND run_id=%s',
         (task['case_id'], task['run_id'])).fetchall()}
@@ -181,7 +188,7 @@ def _decide_report(conn, task, target, decision, corrections):
     if decision=='approve':
         if set(current.validation_errors)-REVIEWABLE_REPORT_ERRORS:
             raise ValueError('report has unresolved validation errors; correct or reject it')
-        checked_report_content(current, [], evidence, sources)
+        checked_report_content(current, [], evidence, sources, structured_dates=structured_dates)
         sections = [s.model_dump(mode='json') for s in current.sections]
         for section in sections:
             for claim in section['claims']:
@@ -193,7 +200,8 @@ def _decide_report(conn, task, target, decision, corrections):
                      (json.dumps(sections, ensure_ascii=False), current.report_id))
         return None
     report_id = uuid4()
-    payload = corrected_report_payload(current, corrections, evidence, sources, report_id, latest+1)
+    payload = corrected_report_payload(current, corrections, evidence, sources, report_id, latest+1,
+                                       structured_dates=structured_dates)
     conn.execute("""INSERT INTO reports(report_id,case_id,run_id,report_version,status,sections,actions,
         input_hash,model_id,prompt_version,knowledge_version,policy_version,memory_refs,consent_refs,
         validation_errors,review_parent_id) VALUES (%s,%s,%s,%s,'pending_review',%s::jsonb,%s::jsonb,

@@ -23,6 +23,28 @@ class LlmExtractorTests(unittest.TestCase):
         checked = validate_evidence_quotes(result, "诊断：疑似肺炎")
         self.assertEqual(checked["candidates"]["candidates"], [])
 
+    def test_personnel_role_must_cooccur_with_name_in_same_quote(self):
+        # blind_61DF96B9 shape: an unbound or mis-bound role must not survive validation.
+        result = {"candidates": {"candidates": []}, "personnel": [
+            {"name": "时硕楠", "role": "审核者", "evidence_quote": "审核者：时硕楠"},
+            {"name": "郭永明", "role": "术者", "evidence_quote": "手术助手：郭永明"},
+            {"name": "王五", "role": "术者", "evidence_quote": "手术者：李四"},
+        ]}
+        checked = validate_evidence_quotes(result, "审核者：时硕楠\n手术助手：郭永明")
+        self.assertEqual([(item["name"], item["role"]) for item in checked["personnel"]],
+                         [("时硕楠", "审核者"), ("郭永明", "unknown")])
+
+    def test_role_substring_absorption_degrades_only_fully_absorbed_claims(self):
+        # '术者' is a substring of '手术者': a claim whose quote only contains the
+        # longer word degrades to unknown, while a standalone '术者' occurrence survives.
+        def checked(quote):
+            result = {"candidates": {"candidates": []}, "personnel": [
+                {"name": "罗鸿", "role": "术者", "evidence_quote": quote}]}
+            return validate_evidence_quotes(result, quote)["personnel"][0]["role"]
+        self.assertEqual(checked("手术者：罗鸿"), "unknown")
+        self.assertEqual(checked("手术者：罗鸿（术者）"), "术者")
+        self.assertEqual(checked("术者：罗鸿"), "术者")
+
 
 if __name__ == "__main__":
     unittest.main()
