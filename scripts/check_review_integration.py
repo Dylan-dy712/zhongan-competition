@@ -203,6 +203,54 @@ def main() -> None:
                               json={'expected_version':3,'decision':'reject','reason':'驳回合成报告'})
         assert rejection.status_code==200
         assert conn.execute('SELECT status FROM reports WHERE report_id=%s',(rejected_report,)).fetchone()['status']=='rejected'
+        # ---- KR4 authoritative quality export: mapping, build, immutability ----
+        total_fact = uuid4()
+        conn.execute("""INSERT INTO extracted_facts(fact_id,run_id,case_id,fact_type,value,raw_value,status,
+            assertion,evidence_ids,extractor_version)
+            VALUES (%s,%s,%s,'total_cost',jsonb_build_object('amount_minor',12000,'currency','CNY'),
+            '医疗总费用：120.00元','observed','present',%s::jsonb,'quality-check')""",
+            (total_fact, run, case, json.dumps([str(evidence)])))
+        assert client.get('/v1/quality/snapshots', headers=patient_headers).status_code == 200
+        assert client.post('/v1/quality/entity-mappings', headers=patient_headers,
+                           json={'entity_type': 'hospital', 'display_name': '合成市第一医院',
+                                 'evidence_ids': [str(evidence)]}).status_code == 403,             'only a medical reviewer can create entity mappings'
+        assert client.post('/v1/quality/entity-mappings', headers=headers,
+                           json={'entity_type': 'hospital', 'display_name': '合成市第一医院',
+                                 'evidence_ids': [str(uuid4())]}).status_code == 422,             'entity mapping requires evidence inside authorized cases'
+        mapping = client.post('/v1/quality/entity-mappings', headers=headers,
+                              json={'entity_type': 'hospital', 'display_name': '合成市第一医院',
+                                    'evidence_ids': [str(evidence)]}).json()
+        renamed = client.post('/v1/quality/entity-mappings', headers=headers,
+                              json={'entity_type': 'hospital', 'display_name': '合成市第一医院 ',
+                                    'evidence_ids': [str(evidence)]}).json()
+        assert mapping['entity_id'] == renamed['entity_id'] and renamed['created'] is False,             'entity identity is stable across display-name whitespace'
+        assert client.post(f'/v1/quality/cases/{case}/attribution', headers=headers,
+                           json={'run_id': str(run), 'entity_id': mapping['entity_id'],
+                                 'evidence_ids': [str(evidence)]}).status_code == 200,             'reviewer attaches the case run to the mapped hospital'
+        build_body = {'window_start': '2026-01-01', 'window_end': '2027-01-01',
+                      'min_sample_size': 2, 'max_missing_rate': 1.0}
+        built = client.post('/v1/quality/snapshots/build', headers=headers, json=build_body)
+        assert built.status_code == 200, f'quality snapshot build: {built.status_code} {built.text[:150]}'
+        quality_body = built.json()
+        assert quality_body['included_records'] == 1 and quality_body['profile_count'] == 1 and             any('代理' in x for x in quality_body['limitations']),             'snapshot records the cost cohort with the observation-date proxy limitation'
+        snapshot = client.get(f"/v1/quality/snapshots/{quality_body['snapshot_id']}", headers=headers).json()
+        metrics = [m for p_ in snapshot['profiles'] for m in p_['metrics'] if m['metric_name'] == 'cost_level']
+        assert len(metrics) == 1 and metrics[0]['sample_count'] == 1,             'cost_level metric persists with sample provenance'
+        assert client.get('/v1/quality/snapshots/00000000-0000-0000-0000-000000000000',
+                          headers=headers).status_code == 404, 'unknown snapshot id is not found'
+        conn.execute("SAVEPOINT tamper_check")
+        try:
+            conn.execute("UPDATE quality_snapshots SET payload=%s::jsonb WHERE snapshot_id=%s",
+                         (json.dumps({'tampered': True}), quality_body['snapshot_id']))
+            raise AssertionError('quality snapshot must be immutable')
+        except AssertionError:
+            raise
+        except Exception:
+            pass
+        finally:
+            conn.execute("ROLLBACK TO SAVEPOINT tamper_check")
+        replay = client.post('/v1/quality/snapshots/build', headers=headers, json=build_body)
+        assert replay.status_code == 200 and replay.json()['created'] is False,             'identical window rebuild replays the same immutable snapshot'
         conn.execute("UPDATE consent_purposes SET status='revoked' WHERE consent_id=%s", (consent,))
         assert client.get('/v1/reviews?status=decided', headers=headers).json() == []
         assert client.post(f'/v1/reviews/{task_id}/decision',headers=report_headers,json=body).status_code==404
