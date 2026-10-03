@@ -12,6 +12,19 @@ test -d "$app_dir/.venv"
 test -f "$release_dir/services/api/sql/011_conversations.sql"
 test -f "$release_dir/apps/web/dist/index.html"
 test -f "$release_dir/REVISION"
+revision="$(< "$release_dir/REVISION")"
+[[ "$revision" =~ ^[0-9a-f]{40}$ ]]
+mobile_dir="$release_dir/output_dir/mobile-demo/dist"
+test -f "$mobile_dir/index.html"
+test "$(< "$mobile_dir/CI_REVISION")" = "$revision"
+test "$(< "$release_dir/apps/web/dist/CI_REVISION")" = "$revision"
+previous_mobile=''
+if [[ -L "$web_dir/mobile-demo" ]]; then
+    previous_mobile="$(readlink "$web_dir/mobile-demo")"
+elif [[ -e "$web_dir/mobile-demo" ]]; then
+    echo 'Existing mobile-demo must be a release symlink' >&2; exit 1
+fi
+mobile_switched=0
 backup_dir="$(mktemp -d /home/ubuntu/zhongan-backup.XXXXXXXX)"
 chmod 700 "$backup_dir"
 printf 'BACKUP_DIRECTORY=%s\n' "$backup_dir"
@@ -32,6 +45,14 @@ rollback() {
         # Restore code/config without destroying newer files or rolling back data.
         tar -xzf "$backup_dir/app.tar.gz" -C "$app_dir"
         sudo tar -xzf "$backup_dir/web.tar.gz" -C "$web_dir"
+        if [[ "$mobile_switched" == 1 ]]; then
+            if [[ -n "$previous_mobile" ]]; then
+                sudo ln -s "$previous_mobile" "$web_dir/.mobile-demo-rollback-$revision"
+                sudo mv -Tf "$web_dir/.mobile-demo-rollback-$revision" "$web_dir/mobile-demo"
+            elif [[ "$(readlink "$web_dir/mobile-demo")" == ".mobile-demo-releases/$revision" ]]; then
+                sudo unlink "$web_dir/mobile-demo"
+            fi
+        fi
         sudo tar -xzf "$backup_dir/config.tar.gz" -C /
         sudo systemctl daemon-reload
         sudo systemctl restart zhongan-api zhongan-worker
@@ -65,6 +86,17 @@ sudo install -m 644 "$release_dir/deploy/zhongan-worker.service" /etc/systemd/sy
 sudo install -m 644 "$release_dir/deploy/nginx-zhongan-api.conf" /etc/nginx/sites-available/zhongan-api
 # Keep old hashed assets available to already-open browser sessions.
 sudo cp -a "$release_dir/apps/web/dist/." "$web_dir/"
+sudo install -d -m 755 "$web_dir/.mobile-demo-releases"
+if [[ -e "$web_dir/.mobile-demo-releases/$revision" ]]; then
+    diff -qr "$mobile_dir" "$web_dir/.mobile-demo-releases/$revision"
+else
+    mobile_stage="$(sudo mktemp -d "$web_dir/.mobile-demo-releases/staging-XXXXXXXX")"
+    sudo cp -a "$mobile_dir/." "$mobile_stage/"
+    sudo mv -T "$mobile_stage" "$web_dir/.mobile-demo-releases/$revision"
+fi
+sudo ln -s ".mobile-demo-releases/$revision" "$web_dir/.mobile-demo-next-$revision"
+sudo mv -Tf "$web_dir/.mobile-demo-next-$revision" "$web_dir/mobile-demo"
+mobile_switched=1
 sudo find "$web_dir" -type d -exec chmod 755 {} +
 sudo find "$web_dir" -type f -exec chmod 644 {} +
 sudo nginx -t
@@ -78,5 +110,6 @@ done
 sudo systemctl reload nginx
 systemctl is-active zhongan-api zhongan-worker nginx
 curl -fsS http://127.0.0.1/health
+test "$(curl -fsS http://127.0.0.1/mobile-demo/CI_REVISION)" = "$revision"
 printf '\nDEPLOYED_REVISION=%s\n' "$(< "$app_dir/REVISION")"
 trap - ERR

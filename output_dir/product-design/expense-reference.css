@@ -1,0 +1,35 @@
+.main.expense-reference{background:radial-gradient(ellipse at 100% 4%,#9aebce 0,transparent 29%),radial-gradient(ellipse at 0 35%,#d1f8eb,transparent 44%),linear-gradient(#eefff5,#f3fcf8);color:#073b33}
+.expense-reference .topbar{background:transparent;backdrop-filter:none;position:relative;min-height:62px;padding-top:9px}
+.expense-reference .topbar h1{font-size:19px;font-weight:750}
+.expense-reference .page{padding:0 16px 35px;background:url('assets/expense-waves.webp') center bottom/100% auto no-repeat}
+.expense-reference .document-hero{min-height:134px;padding:18px 0 15px 5px;overflow:visible;isolation:isolate}
+.expense-reference .document-hero:after{content:'';position:absolute;z-index:-1;right:-13px;top:-40px;width:205px;height:183px;background:url('assets/expense-hero.webp') center/contain no-repeat;pointer-events:none}
+.expense-reference .document-hero>img{display:none}
+.expense-reference .document-kind{font-size:11px;color:#688c80;margin-bottom:9px}
+.expense-reference .document-hero h2{font-size:24px;letter-spacing:-.7px;max-width:100%;margin-bottom:12px;text-shadow:0 1px 9px #f4fff5}
+.expense-reference .document-hero p{font-size:13px;color:#76948b;max-width:245px}
+.expense-reference .document-focus{position:relative;overflow:hidden;padding:20px 18px!important;border-radius:21px;min-height:225px;background:#ffffffed;box-shadow:0 12px 26px #2fba8910}
+.expense-reference .expense-total-art{position:absolute;right:-31px;top:17px;width:190px;height:151px;object-fit:contain;opacity:.62;pointer-events:none}
+.expense-reference .document-focus>.document-label,.expense-reference .document-focus>.bill-total,.expense-reference .document-focus>p,.expense-reference .cost-facts{position:relative}
+.expense-reference .document-label{font-size:14px;color:#1d5144;margin:0 0 18px;font-weight:550}
+.expense-reference .bill-total{font-size:48px;color:#009c7b;margin-bottom:17px;line-height:1.2}
+.expense-reference .bill-total span{font-size:24px}
+.expense-reference .document-focus>p{font-size:12px;color:#869198}
+.expense-reference .cost-facts{padding-top:15px;margin-top:22px;border-color:#dfe8e5}
+.expense-reference .cost-facts span{font-size:11px;color:#849195}.expense-reference .cost-facts strong{font-size:15px;font-weight:650;color:#476d62}
+.expense-reference .expense-short{border-radius:21px;background:#ffffffed;padding:15px!important;margin-top:14px}
+.expense-reference .expense-short .primary{position:relative;isolation:isolate;overflow:hidden;min-height:52px;border-radius:15px;background:linear-gradient(110deg,#40dca7,#00b897 65%,#6deccf);box-shadow:0 7px 14px #09ce9f24;font-size:16px}
+.expense-short .primary>span{position:relative;z-index:1}
+.expense-button-file{position:absolute;width:39px;height:43px;left:15px;bottom:3px;object-fit:contain;transform:rotate(-9deg)}
+.expense-button-cloud{position:absolute;width:77px;height:66px;right:-11px;bottom:-21px;object-fit:contain;opacity:.9;z-index:0}
+.expense-reference .expense-short .document-local{font-size:11px;margin-top:10px;color:#8b9698}
+.expense-reference .expense-folds{margin-top:15px;border-radius:21px;padding:0 18px!important;background:#fffffff2}
+.expense-reference .expense-folds summary{font-size:15px;min-height:59px;color:#153e36;font-weight:650}
+.expense-reference .expense-folds summary:after{color:#619f8d;font-size:21px}
+.expense-reference .expense-folds details>p{font-size:12px!important;line-height:1.8;color:#879496}
+.expense-reference .expense-folds .link{width:100%;display:flex;justify-content:space-between;align-items:center;font-size:13px;font-weight:550;padding-bottom:16px;min-height:44px}
+.expense-reference .expense-folds .link:after{content:'›';color:#89bcaa;font-size:23px}
+.expense-reference .expense-chat-link{color:#15957d;min-height:64px;margin:5px 0 0;font-size:12px}
+@media(max-width:350px){.expense-reference .document-hero h2{font-size:21px}.expense-reference .document-hero:after{width:170px;opacity:.65}.expense-reference .expense-short .primary{font-size:14px}.expense-button-file{width:30px;left:9px}.expense-reference .expense-total-art{right:-47px;width:174px}.expense-reference .cost-facts span{font-size:10px}}
+
+.expense-reference .document-hero h2,.expense-reference .document-hero p,.expense-reference .document-kind{position:relative;z-index:1}.expense-reference .document-hero:after{mask-image:linear-gradient(90deg,transparent,#000 35%)}
