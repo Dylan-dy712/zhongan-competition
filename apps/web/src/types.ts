@@ -59,6 +59,7 @@ export interface AssistantAnswer {
 
 export interface Conversation {
   conversation_id: string; case_id: string; title: string; recall_enabled: boolean;
+  report_context_enabled?:boolean; report_context_version?:number;
   created_at: string; updated_at: string;
 }
 export interface ChatAnswer {text: string; evidence_refs: string[]; history_refs: string[]}

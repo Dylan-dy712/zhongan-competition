@@ -7,6 +7,7 @@ from .contracts.core import Insight, ReviewCorrection, ReviewDecision, ReviewTas
 from .repository import _to_report, request_digest
 from .review_service import (REVIEWABLE_REPORT_ERRORS, checked_report_content,
                              corrected_insight_payload, corrected_report_payload)
+from .report_context import report_sources
 
 
 class ReviewAccessDenied(Exception): pass
@@ -50,11 +51,19 @@ def list_reviews(conn, *, actor_id: UUID, status: str, limit: int,
              AND t.status=%s AND (%s::uuid IS NULL OR t.review_id>%s::uuid)
            ORDER BY t.review_id LIMIT %s""", (actor_id, status, cursor, cursor, limit),
     ).fetchall()
+    accessible=[]
+    for row in rows:
+        if row['target_type']=='report':
+            try:
+                report_sources(conn,row['case_id'],row['run_id'])
+            except ValueError:
+                continue
+        accessible.append(row)
     return [ReviewTask(review_id=r["review_id"], case_id=r["case_id"], run_id=r["run_id"],
         target_type=r["target_type"], target_id=r["target_id"],
         target_version=r["target_version"], status=r["status"], reason=r["reason"],
         target=_insight(r['insight_payload']) if r['target_type']=='insight' else _to_report(r['report_payload']),
-        created_at=r["created_at"]) for r in rows]
+        created_at=r["created_at"]) for r in accessible]
 
 
 def decide_review(conn, *, actor_id: UUID, review_id: UUID, expected_version: int,
@@ -168,7 +177,7 @@ def _decide_report(conn, task, target, decision, corrections):
     evidence = {str(r['evidence_id']): r['text_value'] or '' for r in conn.execute(
         'SELECT evidence_id,text_value FROM evidence WHERE case_id=%s AND run_id=%s',
         (task['case_id'], task['run_id'])).fetchall()}
-    sources = {'case:user_context': str(task['user_context'])} if task['user_context'] else {}
+    sources = report_sources(conn,task['case_id'],task['run_id'],lock=True)
     if decision=='approve':
         if set(current.validation_errors)-REVIEWABLE_REPORT_ERRORS:
             raise ValueError('report has unresolved validation errors; correct or reject it')

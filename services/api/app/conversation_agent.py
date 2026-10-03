@@ -89,9 +89,10 @@ class AgentModel:
 
 
 class CareTools:
-    def __init__(self, conn, actor_id, conversation_id):
+    def __init__(self, conn, actor_id, conversation_id,turn_id=None):
         self.conn, self.actor_id, self.conversation_id = conn, actor_id, conversation_id
         self.evidence_ids, self.history_ids, self.history_cases = set(), set(), set()
+        self.turn_id=turn_id
 
     def execute(self, name, raw_args):
         if name not in ARG_SCHEMAS:
@@ -117,7 +118,8 @@ class CareTools:
             run, created = create_analysis_run(self.conn, actor_id=self.actor_id, case_id=case_id,
                 document_versions=[DocumentVersionRef(document_id=d['document_id'],
                     document_version=d['document_version']) for d in docs],
-                pipeline_version='document-parser-v1', force_new=False)
+                pipeline_version='document-parser-v1', force_new=False,
+                conversation_id=self.conversation_id,turn_id=self.turn_id)
             # Make queued work visible to the worker before the next model round.
             self.conn.commit()
             return {'run_id': str(run.run_id), 'status': run.status, 'created': created}

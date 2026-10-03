@@ -536,6 +536,17 @@ def conversation_recall(conversation_id: UUID, body: RecallSetting,
     return {'recall_enabled': body.enabled}
 
 
+@app.patch('/v1/conversations/{conversation_id}/report-context')
+def conversation_report_context(conversation_id:UUID,body:RecallSetting,
+                                actor_id:UUID=Depends(current_actor),conn=Depends(database)):
+    chats.require_conversation(conn,actor_id,conversation_id)
+    row=conn.execute("""UPDATE conversations SET report_context_enabled=%s,
+        report_context_version=report_context_version+CASE WHEN report_context_enabled<>%s THEN 1 ELSE 0 END
+        WHERE conversation_id=%s AND actor_id=%s RETURNING report_context_enabled,report_context_version""",
+        (body.enabled,body.enabled,conversation_id,actor_id)).fetchone()
+    return row
+
+
 @app.post('/v1/conversations/{conversation_id}/documents', response_model=Document, status_code=201)
 async def chat_upload(conversation_id: UUID, response: Response, file: Annotated[UploadFile, File()],
                       actor_id: UUID = Depends(current_actor), conn=Depends(database),
@@ -563,7 +574,7 @@ def process_chat_message(conversation_id, body, actor_id, conn, input_kind='user
     if turn['status'] == 'completed':
         return {'turn_id': turn['turn_id'], 'answer': turn['answer'], 'tool_events': turn['tool_events']}
     history = [t for t in chats.get_turns(conn, actor_id, conversation_id) if t['turn_id'] != turn['turn_id']]
-    tools = CareTools(conn, actor_id, conversation_id)
+    tools = CareTools(conn, actor_id, conversation_id,turn['turn_id'])
     events = []
 
     def progress(current_events):

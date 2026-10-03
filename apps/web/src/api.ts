@@ -70,6 +70,8 @@ export const continueAnalysis = (token: string, id: string, runId: string) =>
   chatRequest(`/v1/conversations/${id}/analyses/${runId}/continue`, token, 'POST');
 export const setRecall = (token: string, id: string, enabled: boolean) =>
   chatRequest(`/v1/conversations/${id}/recall`, token, 'PATCH', {enabled});
+export const setReportContext = (token:string,id:string,enabled:boolean) =>
+  chatRequest(`/v1/conversations/${id}/report-context`,token,'PATCH',{enabled});
 export const uploadChatDocument = (token: string, id: string, file: File) => {
   const data = new FormData(); data.append('file', file);
   return chatRequest<{document_id:string; source_ref:string}>(`/v1/conversations/${id}/documents`, token, 'POST', data);

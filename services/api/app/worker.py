@@ -18,6 +18,7 @@ from .repository import connect
 from .fact_extractor import EXTRACTOR_VERSION, extract_facts, merge_model_candidates
 from .event_builder import BUILDER_VERSION, build_events
 from .cost_breakdown import cost_fact, has_cost_conflicts, report_cost_context
+from .report_context import context_sources
 from .insight_detector import RULE_VERSION, deterministic_candidates, infer_disease_code, merge_semantic_candidates
 from .insight_llm import PROMPT_VERSION as INSIGHT_PROMPT_VERSION, SCHEMA_VERSION as INSIGHT_SCHEMA_VERSION, detect_semantic
 from .knowledge_assembler import KnowledgeAssembler, PackExcludedError
@@ -240,6 +241,7 @@ def route_document(document: dict, path: Path, pipeline_version: str, ocr: Tence
 def process_run(conn, run: dict, storage_root: Path) -> None:
     parsed_documents = []
     try:
+        source_refs=context_sources(conn,run)
         for reference in run["document_versions"]:
             document = conn.execute(
                 """SELECT * FROM documents WHERE case_id=%s AND document_id=%s
@@ -309,8 +311,9 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
                            "ai_verification_source": e.ai_verification_source}
                           for e in knowledge_entries[:80]]
             report_model_result = draft_report(material, reviewable,
-                                                case_meta["user_context"] if case_meta else None,
-                                                structured_costs=report_cost_context(fact_inputs,
+                                                run['context_snapshot']['case_user_context'] if run.get('context_snapshot') else
+                                                (case_meta["user_context"] if case_meta else None),
+                                                user_sources=source_refs,structured_costs=report_cost_context(fact_inputs,
                                                     model_result['candidates'].get('cost_lines',[])))
 
         evidence_ids = [str(row['evidence_id']) for row in fact_inputs]
@@ -340,6 +343,7 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
                      run["run_id"], run["lease_token"]),
                 )
                 return
+            context_sources(conn,run,lock=True)
             conn.execute("DELETE FROM evidence WHERE run_id=%s", (run["run_id"],))
             conn.execute("DELETE FROM page_blocks WHERE run_id=%s", (run["run_id"],))
             conn.execute("DELETE FROM extracted_facts WHERE run_id=%s", (run["run_id"],))
@@ -453,7 +457,6 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
                          "clinical_or_indeterminate_insight_requires_review"),
                     )
             evidence_texts = {str(x["evidence_id"]): x["text"] for x in fact_inputs}
-            source_refs = {"case:user_context": str(case_meta["user_context"])} if case_meta and case_meta["user_context"] else {}
             mapped_draft = map_report_sources(report_model_result["draft"], evidence_texts, source_refs)
             sections, action_drafts, report_errors = validate_and_complete(
                 mapped_draft, evidence_texts,

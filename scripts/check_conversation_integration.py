@@ -10,7 +10,7 @@ from contextlib import redirect_stdout
 from io import StringIO
 from pathlib import Path
 from unittest.mock import MagicMock, patch
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from fastapi.testclient import TestClient
 from psycopg import sql
@@ -118,6 +118,16 @@ def main():
             uploaded=client.post(base+'/documents',headers=headers,files={'file':('invoice.txt','合成票据：医疗总费用：120.00元。\n药品费：40元\n检查费：80元\n明细合计：120元\n个人自费：10元\n现金支付：30元\n住院天数：3.5天\nCT提示不能排除肺炎。'.encode(),'text/plain')})
             check(uploaded.status_code==201,'chat document upload persists actual file')
             document_id=uploaded.json()['document_id']
+            user_context={'concern':'担心费用，希望核对两个支付金额'}
+            with connection() as conn:
+                conn.execute('UPDATE cases SET user_context=%s::jsonb WHERE case_id=%s',
+                             (json.dumps(user_context),case_id))
+            check(client.patch(base+'/report-context',headers=other_headers,json={'enabled':True}).status_code==404,
+                  'same-case other actor cannot authorize private chat for reports')
+            check(client.get(base,headers=headers).json()['conversation']['report_context_enabled'] is False,
+                  'chat report context sharing is disabled by default')
+            enabled=client.patch(base+'/report-context',headers=headers,json={'enabled':True})
+            check(enabled.status_code==200,'owner explicitly authorizes current chat expressions for case reports')
             model=ScriptedModel([tool('start_analysis'),reply('材料已排队。')])
             with patch('services.api.app.conversation_agent.AgentModel',return_value=model):
                 sent=client.post(base+'/messages',headers=headers,json={'request_id':str(uuid4()),'message':'分析刚上传的票据','document_ids':[document_id]})
@@ -126,9 +136,14 @@ def main():
             with connection() as conn:
                 conn.autocommit=True
                 run=claim_run(conn)
-                user_context={'concern':'担心费用，希望核对两个支付金额'}
                 conn.execute('UPDATE cases SET user_context=%s::jsonb WHERE case_id=%s',
-                             (json.dumps(user_context),case_id))
+                             (json.dumps({'concern':'后来修改的上下文不应覆盖快照'}),case_id))
+                context_snapshot=run['context_snapshot']
+                check(context_snapshot['case_user_context']==user_context and
+                      [t['text'] for t in context_snapshot['chat']['turns']]==[
+                          '我最关心费用','我刚才关心什么？','分析刚上传的票据'],
+                      'analysis freezes only owner user utterances through the initiating turn')
+                chat_ref=f"conversation:{conversation_id}:turn:{context_snapshot['chat']['turns'][0]['turn_id']}:user"
                 draft = {'sections': [{'section_type': section, 'claims': [{
                     'text': '医疗总费用：999.00元', 'claim_type': 'case_fact',
                     'evidence_quote': '医疗总费用：120.00元'}]} for section in SECTION_TYPES],
@@ -139,11 +154,11 @@ def main():
                         {'action_text': '三天后复诊', 'source_quote': '医疗总费用：120.00元',
                          'source_refs': [], 'owner_role': 'patient', 'due_source': 'medical_order',
                          'due_at': '2026-10-10T09:00:00+08:00', 'rationale': '合成测试'},
-                        {'action_text':'向客服核对两个支付金额','source_quote':'希望核对两个支付金额',
+                        {'action_text':'向客服核对费用疑问','source_quote':'我最关心费用',
                          'source_refs':[], 'owner_role':'patient','due_source':'unknown','due_at':None,
                          'rationale':'用户明确表达的费用疑问'}]}
-                draft['sections'][4]['claims'].append({'text':'你担心费用，希望核对两个支付金额',
-                    'claim_type':'patient_statement','source_quote':'担心费用','source_refs':[]})
+                draft['sections'][4]['claims'].append({'text':'你最关心费用',
+                    'claim_type':'patient_statement','source_quote':'我最关心费用','source_refs':[]})
                 extractor = MagicMock(provider='scripted_test', model_id='scripted-report')
                 extractor.extract.return_value = {'status': 'completed', 'candidates': {'candidates': [{
                     'fact_type': 'diagnosis', 'raw_value': '肺炎', 'normalized_value': '肺炎',
@@ -194,12 +209,12 @@ def main():
                       all(c['review_status'] == 'pending' for s in saved['sections'] for c in s['claims']),
                       'real quote cannot automatically release contradictory report facts')
                 concern=saved['sections'][4]['claims'][-1]
-                check(concern['claim_type']=='patient_statement' and concern['source_refs']==['case:user_context']
+                check(concern['claim_type']=='patient_statement' and concern['source_refs']==[chat_ref]
                       and not concern['evidence_refs'] and report_drafter.call_args.args[2]==user_context,
                       'worker retains user concern with separate source provenance and review status')
                 check('UNSAFE_OR_EMPTY_ACTION' in saved['validation_errors'] and
                       len(saved['actions']) == 2 and saved['actions'][0]['due_at'] is None and
-                      saved['actions'][1]['source_refs']==['case:user_context'],
+                      saved['actions'][1]['source_refs']==[chat_ref],
                       'worker removes unsafe action and ungrounded deadline')
                 audited = conn.execute('SELECT candidates FROM model_extractions WHERE run_id=%s AND prompt_version=%s',
                                        (run_id, REPORT_PROMPT_VERSION)).fetchone()
@@ -229,9 +244,12 @@ def main():
             supplement=client.post(base+'/documents',headers=headers,files={'file':('detail.txt','合成费用明细：检查费80元，药费40元。\n医疗总费用：130元。\n医疗总费用：140元。'.encode(),'text/plain')})
             check(supplement.status_code==201,'supplemental document accepted')
             with connection() as conn:
-                tools=CareTools(conn,actor,conversation_id)
+                tools=CareTools(conn,actor,conversation_id,sent.json()['turn_id'])
                 second_run=tools.execute('start_analysis','{}')
                 check(second_run['run_id']!=run_id,'supplement triggers a new analysis')
+                repeated=tools.execute('start_analysis','{}')
+                check(repeated['run_id']==second_run['run_id'],
+                      'same initiating turn with identical materials reuses the frozen run')
                 conn.autocommit=True
                 run=claim_run(conn)
                 with patch.dict(os.environ,{'LLM_API_KEY':''}):
@@ -265,6 +283,101 @@ def main():
                 historical=tools.execute('read_report','{"version":1}')
                 check(historical['report_version']==1 and 'sections' in historical,
                       'published historical report can be read by version')
+
+        # ---- Report-context lifecycle on a dedicated conversation ----
+        # truncation, anchor dedupe, immutable snapshot, disable semantics and
+        # the late-worker rejection after the owner withdraws sharing.
+        with tempfile.TemporaryDirectory(prefix='zhongan-context-files-') as ctx_storage:
+            api.app.dependency_overrides[api.document_storage_root] = lambda: Path(ctx_storage)
+            conv2 = str(uuid4())
+            c2 = f'/v1/conversations/{conv2}'
+            created2 = client.post('/v1/conversations', headers=headers, json={'conversation_id': conv2})
+            check(created2.status_code == 201, 'context lifecycle conversation created')
+            check(client.get(c2, headers=headers).json()['conversation']['report_context_enabled'] is False,
+                  'second conversation also defaults to private')
+            up2 = client.post(c2 + '/documents', headers=headers,
+                              files={'file': ('note.txt', '合成材料：医疗总费用：60.00元。'.encode(), 'text/plain')})
+            check(up2.status_code == 201, 'context lifecycle upload accepted')
+            doc2 = up2.json()['document_id']
+            client.patch(c2 + '/report-context', headers=headers, json={'enabled': True}).raise_for_status()
+
+            def send2(text, docs=None):
+                responses = [tool('start_analysis'), reply('材料已排队。')] if docs else [reply('收到。')]
+                with patch('services.api.app.conversation_agent.AgentModel',
+                           return_value=ScriptedModel(responses)):
+                    r = client.post(c2 + '/messages', headers=headers,
+                                    json={'request_id': str(uuid4()), 'message': text, 'document_ids': docs or []})
+                check(r.status_code == 200, f'context lifecycle message delivered: {text[:12]}')
+                return r.json()
+
+            for index in range(13):
+                send2(f'关切{index:02d}')
+            final = send2('请分析这份材料', docs=[doc2])
+            run2_id = final['tool_events'][0]['run_id']
+            with connection() as conn:
+                conn.autocommit = True
+                snapshot = conn.execute('SELECT context_snapshot FROM analysis_runs WHERE run_id=%s',
+                                        (run2_id,)).fetchone()['context_snapshot']
+                texts = [t['text'] for t in snapshot['chat']['turns']]
+                check(snapshot['chat']['truncated'] is True and len(texts) == 12 and
+                      texts[0] == '关切02' and texts[-1] == '请分析这份材料',
+                      'snapshot keeps the latest 12 owner utterances and marks truncation')
+                check(all('assistant' not in json.dumps(t) for t in snapshot['chat']['turns']),
+                      'model answers never enter the frozen user expression list')
+                try:
+                    conn.execute('UPDATE analysis_runs SET context_snapshot=%s WHERE run_id=%s',
+                                 (json.dumps({'tampered': True}), run2_id))
+                    check(False, 'context snapshot must be immutable')
+                except Exception:
+                    check(conn.execute('SELECT context_snapshot FROM analysis_runs WHERE run_id=%s',
+                                       (run2_id,)).fetchone()['context_snapshot'] == snapshot,
+                          'immutable trigger blocks snapshot tampering')
+                tools2 = CareTools(conn, actor, conv2, UUID(final['turn_id']))
+                check(tools2.execute('start_analysis', '{}')['run_id'] == run2_id,
+                      'duplicate tool call on the same initiating turn reuses the frozen run')
+                with patch.dict(os.environ, {'LLM_API_KEY': ''}):
+                    claimed = claim_run(conn)
+                    check(claimed is not None and str(claimed['run_id']) == run2_id,
+                          'context lifecycle run is queued for the worker')
+                    process_run(conn, claimed, Path(ctx_storage))
+                check(conn.execute('SELECT status FROM analysis_runs WHERE run_id=%s',
+                                   (run2_id,)).fetchone()['status'] == 'completed',
+                      'run with frozen context completes without a model key on synthetic text')
+                extra = send2('再分析一次', docs=[doc2])
+                run3_id = extra['tool_events'][0]['run_id']
+                check(run3_id != run2_id, 'new initiating turn creates a new run')
+                snapshot3 = conn.execute('SELECT context_snapshot FROM analysis_runs WHERE run_id=%s',
+                                         (run3_id,)).fetchone()['context_snapshot']
+                check(snapshot3['chat']['turns'][-1]['text'] == '再分析一次' and
+                      snapshot3['chat']['anchor_turn_id'] == extra['turn_id'],
+                      'new anchor freezes a new conversation boundary')
+            client.patch(c2 + '/report-context', headers=headers, json={'enabled': False}).raise_for_status()
+            disabled = send2('关闭共享后再分析', docs=[doc2])
+            run4_id = disabled['tool_events'][0]['run_id']
+            with connection() as conn:
+                conn.autocommit = True
+                snapshot4 = conn.execute('SELECT context_snapshot FROM analysis_runs WHERE run_id=%s',
+                                         (run4_id,)).fetchone()['context_snapshot']
+                check(snapshot4['chat'] is None and snapshot4['case_user_context'] is None,
+                      'disabled sharing excludes chat from newly created runs')
+                late = claim_run(conn)
+                check(late is not None and str(late['run_id']) == run3_id,
+                      'run queued while sharing was on remains the worker candidate after withdrawal')
+                with patch.dict(os.environ, {'LLM_API_KEY': ''}):
+                    process_run(conn, late, Path(ctx_storage))
+                late_row = conn.execute('SELECT status,error FROM analysis_runs WHERE run_id=%s',
+                                        (run3_id,)).fetchone()
+                check(late_row['status'] == 'failed' and
+                      (late_row['error'] or {}).get('code') == 'REPORT_CONTEXT_UNAUTHORIZED',
+                      'late worker result is rejected after sharing is withdrawn')
+            check(client.get(c2, headers=headers).json()['conversation']['report_context_enabled'] is False,
+                  'sharing stays off after the withdrawal')
+            enabled_again = client.patch(c2 + '/report-context', headers=headers, json={'enabled': True})
+            check(enabled_again.status_code == 200 and enabled_again.json()['report_context_version'] >= 3,
+                  're-enabling sharing bumps the sharing version')
+            check(client.get(c2, headers=headers).json()['conversation']['report_context_enabled'] is True,
+                  'owner can re-enable sharing explicitly')
+            api.app.dependency_overrides.pop(api.document_storage_root, None)
 
         follow_id=str(uuid4())
         check(client.post('/v1/conversations',headers=headers,json={'conversation_id':follow_id,'case_id':case_id}).status_code==201,'new conversation can continue same case')
