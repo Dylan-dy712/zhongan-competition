@@ -124,3 +124,22 @@ export interface ReleaseResult {
   report_version: number;
   status: string;
 }
+
+export interface QualityRecommendation {
+  candidate_id: string;
+  entity_type: string;
+  entity_name: string;
+  eligible: boolean;
+  match_reasons: {reason_code: string; text: string; metric_refs: string[]; need_refs: string[]}[];
+  limitations: string[];
+  ranking_allowed: boolean;
+  rejection_reason: string | null;
+  rank: number | null;
+}
+
+export interface RecommendationResponse {
+  snapshot_id: string;
+  data_origin: string;
+  policy_status: string;
+  results: QualityRecommendation[];
+}

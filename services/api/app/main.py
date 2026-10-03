@@ -32,7 +32,8 @@ from .review_repository import (
 from .release_repository import publish_report
 from .quality_export import (MappingCreate, SnapshotBuild, attach_case_attribution,
     create_entity_mapping, draft_policy, export_quality_input, list_entity_mappings,
-    list_snapshots, load_snapshot, persist_snapshot, require_reviewer)
+    list_snapshots, load_snapshot, persist_snapshot, recommend_from_latest, require_reviewer)
+from .quality_profiles import ProfileMatchRequest
 from .delivery_repository import list_deliveries, record_receipt, submit_feedback, list_feedback_triage
 from .care_assistant import AssistantAnswer, answer_question
 from . import conversation_repository as chats
@@ -485,6 +486,15 @@ def post_quality_snapshot_build(body: SnapshotBuild, actor_id: UUID = Depends(cu
         raise HTTPException(status_code=403, detail="Medical reviewer role required") from None
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from None
+
+
+@app.post("/v1/quality/recommendations")
+def post_quality_recommendations(body: ProfileMatchRequest,
+                                 actor_id: UUID = Depends(current_actor), conn=Depends(database)) -> dict:
+    item = recommend_from_latest(conn, body)
+    if item is None:
+        raise HTTPException(status_code=404, detail="No quality snapshot has been built yet")
+    return item
 
 
 @app.get("/v1/quality/snapshots")

@@ -1,6 +1,6 @@
 import type { AssistantAnswer, Evidence, Report, Conversation, ChatSnapshot, ChatSubject, ChatTurn,
   DeliveryNotice, DeliveryReceipt, FeedbackType, FeedbackResult, ReviewTask, ReviewCorrection,
-  ReviewDecision, ReleaseResult } from "./types";
+  ReviewDecision, ReleaseResult, RecommendationResponse } from "./types";
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
 
@@ -83,3 +83,7 @@ export const decideReview = (token: string, reviewId: string, body: {expected_ve
   chatRequest<ReviewDecision>(`/v1/reviews/${encodeURIComponent(reviewId)}/decision`, token, "POST", body, key);
 export const publishReport = (token: string, caseId: string, version: number, expectedVersion: number, key: string) =>
   chatRequest<ReleaseResult>(`/v1/cases/${encodeURIComponent(caseId)}/reports/${version}/publish`, token, "POST", {expected_version: expectedVersion}, key);
+export const requestRecommendations = (token: string, body: {disease_group: string; treatment_group: string;
+  risk_group: string | null; payer_group: string | null;
+  needs: {need_id: string; metric_name: string}[]}) =>
+  chatRequest<RecommendationResponse>('/v1/quality/recommendations', token, 'POST', body);
