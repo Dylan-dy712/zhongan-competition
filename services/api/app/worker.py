@@ -453,8 +453,8 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
                          "clinical_or_indeterminate_insight_requires_review"),
                     )
             evidence_texts = {str(x["evidence_id"]): x["text"] for x in fact_inputs}
-            mapped_draft = map_report_sources(report_model_result["draft"], evidence_texts)
             source_refs = {"case:user_context": str(case_meta["user_context"])} if case_meta and case_meta["user_context"] else {}
+            mapped_draft = map_report_sources(report_model_result["draft"], evidence_texts, source_refs)
             sections, action_drafts, report_errors = validate_and_complete(
                 mapped_draft, evidence_texts,
                 {e.entry_id for e in knowledge_entries}, source_refs,

@@ -38,7 +38,8 @@ def corrected_insight_payload(current: Insight, corrections: list[ReviewCorrecti
     return Insight.model_validate(payload).model_dump(mode="json")
 
 
-REVIEWABLE_REPORT_ERRORS = {'CASE_FACT_REQUIRES_REVIEW', 'ACTION_REQUIRES_REVIEW'}
+REVIEWABLE_REPORT_ERRORS = {'CASE_FACT_REQUIRES_REVIEW', 'ACTION_REQUIRES_REVIEW',
+                            'PATIENT_STATEMENT_REQUIRES_REVIEW', 'SERVICE_SUGGESTION_REQUIRES_REVIEW'}
 
 
 def checked_report_content(current: Report, corrections: list[ReviewCorrection],

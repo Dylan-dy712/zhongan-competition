@@ -118,7 +118,13 @@ def publish_report(conn, *, actor_id, case_id, version, expected_version, idempo
             except ValueError:
                 raise ReleaseBlocked('cost field is not supported by current source evidence') from None
         sources = {'case:user_context': str(scope['user_context'])} if scope['user_context'] else {}
-        checked_report_content(report,[],evidence,sources)
+        checked_sections, _, content_errors = checked_report_content(report,[],evidence,sources)
+        # Recompute from actual content: stale/forged statuses and an empty saved error list
+        # cannot turn a model label or paraphrase into an automatic approval.
+        if (content_errors or any(c['review_status']=='pending' for s in checked_sections for c in s['claims'])) and not conn.execute("""SELECT 1 FROM review_decisions
+            WHERE target_type='report' AND target_id=%s AND target_version=%s AND decision='approve'""",
+            (report.report_id,version)).fetchone():
+            raise ReleaseBlocked('report content requires an approval record')
         check_report_knowledge(report,'\n'.join(evidence.values()))
         # Expiry can pass while validation runs; row locks alone do not stop the clock.
         if not conn.execute("""SELECT 1 FROM consent_purposes WHERE consent_id=%s AND purpose='case_guidance'

@@ -293,6 +293,8 @@ flowchart TD
 
 `Action` 保留 `action_id, report_id, source_refs, owner_role, action_text, due_at, due_source, status, feedback_ref`；补充 `priority, rationale`。
 
+原型报告草稿用 `source_quote` 引用已授权 `user_sources`（当前仅 `case:user_context`），与引用病历的 `evidence_quote` 分开绑定。用户担心、偏好和提醒要求不能充当医学事实或医嘱；用户表达的改写及模型生成的服务建议均需复核，不能凭模型自报 `claim_type/review_status` 自动放行。发布按实际内容重算复核要求，需对应报告 ID/版本的真实审批记录，不能依赖保存的空错误列表。当前聊天历史尚未自动冻结到报告用户来源中。
+
 - `owner_role = patient | caregiver | clinician | customer_service`；行动不得替未知主体承诺服务。
 - `status = proposed | acknowledged | completed | deferred | help_requested | cancelled`。
 - `due_source = medical_order | user_request | service_policy | unknown`。没有时间依据时 `due_at=null`；用户提醒时间不是医学复诊时间。

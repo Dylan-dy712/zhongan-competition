@@ -7,23 +7,27 @@ from .contracts.core import Claim, ReportSection
 
 SECTION_TYPES = ("diagnosis_explanation", "treatment_review", "cost_explanation",
                  "recovery_plan", "emotional_support", "next_visit_advice")
-POLICY_VERSION = "report-safety-v2"
+POLICY_VERSION = "report-safety-v3"
 UNSAFE_PATTERNS = (r"自行(?:停药|换药|加药)", r"保证(?:治愈|康复|有效)", r"医生(?:开错|误诊)")
 
 
-def map_report_sources(draft: dict, evidence: dict[str, str]) -> dict:
+def map_report_sources(draft: dict, evidence: dict[str, str], sources: dict[str, str] | None = None) -> dict:
     """Bind exact quotes without modifying the model output retained for audit."""
-    def refs(quote):
-        match = next((key for key, text in evidence.items() if quote and quote.strip() and quote in text), None)
+    sources = sources or {}
+    def refs(quote, corpus):
+        match = next((key for key, text in corpus.items() if quote and quote.strip() and quote in text), None)
         return [match] if match else []
 
     return {
         "sections": [{"section_type": section.get("section_type"), "claims": [
-            {**claim, "evidence_refs": refs(claim.get("evidence_quote"))}
+            {**claim, "evidence_refs": refs(claim.get("evidence_quote"), evidence),
+             "source_refs": list(dict.fromkeys(claim.get("source_refs", []) +
+                 (refs(claim.get("source_quote"), sources) if claim.get("claim_type") == "patient_statement" else [])))}
             for claim in section.get("claims", [])
         ]} for section in draft.get("sections", [])],
         "actions": [{**action, "source_refs": list(dict.fromkeys(
-            action.get("source_refs", []) + refs(action.get("source_quote"))))}
+            action.get("source_refs", []) + refs(action.get("source_quote"), evidence) +
+            refs(action.get("source_quote"), sources)))}
             for action in draft.get("actions", [])],
     }
 
@@ -68,7 +72,13 @@ def validate_and_complete(draft: dict, valid_evidence: dict[str, str], approved_
             text = str(raw.get("text", "")).strip()
             if not text or _unsafe(text):
                 errors.append("UNSAFE_OR_EMPTY_CLAIM"); continue
-            review_required = claim_type in {"professional_explanation", "to_confirm"}
+            review_required = claim_type in {"professional_explanation", "to_confirm", "service_suggestion"}
+            if claim_type == "service_suggestion":
+                # Model-assigned labels do not prove that advice is non-clinical or supported.
+                errors.append("SERVICE_SUGGESTION_REQUIRES_REVIEW")
+            if claim_type == "patient_statement" and not _fact_preserved(text, [valid_source_refs[x] for x in sources]):
+                review_required = True
+                errors.append("PATIENT_STATEMENT_REQUIRES_REVIEW")
             if claim_type == "case_fact" and not _fact_preserved(text, [valid_evidence[x] for x in evidence]):
                 # A valid ID proves provenance, not that a paraphrase preserves the fact.
                 review_required = True

@@ -126,6 +126,9 @@ def main():
             with connection() as conn:
                 conn.autocommit=True
                 run=claim_run(conn)
+                user_context={'concern':'担心费用，希望核对两个支付金额'}
+                conn.execute('UPDATE cases SET user_context=%s::jsonb WHERE case_id=%s',
+                             (json.dumps(user_context),case_id))
                 draft = {'sections': [{'section_type': section, 'claims': [{
                     'text': '医疗总费用：999.00元', 'claim_type': 'case_fact',
                     'evidence_quote': '医疗总费用：120.00元'}]} for section in SECTION_TYPES],
@@ -135,7 +138,12 @@ def main():
                          'rationale': '合成测试'},
                         {'action_text': '三天后复诊', 'source_quote': '医疗总费用：120.00元',
                          'source_refs': [], 'owner_role': 'patient', 'due_source': 'medical_order',
-                         'due_at': '2026-10-10T09:00:00+08:00', 'rationale': '合成测试'}]}
+                         'due_at': '2026-10-10T09:00:00+08:00', 'rationale': '合成测试'},
+                        {'action_text':'向客服核对两个支付金额','source_quote':'希望核对两个支付金额',
+                         'source_refs':[], 'owner_role':'patient','due_source':'unknown','due_at':None,
+                         'rationale':'用户明确表达的费用疑问'}]}
+                draft['sections'][4]['claims'].append({'text':'你担心费用，希望核对两个支付金额',
+                    'claim_type':'patient_statement','source_quote':'担心费用','source_refs':[]})
                 extractor = MagicMock(provider='scripted_test', model_id='scripted-report')
                 extractor.extract.return_value = {'status': 'completed', 'candidates': {'candidates': [{
                     'fact_type': 'diagnosis', 'raw_value': '肺炎', 'normalized_value': '肺炎',
@@ -185,8 +193,13 @@ def main():
                 check(saved['status'] == 'pending_review' and
                       all(c['review_status'] == 'pending' for s in saved['sections'] for c in s['claims']),
                       'real quote cannot automatically release contradictory report facts')
+                concern=saved['sections'][4]['claims'][-1]
+                check(concern['claim_type']=='patient_statement' and concern['source_refs']==['case:user_context']
+                      and not concern['evidence_refs'] and report_drafter.call_args.args[2]==user_context,
+                      'worker retains user concern with separate source provenance and review status')
                 check('UNSAFE_OR_EMPTY_ACTION' in saved['validation_errors'] and
-                      len(saved['actions']) == 1 and saved['actions'][0]['due_at'] is None,
+                      len(saved['actions']) == 2 and saved['actions'][0]['due_at'] is None and
+                      saved['actions'][1]['source_refs']==['case:user_context'],
                       'worker removes unsafe action and ungrounded deadline')
                 audited = conn.execute('SELECT candidates FROM model_extractions WHERE run_id=%s AND prompt_version=%s',
                                        (run_id, REPORT_PROMPT_VERSION)).fetchone()

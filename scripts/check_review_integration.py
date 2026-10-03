@@ -129,7 +129,7 @@ def main() -> None:
         conn.execute("""INSERT INTO reports(report_id,case_id,run_id,report_version,status,sections,actions,
             input_hash,model_id,prompt_version,knowledge_version,policy_version,consent_refs,validation_errors)
             VALUES (%s,%s,%s,1,'pending_review',%s::jsonb,'[]',%s,'synthetic','test','knowledge:none',
-            'report-safety-v2',%s::jsonb,'["UNSAFE_OR_EMPTY_ACTION"]')""",
+            'report-safety-v3',%s::jsonb,'["UNSAFE_OR_EMPTY_ACTION"]')""",
             (report_id,case,run,json.dumps(sections,ensure_ascii=False),'e'*64,
              json.dumps([{'consent_id': str(consent), 'version': 1, 'purpose': 'case_guidance'}])))
         # Reapplying migration backfills existing pending reports without duplicating tasks.
@@ -151,6 +151,9 @@ def main() -> None:
         corrected=deepcopy(sections)
         for section in corrected:
             section['claims'][0]['text']='合成证据'
+        corrected[-2]['claims'].append({'claim_id':str(uuid4()),'text':'可以整理疑问，逐项与客服确认。',
+            'claim_type':'service_suggestion','evidence_refs':[],'knowledge_refs':[],'source_refs':[],
+            'review_status':'not_required'})
         corrections=[{'field_or_claim_id':'sections','replacement': corrected,
                       'source_refs':[str(evidence)],'reason':'逐条核对原始合成证据'},
                      {'field_or_claim_id':'actions','replacement':[{
