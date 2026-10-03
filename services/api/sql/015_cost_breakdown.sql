@@ -6,5 +6,5 @@ ALTER TABLE extracted_facts ADD CONSTRAINT extracted_facts_fact_type_check CHECK
 -- A scalar total and structured components are distinct facts of the same event type.
 -- Fall back to event_type for legacy events without a fact_type attribute.
 ALTER TABLE medical_events DROP CONSTRAINT IF EXISTS medical_events_run_id_event_type_key;
-CREATE UNIQUE INDEX medical_events_run_fact_type_idx ON medical_events
+CREATE UNIQUE INDEX IF NOT EXISTS medical_events_run_fact_type_idx ON medical_events
     (run_id, event_type, (coalesce(attributes->>'fact_type', event_type)));
