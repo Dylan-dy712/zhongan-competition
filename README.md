@@ -91,6 +91,8 @@ python scripts/bootstrap_dev.py
 
 当前 API 仅接受合成案件，未配置数据库时返回 503。材料隔离存储、受控文本解析、原生 PDF 文字提取、腾讯云高精度 OCR，以及五类证据绑定字段候选已经实现。DeepSeek V4.1 Flash 结构化抽取、Schema 校验、一次修复预算、逐字引用验证和冲突合并已经通过合成材料真实调用验收；图表视觉理解尚未接入。不得向此原型上传真实医疗数据。
 
+新运行额外保存有原文依据的费用构成（分类与支付口径分别展示），进入费用事件和关怀报告输入；不把明细合计当总费，不求和重复/范围未确认的项目，不推算自付比例。契约、发布重查和验证边界见[费用构成说明](docs/reviews/cost-breakdown.md)。
+
 REQ-04 已将有效字段重建为诊断、手术、用药、住院和费用事件，并通过 `GET /v1/cases/{case_id}/events?run_id=...` 返回事件和 `belongs_to_encounter` 关系。没有材料日期时 `occurred_at=null`、`time_precision=unknown`；冲突事实保持 `assertion=unknown` 和 `relation.status=indeterminate`，不按页面顺序推断医学时间关系。
 
 数据库 API 联调至少验证：有效令牌和授权创建返回 201；同一幂等键与相同内容返回 200 和同一案件；同键不同内容返回 409；跨主体读取返回 404；撤回 `case_guidance` 后读取与重试创建均被拒绝。

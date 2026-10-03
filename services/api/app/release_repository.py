@@ -5,6 +5,7 @@ from uuid import uuid4
 from .repository import _to_report, request_digest
 from .report_builder import POLICY_VERSION
 from .fact_extractor import FIELD_TYPES
+from .cost_breakdown import CostBreakdown, validate_cost_sources
 from .review_repository import ReviewAccessDenied, ReviewNotFound, StaleReview
 from .review_service import REVIEWABLE_REPORT_ERRORS, checked_report_content, check_report_knowledge
 
@@ -85,19 +86,37 @@ def publish_report(conn, *, actor_id, case_id, version, expected_version, idempo
             (review_required=true OR review_status='pending' OR (category='clinical' AND review_status='rejected')) LIMIT 1""",
             (case_id,report.run_id)).fetchone():
             raise ReleaseBlocked('insight review is incomplete or clinical content was rejected')
-        facts = conn.execute('SELECT fact_type,status,assertion,evidence_ids FROM extracted_facts WHERE case_id=%s AND run_id=%s',
+        facts = conn.execute('SELECT fact_type,status,assertion,evidence_ids,value FROM extracted_facts WHERE case_id=%s AND run_id=%s',
                              (case_id,report.run_id)).fetchall()
-        if {f['fact_type'] for f in facts}!=set(FIELD_TYPES):
+        if not set(FIELD_TYPES)<= {f['fact_type'] for f in facts}:
             raise ReleaseBlocked('required structured fields are missing from output')
+        costs=[]
+        for fact in facts:
+            if fact['fact_type']=='cost_breakdown' and fact['value'] is not None:
+                try:
+                    cost=CostBreakdown.model_validate(fact['value'])
+                except ValueError:
+                    raise ReleaseBlocked('structured cost field is invalid') from None
+                if set(fact['evidence_ids'])!={str(s.evidence_id) for f in cost.fields for s in f.sources}:
+                    raise ReleaseBlocked('cost field source refs are incomplete')
+                costs.append(cost)
+                if any(field.amount.status=='conflict' for field in cost.fields):
+                    raise ReleaseBlocked('cost component conflicts remain unresolved')
         if any(f['status']=='conflict' for f in facts):
             raise ReleaseBlocked('fact conflicts remain unresolved')
         uncertain = {str(ref) for f in facts if f['assertion'] in {'unknown','negated','historical','suspected'}
                      for ref in f['evidence_ids']}
         if any(uncertain.intersection(a.source_refs) for a in report.actions):
             raise ReleaseBlocked('action depends on uncertain or non-current facts')
-        evidence = {str(e['evidence_id']):e['text_value'] or '' for e in conn.execute(
-            'SELECT evidence_id,text_value FROM evidence WHERE case_id=%s AND run_id=%s',
+        evidence_rows={str(e['evidence_id']):e for e in conn.execute(
+            'SELECT evidence_id,text_value,document_id,document_version,page_index FROM evidence WHERE case_id=%s AND run_id=%s',
             (case_id,report.run_id)).fetchall()}
+        evidence={key:row['text_value'] or '' for key,row in evidence_rows.items()}
+        for cost in costs:
+            try:
+                validate_cost_sources(cost,evidence_rows)
+            except ValueError:
+                raise ReleaseBlocked('cost field is not supported by current source evidence') from None
         sources = {'case:user_context': str(scope['user_context'])} if scope['user_context'] else {}
         checked_report_content(report,[],evidence,sources)
         check_report_knowledge(report,'\n'.join(evidence.values()))

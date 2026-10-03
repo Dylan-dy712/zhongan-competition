@@ -9,9 +9,10 @@ from services.api.app.knowledge_assembler import KnowledgeAssembler
 
 class InsightDetectorTests(unittest.TestCase):
     def test_cost_mismatch_is_indeterminate_and_evidence_bound(self):
-        a, b = uuid4(), uuid4()
+        a, b, doc = uuid4(), uuid4(), uuid4()
         rows = [{"evidence_id": a, "text": "医疗总费用：1000元"},
                 {"evidence_id": b, "text": "明细合计：900元"}]
+        for row in rows: row.update(document_id=doc,document_version=1,page_index=0)
         item = deterministic_candidates(rows)[0]
         self.assertEqual(item["label"], "COST_AMOUNT_RECONCILIATION")
         self.assertEqual(item["judgment_status"], "indeterminate")

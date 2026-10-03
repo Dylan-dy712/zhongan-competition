@@ -163,7 +163,7 @@ def main() -> None:
     assert evidence["text_span"]["offset_unit"] == "unicode_code_point"
     assert evidence["source_hash"] == hashlib.sha256(content).hexdigest()
     status, facts = call("GET", f"/v1/cases/{case_id}/facts?run_id={run['run_id']}")
-    assert status == 200 and len(facts) == 5
+    assert status == 200 and len(facts) == 6
     facts_by_type = {item["fact_type"]: item for item in facts}
     assert facts_by_type["diagnosis"]["assertion"] == "suspected"
     assert facts_by_type["stay_days"]["value"] == 7
@@ -171,7 +171,7 @@ def main() -> None:
     assert all(item["evidence_ids"] for item in facts)
     status, event_bundle = call("GET", f"/v1/cases/{case_id}/events?run_id={run['run_id']}")
     assert status == 200
-    assert len(event_bundle["events"]) == 5 and len(event_bundle["relations"]) == 5
+    assert len(event_bundle["events"]) == 6 and len(event_bundle["relations"]) == 6
     assert len({item["encounter_id"] for item in event_bundle["events"]}) == 1
     assert all(item["occurred_at"] is None and item["time_precision"] == "unknown"
                for item in event_bundle["events"])

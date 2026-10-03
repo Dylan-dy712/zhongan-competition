@@ -115,7 +115,7 @@ def main():
 
         with tempfile.TemporaryDirectory(prefix='zhongan-chat-files-') as storage:
             api.app.dependency_overrides[api.document_storage_root] = lambda: Path(storage)
-            uploaded=client.post(base+'/documents',headers=headers,files={'file':('invoice.txt','合成票据：医疗总费用：120.00元。\n住院天数：3.5天\nCT提示不能排除肺炎。'.encode(),'text/plain')})
+            uploaded=client.post(base+'/documents',headers=headers,files={'file':('invoice.txt','合成票据：医疗总费用：120.00元。\n药品费：40元\n检查费：80元\n明细合计：120元\n个人自费：10元\n现金支付：30元\n住院天数：3.5天\nCT提示不能排除肺炎。'.encode(),'text/plain')})
             check(uploaded.status_code==201,'chat document upload persists actual file')
             document_id=uploaded.json()['document_id']
             model=ScriptedModel([tool('start_analysis'),reply('材料已排队。')])
@@ -146,18 +146,38 @@ def main():
                      patch('services.api.app.worker.detect_semantic', return_value={
                          'status': 'completed', 'candidates': [], 'raw_output': {}, 'usage_metadata': {}}), \
                      patch('services.api.app.worker.draft_report', return_value={
-                         'status': 'completed', 'draft': draft, 'raw_output': {}, 'usage_metadata': {}}):
+                         'status': 'completed', 'draft': draft, 'raw_output': {}, 'usage_metadata': {}}) as report_drafter:
                     process_run(conn,run,Path(storage))
                 status=conn.execute('SELECT status,error FROM analysis_runs WHERE run_id=%s',(run_id,)).fetchone()
                 check(status['status']=='completed',f"worker parses synthetic invoice ({status['status']})")
                 stay = conn.execute("SELECT value FROM extracted_facts WHERE run_id=%s AND fact_type='stay_days'",
                                     (run_id,)).fetchone()
+                cost_events=conn.execute("SELECT attributes->>'fact_type' AS fact_type FROM medical_events WHERE run_id=%s AND event_type='cost'",
+                                         (run_id,)).fetchall()
+                check({row['fact_type'] for row in cost_events}=={'total_cost','cost_breakdown'},
+                      'scalar total and structured costs persist as distinct source-bound events')
                 check(stay['value'] == 3.5, 'fractional hospital stay survives extraction and SQL storage')
                 response=client.get(f'/v1/cases/{uploaded.json()["case_id"]}/facts',headers=headers,
                                     params={'run_id':run_id})
                 check(response.status_code==200 and next(f for f in response.json()
                       if f['fact_type']=='diagnosis')['assertion']=='unknown',
                       'model cannot confirm a diagnosis by quoting only the uncertain entity')
+                costs=next(f for f in response.json() if f['fact_type']=='cost_breakdown')
+                fields={f['source_label']:f for f in costs['value']['fields']}
+                check(costs['status']=='derived' and fields['药品费']['amount']['value']['amount_minor']==4000 and
+                      fields['个人自费']['role']=='payment_component' and costs['value']['self_paid_ratio'] is None,
+                      'worker stores source-bound cost categories and separate payment labels without inferred ratios')
+                cost_refs={str(src['evidence_id']) for f in fields.values() for src in f['sources']}
+                check(cost_refs==set(costs['evidence_ids']) and all(client.get(f'/v1/evidence/{ref}',headers=headers).status_code==200
+                      for ref in cost_refs),'cost component references resolve through the actual authorized evidence API')
+                conn.execute('UPDATE actor_subject_access SET can_read_case=false WHERE actor_id=%s',(outsider,))
+                check(client.get(f'/v1/cases/{uploaded.json()["case_id"]}/facts',headers=other_headers,
+                      params={'run_id':run_id}).status_code==404 and all(client.get(f'/v1/evidence/{ref}',headers=other_headers).status_code==404
+                      for ref in cost_refs),'unscoped actor cannot read cost components or their evidence')
+                conn.execute('UPDATE actor_subject_access SET can_read_case=true WHERE actor_id=%s',(outsider,))
+                context=report_drafter.call_args.kwargs['structured_costs']
+                check(any(f['source_label']=='药品费' and f['value']['amount_minor']==4000 for f in context['fields']) and
+                      context['completeness_status']=='not_established','report generation receives source-bound cost fields and limitations')
                 saved = conn.execute('SELECT status,sections,actions,validation_errors FROM reports WHERE run_id=%s',
                                      (run_id,)).fetchone()
                 check(conn.execute("SELECT count(*) AS n FROM review_tasks WHERE run_id=%s AND target_type='report' AND status='pending'",

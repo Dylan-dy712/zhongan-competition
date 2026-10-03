@@ -94,7 +94,7 @@ class FactExtractorTests(unittest.TestCase):
 
     def test_three_model_values_and_repeated_value_preserve_all_sources(self):
         rows = [{'evidence_id': uuid4(), 'text': text} for text in [
-            '医疗总费用：100元', '窗口记录200元', '另一记录300元', '复核记录200元']]
+            '医疗总费用：100元', '窗口记录：总费用：200元', '另一记录：总费用：300元', '复核记录：总费用：200元']]
         rules = extract_facts(rows)
         unchanged = deepcopy(rules)
         models = [{'fact_type': 'total_cost', 'raw_value': f'{amount}元',
@@ -150,3 +150,30 @@ class FactExtractorTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CostSourceGuardTests(unittest.TestCase):
+    def test_subtotals_and_payments_are_not_case_totals(self):
+        rows=[{'evidence_id':uuid4(),'text':'药品费：100元；明细合计：900元；现金支付：50元；合计：50元'}]
+        total=next(f for f in extract_facts(rows) if f['fact_type']=='total_cost')
+        self.assertEqual(total['status'],'missing')
+        rows[0]['text']='医疗总费用：1000元；明细合计：900元'
+        total=next(f for f in extract_facts(rows) if f['fact_type']=='total_cost')
+        self.assertEqual(total['value']['amount_minor'],100000)
+        self.assertEqual(total['status'],'observed')
+
+    def test_model_cannot_invent_amount_or_promote_estimate_or_subtotal(self):
+        for text,value,quote in [('医疗总费用：100元',99900,'医疗总费用：100元'),
+            ('明细合计：100元',10000,'明细合计：100元'),
+            ('预计医疗总费用：100元',10000,'医疗总费用：100元'),
+            ('医疗总费用：100元至200元',10000,'医疗总费用：100元')]:
+            rows=[{'evidence_id':uuid4(),'text':text}]
+            rules=extract_facts(rows)
+            result=merge_model_candidates(rules,[{'fact_type':'total_cost','raw_value':'fake raw',
+                'normalized_value':{'amount_minor':value,'currency':'CNY'},'assertion':'present','evidence_quote':quote}],rows)
+            total=next(f for f in result if f['fact_type']=='total_cost')
+            self.assertEqual(total,next(f for f in rules if f['fact_type']=='total_cost'))
+        for invalid in (True,-1,float('nan'),'1,00','3.141元','-10元','1e3元',
+            {'amount_minor':True,'currency':'CNY'},{'amount_minor':1.9,'currency':'CNY'},
+            {'amount_minor':-1,'currency':'CNY'},{'amount_minor':10,'currency':'USD'}):
+            self.assertIsNone(normalize_value('total_cost',invalid))

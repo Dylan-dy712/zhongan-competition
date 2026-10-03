@@ -17,6 +17,7 @@ from pypdf import PdfReader
 from .repository import connect
 from .fact_extractor import EXTRACTOR_VERSION, extract_facts, merge_model_candidates
 from .event_builder import BUILDER_VERSION, build_events
+from .cost_breakdown import cost_fact, has_cost_conflicts, report_cost_context
 from .insight_detector import RULE_VERSION, deterministic_candidates, infer_disease_code, merge_semantic_candidates
 from .insight_llm import PROMPT_VERSION as INSIGHT_PROMPT_VERSION, SCHEMA_VERSION as INSIGHT_SCHEMA_VERSION, detect_semantic
 from .knowledge_assembler import KnowledgeAssembler, PackExcludedError
@@ -62,6 +63,24 @@ def text_chunks(text: str, limit: int = 2000):
         end = min(start + limit, len(text))
         if text[start:end].strip():
             yield start, end, text[start:end]
+
+
+def evidence_for_page(document,page):
+    """Prepare once so report cost context and SQL evidence refer to the same source spans."""
+    if not page['text']:
+        return []
+    if page['parser_version']==OCR_VERSION:
+        spans=[]
+        cursor=0
+        for block in page['blocks']:
+            value=block['text']
+            spans.append((cursor,cursor+len(value),value,block.get('bbox')))
+            cursor+=len(value)+1
+    else:
+        spans=[(*chunk,None) for chunk in text_chunks(page['text'])]
+    return [{'evidence_id':uuid4(),'text':value,'document_id':document['document_id'],
+             'document_version':document['document_version'],'page_index':page['page_index'],
+             'start':start,'end':end,'bbox':bbox} for start,end,value,bbox in spans]
 
 
 def page_image_count(page) -> int:
@@ -240,6 +259,9 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
         material = "\n\n".join(
             page["text"] for _document, pages in parsed_documents for page in pages if page["text"]
         )
+        prepared_by_page={(document['document_id'],document['document_version'],page['page_index']):evidence_for_page(document,page)
+            for document,pages in parsed_documents for page in pages}
+        fact_inputs=[row for rows in prepared_by_page.values() for row in rows]
         model_result = {"status": "not_configured", "raw_output": None,
                         "repaired_output": None, "candidates": {"candidates": []},
                         "usage_metadata": {}, "error_code": "LLM_NOT_CONFIGURED"}
@@ -287,10 +309,11 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
                            "ai_verification_source": e.ai_verification_source}
                           for e in knowledge_entries[:80]]
             report_model_result = draft_report(material, reviewable,
-                                                case_meta["user_context"] if case_meta else None)
+                                                case_meta["user_context"] if case_meta else None,
+                                                structured_costs=report_cost_context(fact_inputs,
+                                                    model_result['candidates'].get('cost_lines',[])))
 
-        evidence_ids = []
-        fact_inputs = []
+        evidence_ids = [str(row['evidence_id']) for row in fact_inputs]
         routing = []
         waiting_review = any(
             page["requires_ocr"] or page["requires_vision"] or page["status"] == "unreadable"
@@ -366,33 +389,21 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
                              ("pdf_text_layer" if document["media_type"] == "application/pdf" else "controlled_text"),
                              document["source_hash"], page["parser_version"]),
                         )
-                    if page["text"]:
-                        if page["parser_version"] == OCR_VERSION:
-                            spans = []
-                            cursor = 0
-                            for block in page["blocks"]:
-                                value = block["text"]
-                                spans.append((cursor, cursor + len(value), value, block.get("bbox")))
-                                cursor += len(value) + 1
-                        else:
-                            spans = [(*chunk, None) for chunk in text_chunks(page["text"])]
-                        for start, end, value, bbox in spans:
-                            evidence_id = uuid4()
-                            evidence_ids.append(str(evidence_id))
-                            fact_inputs.append({"evidence_id": evidence_id, "text": value})
-                            conn.execute(
-                                """INSERT INTO evidence
-                                   (evidence_id, run_id, case_id, document_id, document_version,
-                                    page_index, text_start, text_end, text_value, bbox, extraction_method,
-                                    source_hash, parser_version)
-                                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s,%s,%s)""",
-                                (evidence_id, run["run_id"], run["case_id"], document["document_id"],
-                                 document["document_version"], page["page_index"], start, end, value,
-                                 json.dumps(bbox),
-                                 OCR_METHOD if page["parser_version"] == OCR_VERSION else
-                                 ("pdf_text_layer" if document["media_type"] == "application/pdf" else "controlled_text"),
-                                 document["source_hash"], page["parser_version"]),
-                            )
+                    for row in prepared_by_page[(document['document_id'],document['document_version'],page['page_index'])]:
+                        evidence_id,start,end,value,bbox=(row[key] for key in ('evidence_id','start','end','text','bbox'))
+                        conn.execute(
+                            """INSERT INTO evidence
+                               (evidence_id, run_id, case_id, document_id, document_version,
+                                page_index, text_start, text_end, text_value, bbox, extraction_method,
+                                source_hash, parser_version)
+                               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s,%s,%s)""",
+                            (evidence_id, run["run_id"], run["case_id"], document["document_id"],
+                             document["document_version"], page["page_index"], start, end, value,
+                             json.dumps(bbox),
+                             OCR_METHOD if page["parser_version"] == OCR_VERSION else
+                             ("pdf_text_layer" if document["media_type"] == "application/pdf" else "controlled_text"),
+                             document["source_hash"], page["parser_version"]),
+                        )
                 document_status = "parsing" if any(
                     page["requires_ocr"] or page["requires_vision"] or page["status"] == "unreadable"
                     for page in pages
@@ -405,6 +416,10 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
             facts = merge_model_candidates(
                 facts, model_result["candidates"].get("candidates", []), fact_inputs
             )
+            expense_fact=cost_fact(fact_inputs,model_result['candidates'].get('cost_lines',[]))
+            facts.append(expense_fact)
+            if expense_fact['value'] and has_cost_conflicts(expense_fact['value']):
+                waiting_review=True
             rule_insights = deterministic_candidates(fact_inputs, knowledge_entries)
             insights = merge_semantic_candidates(
                 rule_insights, insight_model_result["candidates"], fact_inputs,
