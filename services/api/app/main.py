@@ -30,6 +30,9 @@ from .review_repository import (
     ReviewAccessDenied, ReviewNotFound, StaleReview, decide_review, list_reviews,
 )
 from .release_repository import publish_report
+from .quality_export import (MappingCreate, SnapshotBuild, attach_case_attribution,
+    create_entity_mapping, draft_policy, export_quality_input, list_entity_mappings,
+    list_snapshots, load_snapshot, persist_snapshot, require_reviewer)
 from .delivery_repository import list_deliveries, record_receipt, submit_feedback, list_feedback_triage
 from .care_assistant import AssistantAnswer, answer_question
 from . import conversation_repository as chats
@@ -75,6 +78,12 @@ class CreateRun(Contract):
     document_versions: list[DocumentVersionRef] = Field(min_length=1, max_length=100)
     pipeline_version: str = Field(min_length=1, max_length=100)
     force_new: bool = False
+
+
+class AttributionCreate(Contract):
+    run_id: UUID
+    entity_id: UUID
+    evidence_ids: list[UUID]
 
 
 class DecideReview(Contract):
@@ -423,6 +432,73 @@ def post_report_release(case_id: UUID, version: Annotated[int, ApiPath(ge=1)], b
         raise HTTPException(422,str(exc)) from None
     except OSError:
         raise HTTPException(503,'Report knowledge validation unavailable') from None
+
+
+@app.get("/v1/quality/entity-mappings")
+def get_entity_mappings(actor_id: UUID = Depends(current_actor), conn=Depends(database)) -> list[dict]:
+    try:
+        return list_entity_mappings(conn)
+    except ReviewAccessDenied:
+        raise HTTPException(status_code=403, detail="Medical reviewer role required") from None
+
+
+@app.post("/v1/quality/entity-mappings", status_code=200)
+def post_entity_mapping(body: MappingCreate, actor_id: UUID = Depends(current_actor),
+                        conn=Depends(database)) -> dict:
+    try:
+        return create_entity_mapping(conn, actor_id=actor_id, body=body)
+    except ReviewAccessDenied:
+        raise HTTPException(status_code=403, detail="Medical reviewer role required") from None
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+
+
+@app.post("/v1/quality/cases/{case_id}/attribution")
+def post_case_attribution(case_id: UUID, body: AttributionCreate,
+                          actor_id: UUID = Depends(current_actor), conn=Depends(database)) -> dict:
+    try:
+        return attach_case_attribution(conn, actor_id=actor_id, case_id=case_id,
+            run_id=body.run_id, entity_id=body.entity_id, evidence_ids=body.evidence_ids)
+    except ReviewAccessDenied:
+        raise HTTPException(status_code=403, detail="Medical reviewer role required") from None
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+
+
+@app.post("/v1/quality/snapshots/build")
+def post_quality_snapshot_build(body: SnapshotBuild, actor_id: UUID = Depends(current_actor),
+                                conn=Depends(database)) -> dict:
+    try:
+        require_reviewer(conn, actor_id)
+        dataset_version = body.dataset_version or (
+            "business-db@" + conn.execute("SELECT coalesce(max(created_at)::date::text,'none') AS d FROM analysis_runs").fetchone()["d"])
+        policy = draft_policy(body.window_start, body.window_end,
+                              min_sample_size=body.min_sample_size, max_missing_rate=body.max_missing_rate)
+        data, limitations = export_quality_input(conn, policy=policy, dataset_version=dataset_version)
+        if data is None:
+            raise HTTPException(status_code=422, detail="; ".join(limitations) or "no authoritative records")
+        result = persist_snapshot(conn, data=data, actor_id=actor_id, limitations=limitations)
+        return {"snapshot_id": str(result["snapshot_id"]), "dataset_version": data.dataset_version,
+                "included_records": result["included_records"], "profile_count": len(result["profiles"]),
+                "limitations": limitations, "created": result["created"]}
+    except ReviewAccessDenied:
+        raise HTTPException(status_code=403, detail="Medical reviewer role required") from None
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+
+
+@app.get("/v1/quality/snapshots")
+def get_quality_snapshots(actor_id: UUID = Depends(current_actor), conn=Depends(database)) -> list[dict]:
+    return list_snapshots(conn)
+
+
+@app.get("/v1/quality/snapshots/{snapshot_id}")
+def get_quality_snapshot(snapshot_id: UUID, actor_id: UUID = Depends(current_actor),
+                         conn=Depends(database)) -> dict:
+    item = load_snapshot(conn, snapshot_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="Snapshot not found")
+    return item
 
 
 @app.post("/v1/cases/{case_id}/assistant/messages", response_model=AssistantAnswer)
