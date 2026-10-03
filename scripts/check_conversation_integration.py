@@ -152,6 +152,10 @@ def main():
                 check(status['status']=='completed',f"worker parses synthetic invoice ({status['status']})")
                 stay = conn.execute("SELECT value FROM extracted_facts WHERE run_id=%s AND fact_type='stay_days'",
                                     (run_id,)).fetchone()
+                cost_events=conn.execute("SELECT attributes->>'fact_type' AS fact_type FROM medical_events WHERE run_id=%s AND event_type='cost'",
+                                         (run_id,)).fetchall()
+                check({row['fact_type'] for row in cost_events}=={'total_cost','cost_breakdown'},
+                      'scalar total and structured costs persist as distinct source-bound events')
                 check(stay['value'] == 3.5, 'fractional hospital stay survives extraction and SQL storage')
                 response=client.get(f'/v1/cases/{uploaded.json()["case_id"]}/facts',headers=headers,
                                     params={'run_id':run_id})
