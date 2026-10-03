@@ -187,6 +187,22 @@ def main():
         check(publish().json()['message']=='cost component conflicts remain unresolved',
               'nested cost conflicts have an explicit release rejection reason')
         conn.execute("UPDATE extracted_facts SET value=%s::jsonb WHERE fact_id=%s",(json.dumps(original),expense['fact_id']))
+        reviewed_sections=deepcopy(sections)
+        reviewed_sections[4]['claims'].append({'claim_id':str(uuid4()),'text':'可以整理疑问，与客服逐项确认。',
+            'claim_type':'service_suggestion','evidence_refs':[],'knowledge_refs':[],'source_refs':[],
+            'review_status':'pending'})
+        conn.execute("UPDATE reports SET status='pending_review',sections=%s::jsonb WHERE report_id=%s",
+                     (json.dumps(reviewed_sections),report))
+        service_review=uuid4()
+        conn.execute("""INSERT INTO review_tasks(review_id,case_id,run_id,target_type,target_id,target_version,status,reason)
+            VALUES (%s,%s,%s,'report',%s,1,'pending','synthetic service suggestion review')""",
+            (service_review,case,run,report))
+        approved=client.post(f'/v1/reviews/{service_review}/decision',
+            headers={**headers,'Idempotency-Key':'approve-service-suggestion'},
+            json={'expected_version':1,'decision':'approve','reason':'合成测试：核对用户服务建议'})
+        check(approved.status_code==200,'service suggestion passes actual report approval API')
+        check(conn.execute("SELECT count(*) AS n FROM review_decisions WHERE target_id=%s AND decision='approve'",
+                           (report,)).fetchone()['n']==1,'reviewed report has an actual version-specific approval record')
         engine=conn.execute('SELECT version() AS version').fetchone()['version']
         sql_rollback='not_tested_pglite_protocol_limit'
         concurrency='not_tested_pglite_protocol_limit'
