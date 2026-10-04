@@ -36,6 +36,7 @@ export function ReviewWorkbench({token}: {token: string}) {
   const [busy, setBusy] = useState(false);
   const [evidence, setEvidence] = useState<Evidence | null>(null);
   const [readyToPublish, setReadyToPublish] = useState<{caseId: string; reportId: string; version: number}[]>([]);
+  const [insightEdits, setInsightEdits] = useState<null | {severity: string; rationale: string; uncertainty: string; suggested_action: string; judgment_status: string}>(null);
   const [published, setPublished] = useState<string[]>([]);
 
   const load = useCallback(async () => {
@@ -53,7 +54,7 @@ export function ReviewWorkbench({token}: {token: string}) {
   const report = selected ? asReport(selected.target) : null;
   const insight = selected && !report ? selected.target as Record<string, unknown> : null;
 
-  const reset = () => {setEditing(false); setEditedSections(null); setEditedActions(null); setReason('');};
+  const reset = () => {setEditing(false); setEditedSections(null); setEditedActions(null); setInsightEdits(null); setReason('');};
   const select = (id: string | null) => {setSelectedId(id); reset(); setNotice('');};
 
   const act = async (decision: 'approve' | 'correct' | 'reject') => {
@@ -61,9 +62,21 @@ export function ReviewWorkbench({token}: {token: string}) {
     if (decision !== 'approve' && !reason.trim()) {setNotice(decision === 'reject' ? '驳回必须填写理由。' : '纠正必须填写理由。'); return;}
     setBusy(true); setError(''); setNotice('');
     try {
-      const corrections: {field_or_claim_id: "sections" | "actions"; replacement: unknown; reason: string}[] = [];
-      if (decision === 'correct' && editedSections) corrections.push({field_or_claim_id: 'sections', replacement: editedSections, reason: reason.trim()});
-      if (decision === 'correct' && editedActions) corrections.push({field_or_claim_id: 'actions', replacement: editedActions, reason: reason.trim()});
+      const corrections = [];
+      if (decision === 'correct' && editedSections) corrections.push({field_or_claim_id: 'sections' as const, replacement: editedSections, reason: reason.trim()});
+      if (decision === 'correct' && editedActions) corrections.push({field_or_claim_id: 'actions' as const, replacement: editedActions, reason: reason.trim()});
+      if (decision === 'correct' && insightEdits && insight) {
+        const original = insight as Record<string, unknown>;
+        for (const field of ['severity', 'rationale', 'uncertainty', 'suggested_action', 'judgment_status'] as const) {
+          const before = original[field] == null ? '' : String(original[field]);
+          if (insightEdits[field] !== before) {
+            corrections.push({field_or_claim_id: field,
+              replacement: field === 'uncertainty' && insightEdits[field] === '' ? null : insightEdits[field],
+              reason: reason.trim()});
+          }
+        }
+        if (!corrections.length) {setNotice('纠正模式下没有实际修改任何字段。'); setBusy(false); return;}
+      }
       const result: ReviewDecision = await decideReview(token, selected.review_id,
         {expected_version: selected.target_version, decision, reason: reason.trim() || '核对无误', corrections},
         genKey());
@@ -118,8 +131,14 @@ export function ReviewWorkbench({token}: {token: string}) {
           onChange={e => setReason(e.target.value)} rows={2} placeholder="例如：费用数字与票据不符，已改为清单口径"/></label></div>
         <div className="review-actions-bar">
           <button disabled={busy} onClick={() => void act('approve')}>通过</button>
-          {report && <button disabled={busy} onClick={() => {
-            if (!editing && report) {setEditedSections(cloneSections(report.sections)); setEditedActions(cloneActions(report.actions));}
+          {(report || insight) && <button disabled={busy} onClick={() => {
+            if (insight && !editing) {
+              setInsightEdits({severity: String(insight.severity || 'undetermined'),
+                rationale: String(insight.rationale || ''), uncertainty: String(insight.uncertainty || ''),
+                suggested_action: String(insight.suggested_action || ''),
+                judgment_status: String(insight.judgment_status || 'candidate')});
+            }
+            if (report && !editing) {setEditedSections(cloneSections(report.sections)); setEditedActions(cloneActions(report.actions));}
             setEditing(v => !v);}}>{editing ? '退出纠正' : '纠正'}</button>}
           <button className="danger" disabled={busy} onClick={() => void act('reject')}>驳回</button>
         </div>
@@ -148,9 +167,24 @@ export function ReviewWorkbench({token}: {token: string}) {
         </div>}
         {insight && <div className="review-report">
           <p><strong>{insightLabels[String(insight.category)] || String(insight.category)}</strong> · {String(insight.label)}</p>
+          {editing && insightEdits ? <div className="review-insight-edit">
+            <label>严重度<select value={insightEdits.severity} onChange={e => setInsightEdits({...insightEdits, severity: e.target.value})}>
+              {['low', 'medium', 'high', 'undetermined'].map(v => <option key={v} value={v}>{v}</option>)}</select></label>
+            <label>判定状态<select value={insightEdits.judgment_status} onChange={e => setInsightEdits({...insightEdits, judgment_status: e.target.value})}>
+              {['candidate', 'supported', 'indeterminate', 'rejected'].map(v => <option key={v} value={v}>{v}</option>)}</select></label>
+            <label>理由<textarea value={insightEdits.rationale} rows={3}
+              onChange={e => setInsightEdits({...insightEdits, rationale: e.target.value})}/></label>
+            <label>不确定性说明（可留空）<textarea value={insightEdits.uncertainty} rows={2}
+              onChange={e => setInsightEdits({...insightEdits, uncertainty: e.target.value})}/></label>
+            <label>建议<textarea value={insightEdits.suggested_action} rows={2}
+              onChange={e => setInsightEdits({...insightEdits, suggested_action: e.target.value})}/></label>
+            <p className="review-note">仅提交有变化的字段；服务端按同一契约重新校验。</p>
+          </div>
+          : <>
           <p>{String(insight.rationale)}</p>
           <p className="review-claim-meta">建议：{String(insight.suggested_action || '—')}</p>
           <p className="review-claim-meta">严重度：{String(insight.severity)}</p>
+          </>}
         </div>}
         {evidence && <EvidencePanel evidence={evidence} onClose={() => setEvidence(null)}/>}
       </section>}
