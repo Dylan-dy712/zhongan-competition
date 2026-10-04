@@ -77,7 +77,8 @@ def create_entity_mapping(conn, *, actor_id: UUID, body: MappingCreate) -> dict:
         """INSERT INTO entity_mappings (entity_id,entity_type,display_name,normalized_name,
                source_evidence_ids,created_by)
            VALUES (%s,%s,%s,%s,%s::jsonb,%s)
-           ON CONFLICT (entity_type, normalized_name) DO NOTHING RETURNING entity_id""",
+           ON CONFLICT DO NOTHING
+           RETURNING entity_id""",
         (str(entity_id), body.entity_type, body.display_name.strip(),
          normalized_entity_name(body.display_name), json.dumps([str(e) for e in body.evidence_ids]),
          actor_id),
@@ -191,21 +192,20 @@ def export_quality_input(conn, *, policy: MetricPolicy, dataset_version: str) ->
 
 def persist_snapshot(conn, *, data: QualityInput, actor_id: UUID, limitations: list[str]) -> dict:
     snapshot = build_profiles(data)
-    existing = conn.execute("SELECT 1 FROM quality_snapshots WHERE manifest_hash=%s",
-                            (snapshot["input_sha256"],)).fetchone()
-    conn.execute(
+    inserted = conn.execute(
         """INSERT INTO quality_snapshots (snapshot_id,dataset_version,data_origin,policy,
                manifest_hash,limitations,payload,created_by)
            VALUES (%s,%s,%s,%s::jsonb,%s,%s::jsonb,%s::jsonb,%s)
-           ON CONFLICT (manifest_hash) DO NOTHING""",
+           ON CONFLICT DO NOTHING
+           RETURNING snapshot_id, created_at""",
         (snapshot["snapshot_id"], data.dataset_version, data.data_origin,
          json.dumps(snapshot["policy"]), snapshot["input_sha256"],
          json.dumps(limitations), json.dumps(snapshot), actor_id),
-    )
+    ).fetchone()
     row = conn.execute(
         """SELECT snapshot_id,created_at FROM quality_snapshots WHERE manifest_hash=%s""",
         (snapshot["input_sha256"],)).fetchone()
-    return {**snapshot, "row_created_at": row["created_at"].isoformat(), "created": existing is None}
+    return {**snapshot, "row_created_at": row["created_at"].isoformat(), "created": inserted is not None}
 
 
 def recommend_from_latest(conn, request) -> dict | None:

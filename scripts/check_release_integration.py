@@ -240,6 +240,14 @@ def main():
             check_concurrency(conn,dsn,schema,reviewer=reviewer,patient=patient,case=case,consent=consent,
                               report=report,check=check)
             concurrency='passed'
+            from scripts.check_quality_concurrency import check_quality_concurrency
+
+            def quality_check(ok, msg):
+                if not ok:
+                    raise AssertionError(msg)
+
+            check_quality_concurrency(conn, dsn, schema, reviewer=reviewer, subject=subject, check=quality_check)
+            concurrency='passed+quality'
         released=publish()
         check(released.status_code==200,'validated report publishes through actual API')
         check(conn.execute('SELECT count(*) AS n FROM report_releases').fetchone()['n']==1 and
