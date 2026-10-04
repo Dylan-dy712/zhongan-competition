@@ -1,0 +1,20 @@
+::ffff:127.0.0.1 - - [04/Oct/2026 14:17:41] "GET / HTTP/1.1" 200 -
+::ffff:127.0.0.1 - - [04/Oct/2026 14:17:53] "GET / HTTP/1.1" 304 -
+::ffff:127.0.0.1 - - [04/Oct/2026 14:17:53] "GET /assets/index-Dt3H3HEJ.js HTTP/1.1" 304 -
+::ffff:127.0.0.1 - - [04/Oct/2026 14:17:53] "GET /assets/index-DME4cGO-.css HTTP/1.1" 304 -
+::ffff:127.0.0.1 - - [04/Oct/2026 14:17:53] "GET /assets/nuan-reading-v1-CLfAdjRC.webp HTTP/1.1" 304 -
+::ffff:127.0.0.1 - - [04/Oct/2026 14:17:53] "GET /assets/home-brand-CdmvwyJZ.webp HTTP/1.1" 304 -
+::ffff:127.0.0.1 - - [04/Oct/2026 14:17:53] "GET / HTTP/1.1" 304 -
+::ffff:127.0.0.1 - - [04/Oct/2026 14:17:53] "GET /assets/reference-mascot-BX8ZSpgq.webp HTTP/1.1" 304 -
+::ffff:127.0.0.1 - - [04/Oct/2026 14:17:53] "GET /assets/reference-summary-xmtr4MoX.webp HTTP/1.1" 304 -
+::ffff:127.0.0.1 - - [04/Oct/2026 14:17:53] "GET /assets/reference-cost-CVjlcOKY.webp HTTP/1.1" 304 -
+::ffff:127.0.0.1 - - [04/Oct/2026 14:18:01] code 404, message File not found
+::ffff:127.0.0.1 - - [04/Oct/2026 14:18:01] "GET /favicon.ico HTTP/1.1" 404 -
+::ffff:127.0.0.1 - - [04/Oct/2026 14:18:17] code 404, message File not found
+::ffff:127.0.0.1 - - [04/Oct/2026 14:18:17] "GET /favicon.ico HTTP/1.1" 404 -
+::ffff:127.0.0.1 - - [04/Oct/2026 14:18:27] code 404, message File not found
+::ffff:127.0.0.1 - - [04/Oct/2026 14:18:27] "GET /favicon.ico HTTP/1.1" 404 -
+::ffff:127.0.0.1 - - [04/Oct/2026 14:18:41] code 404, message File not found
+::ffff:127.0.0.1 - - [04/Oct/2026 14:18:41] "GET /favicon.ico HTTP/1.1" 404 -
+::ffff:127.0.0.1 - - [04/Oct/2026 14:18:57] code 404, message File not found
+::ffff:127.0.0.1 - - [04/Oct/2026 14:18:57] "GET /favicon.ico HTTP/1.1" 404 -

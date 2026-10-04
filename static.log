@@ -1,0 +1,20 @@
+::ffff:127.0.0.1 - - [04/Oct/2026 15:14:17] "GET / HTTP/1.1" 200 -
+::ffff:127.0.0.1 - - [04/Oct/2026 15:14:36] "GET / HTTP/1.1" 200 -
+::ffff:127.0.0.1 - - [04/Oct/2026 15:14:36] "GET /assets/index-DME4cGO-.css HTTP/1.1" 200 -
+::ffff:127.0.0.1 - - [04/Oct/2026 15:14:36] "GET /assets/index-Dt3H3HEJ.js HTTP/1.1" 200 -
+::ffff:127.0.0.1 - - [04/Oct/2026 15:14:37] "GET /assets/home-brand-CdmvwyJZ.webp HTTP/1.1" 200 -
+::ffff:127.0.0.1 - - [04/Oct/2026 15:14:37] "GET /assets/nuan-reading-v1-CLfAdjRC.webp HTTP/1.1" 200 -
+::ffff:127.0.0.1 - - [04/Oct/2026 15:14:43] code 404, message File not found
+::ffff:127.0.0.1 - - [04/Oct/2026 15:14:43] "GET /favicon.ico HTTP/1.1" 404 -
+::ffff:127.0.0.1 - - [04/Oct/2026 15:15:02] "GET / HTTP/1.1" 200 -
+::ffff:127.0.0.1 - - [04/Oct/2026 15:15:02] "GET /assets/index-Dt3H3HEJ.js HTTP/1.1" 200 -
+::ffff:127.0.0.1 - - [04/Oct/2026 15:15:02] "GET /assets/index-DME4cGO-.css HTTP/1.1" 200 -
+::ffff:127.0.0.1 - - [04/Oct/2026 15:15:02] "GET /assets/home-brand-CdmvwyJZ.webp HTTP/1.1" 200 -
+::ffff:127.0.0.1 - - [04/Oct/2026 15:15:02] "GET /assets/nuan-reading-v1-CLfAdjRC.webp HTTP/1.1" 200 -
+::ffff:127.0.0.1 - - [04/Oct/2026 15:15:02] code 404, message File not found
+::ffff:127.0.0.1 - - [04/Oct/2026 15:15:02] "GET /favicon.ico HTTP/1.1" 404 -
+::ffff:127.0.0.1 - - [04/Oct/2026 15:16:04] "GET /assets/reference-mascot-BX8ZSpgq.webp HTTP/1.1" 200 -
+::ffff:127.0.0.1 - - [04/Oct/2026 15:16:04] "GET /assets/reference-summary-xmtr4MoX.webp HTTP/1.1" 200 -
+::ffff:127.0.0.1 - - [04/Oct/2026 15:16:04] "GET /assets/reference-cost-CVjlcOKY.webp HTTP/1.1" 200 -
+::ffff:127.0.0.1 - - [04/Oct/2026 15:20:10] code 404, message File not found
+::ffff:127.0.0.1 - - [04/Oct/2026 15:20:10] "GET /favicon.ico HTTP/1.1" 404 -
