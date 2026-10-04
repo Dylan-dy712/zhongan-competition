@@ -343,6 +343,30 @@ def main():
                 check(conn.execute('SELECT status FROM analysis_runs WHERE run_id=%s',
                                    (run2_id,)).fetchone()['status'] == 'completed',
                       'run with frozen context completes without a model key on synthetic text')
+                # Sharing is still on with the original version: the report should be visible.
+                rep_row = conn.execute('SELECT report_id FROM reports WHERE run_id=%s LIMIT 1',
+                                       (run2_id,)).fetchone()
+                check(rep_row is not None, 'run2 report exists after processing')
+                if rep_row:
+                    rep_id = rep_row['report_id']
+                    # Clear pending review statuses so the visibility check passes;
+                    # the test targets sharing-withdrawal visibility, not review gates.
+                    conn.execute("""UPDATE reports SET status='published', sections=(
+                        SELECT jsonb_agg(jsonb_set(claim_row, '{claims}',
+                            (SELECT jsonb_agg(jsonb_set(c, '{review_status}', '"approved"'))
+                             FROM jsonb_array_elements(claim_row->'claims') c))
+                        ) FROM jsonb_array_elements(sections) claim_row) WHERE report_id=%s""", (rep_id,))
+                    conn.execute("""INSERT INTO report_releases(release_id,report_id,case_id,report_version,
+                        released_by,consent_id,consent_version,input_hash,knowledge_version,policy_version,
+                        idempotency_key,request_hash)
+                        SELECT %s,report_id,case_id,report_version,%s,%s,1,input_hash,knowledge_version,
+                        policy_version,'ctx-sharing-visible',%s FROM reports WHERE report_id=%s""",
+                        (uuid4(), actor, consent, 'd'*64, rep_id))
+                    case_for_ctx = conn.execute('SELECT case_id FROM reports WHERE report_id=%s',
+                                                (rep_id,)).fetchone()['case_id']
+                    check(client.get(f'/v1/cases/{case_for_ctx}/reports/1',
+                          headers=headers).status_code == 200,
+                          'published report from sharing-enabled run is patient-visible')
                 extra = send2('再分析一次', docs=[doc2])
                 run3_id = extra['tool_events'][0]['run_id']
                 check(run3_id != run2_id, 'new initiating turn creates a new run')
@@ -370,6 +394,14 @@ def main():
                 check(late_row['status'] == 'failed' and
                       (late_row['error'] or {}).get('code') == 'REPORT_CONTEXT_UNAUTHORIZED',
                       'late worker result is rejected after sharing is withdrawn')
+                # After version bump, the old sharing-enabled report is hidden.
+                if rep_row:
+                    check(client.get(f'/v1/cases/{case_for_ctx}/reports/1',
+                          headers=headers).status_code == 404,
+                          'sharing withdrawal hides an already-published report from the patient')
+                    # Feedback is NOT blocked: the patient still has case access;
+                    # sharing withdrawal hides visibility but doesn't revoke
+                    # case-level authorization or invalidate historical feedback.
             check(client.get(c2, headers=headers).json()['conversation']['report_context_enabled'] is False,
                   'sharing stays off after the withdrawal')
             enabled_again = client.patch(c2 + '/report-context', headers=headers, json={'enabled': True})
