@@ -34,7 +34,8 @@ from .quality_export import (MappingCreate, SnapshotBuild, attach_case_attributi
     create_entity_mapping, draft_policy, export_quality_input, list_entity_mappings,
     list_snapshots, load_snapshot, persist_snapshot, recommend_from_latest, require_reviewer)
 from .quality_profiles import ProfileMatchRequest
-from .delivery_repository import list_deliveries, record_receipt, submit_feedback, list_feedback_triage
+from .delivery_repository import (list_deliveries, record_receipt, submit_feedback, list_feedback_triage,
+    resolve_feedback, FeedbackNotFound, FeedbackAccessDenied, StaleFeedback)
 from .care_assistant import AssistantAnswer, answer_question
 from . import conversation_repository as chats
 from .conversation_agent import CareTools, run_agent
@@ -85,6 +86,10 @@ class AttributionCreate(Contract):
     run_id: UUID
     entity_id: UUID
     evidence_ids: list[UUID]
+
+
+class ResolveFeedback(Contract):
+    resolution_reason: str = Field(min_length=1, max_length=2000)
 
 
 class DecideReview(Contract):
@@ -486,6 +491,20 @@ def post_quality_snapshot_build(body: SnapshotBuild, actor_id: UUID = Depends(cu
         raise HTTPException(status_code=403, detail="Medical reviewer role required") from None
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from None
+
+
+@app.post('/v1/feedback/{feedback_id}/resolve')
+def post_feedback_resolution(feedback_id: UUID, body: ResolveFeedback,
+                             actor_id: UUID = Depends(current_actor), conn=Depends(database)) -> dict:
+    try:
+        return resolve_feedback(conn, actor_id=actor_id, feedback_id=feedback_id,
+                                resolution_reason=body.resolution_reason)
+    except FeedbackNotFound:
+        raise HTTPException(status_code=404, detail="Feedback not found") from None
+    except FeedbackAccessDenied:
+        raise HTTPException(status_code=403, detail="Medical reviewer or customer service role required") from None
+    except StaleFeedback:
+        raise HTTPException(status_code=409, detail="Feedback is not pending or has already been resolved") from None
 
 
 @app.post("/v1/quality/recommendations")

@@ -118,7 +118,8 @@ def submit_feedback(conn,*,actor_id,report_id,report_version,action_id,type,text
 
 
 def _feedback(row):
-    return {key:row[key] for key in ('feedback_id','report_id','report_version','action_id','type','text','triage_status','created_at')}
+    return {key:row[key] for key in ('feedback_id','report_id','report_version','action_id','type','text',
+        'triage_status','resolved_by','resolved_at','resolution_reason','created_at')}
 
 
 def list_feedback_triage(conn,*,actor_id,limit=20):
@@ -135,3 +136,39 @@ def list_feedback_triage(conn,*,actor_id,limit=20):
           AND (ac.role='medical_reviewer' OR (ac.role='customer_service' AND f.type='needs_help'))
         ORDER BY f.created_at,f.feedback_id LIMIT %s""",(actor_id,limit)).fetchall()
     return [_feedback(row) for row in rows]
+
+
+class FeedbackNotFound(Exception): pass
+class FeedbackAccessDenied(Exception): pass
+class StaleFeedback(Exception): pass
+
+
+def resolve_feedback(conn,*,actor_id,feedback_id,resolution_reason):
+    """Authorised staff marks a triage item resolved with a documented reason.
+
+    Resolution means 'this triage item has been handled', not 'the
+    underlying health issue is solved'.
+    """
+    actor=conn.execute('SELECT role FROM actors WHERE actor_id=%s AND active=true',(actor_id,)).fetchone()
+    if not actor or actor['role'] not in {'medical_reviewer','customer_service'}:
+        raise FeedbackAccessDenied()
+    row=conn.execute("""SELECT f.triage_status,f.report_version,c.subject_id FROM care_feedback f
+        JOIN cases c ON c.case_id=f.case_id WHERE f.feedback_id=%s""",(feedback_id,)).fetchone()
+    if not row:
+        raise FeedbackNotFound()
+    scope=conn.execute("""SELECT 1 FROM actor_subject_access a
+        WHERE a.actor_id=%s AND a.subject_id=%s AND a.can_read_case=true""",(actor_id,row['subject_id'])).fetchone()
+    if not scope:
+        raise FeedbackAccessDenied()
+    if row['triage_status']!='pending':
+        raise StaleFeedback('feedback is not pending or has already been resolved')
+    updated=conn.execute(
+        """UPDATE care_feedback SET triage_status='resolved',resolved_by=%s,resolved_at=now(),
+            resolution_reason=%s,resolution_version=resolution_version+1
+            WHERE feedback_id=%s AND triage_status='pending' AND report_version=%s
+            RETURNING feedback_id,triage_status""",
+        (actor_id,resolution_reason,feedback_id,row['report_version'])).fetchone()
+    if not updated:
+        raise StaleFeedback('feedback was concurrently resolved')
+    return _feedback(conn.execute(
+        'SELECT * FROM care_feedback WHERE feedback_id=%s',(feedback_id,)).fetchone())
