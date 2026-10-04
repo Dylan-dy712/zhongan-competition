@@ -357,6 +357,23 @@ def main():
               'revocation blocks feed and receipt replay')
         check(client.get('/v1/feedback/triage',headers=headers).json()==[],
               'revoked feedback is hidden from staff triage')
+        # ---- Feedback resolution closed loop (after all other feedback tests) ----
+        fb_id=feedback.json()['feedback_id']
+        check(client.post(f'/v1/feedback/{fb_id}/resolve',headers=patient_headers,
+                           json={'resolution_reason':'本人关闭'}).status_code==403,
+              'patient cannot resolve their own feedback')
+        check(client.post(f'/v1/feedback/{uuid4()}/resolve',headers=headers,
+                           json={'resolution_reason':'不存在'}).status_code==404,
+              'unknown feedback id returns 404')
+        resolved=client.post(f'/v1/feedback/{fb_id}/resolve',headers=headers,
+                             json={'resolution_reason':'已核实，与原始票据一致'})
+        check(resolved.status_code==200, f'resolve: {resolved.status_code} {resolved.text[:120]}')
+        check(resolved.json()['triage_status']=='resolved', 'resolution sets triage to resolved')
+        check(client.get('/v1/feedback/triage',headers=headers).json()==[],
+              'resolved feedback disappears from pending triage')
+        replay_res=client.post(f'/v1/feedback/{fb_id}/resolve',headers=headers,
+                               json={'resolution_reason':'重复关闭'})
+        check(replay_res.status_code==409, 'double resolution returns 409 conflict')
         print(json.dumps({'status':'passed','checks':checks,'count':len(checks),
                           'mode':'synthetic-fixtures/real-HTTP/SQL','engine':engine,'sql_error_rollback':sql_rollback,'concurrency':concurrency},ensure_ascii=False))
     finally:
