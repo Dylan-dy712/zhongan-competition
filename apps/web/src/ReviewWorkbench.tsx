@@ -131,6 +131,8 @@ export function ReviewWorkbench({token}: {token: string}) {
           onChange={e => setReason(e.target.value)} rows={2} placeholder="例如：费用数字与票据不符，已改为清单口径"/></label></div>
         <div className="review-actions-bar">
           <button disabled={busy} onClick={() => void act('approve')}>通过</button>
+          {editing && <button disabled={busy || !reason.trim()} title="填写复核意见后提交"
+            onClick={() => void act('correct')}>提交纠正</button>}
           {(report || insight) && <button disabled={busy} onClick={() => {
             if (insight && !editing) {
               setInsightEdits({severity: String(insight.severity || 'undetermined'),
