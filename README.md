@@ -35,9 +35,9 @@ PR及main通过[GitHub Actions检查](.github/workflows/ci.yml)后，按[CI与�
 
 聊天和工具事件写入 PostgreSQL。近期聊天进入上下文，较早聊天通过同一用户、同一关怀对象的关键词检索查找；关闭“允许新对话回忆”后，该会话不再作为历史检索来源。此版本是可追溯历史检索，不含自动偏好提炼、向量语义检索或物理删除能力。授权撤回后不再允许读取相关对话。尚未发布的报告不会通过聊天绕过审核。
 
-报告校验采用 `report-safety-v2`：引用存在不能证明改写后的事实正确；自动保留完整原文事实，其他病例事实改写进入待复核。行动建议同样校验来源并拦截自行停换加药；无直接来源的复诊日期清空并要求复核。报告模型必须返回完整六节，原始引用摘录保留在审计记录中。此校验是保守发布门槛，不能替代医学审核或官方效果评测。
+报告校验采用 `report-safety-v3`：引用存在不能证明改写后的事实正确；自动保留完整原文事实，其他病例事实改写进入待复核。行动建议同样校验来源并拦截自行停换加药；无直接来源的复诊日期清空并要求复核。报告模型必须返回完整六节，原始引用摘录保留在审计记录中。此校验是保守发布门槛，不能替代医学审核或官方效果评测。
 
-报告已接入统一审核队列：授权医学审核者可批准、修改生成新版本或驳回，修改保留原版内容和决策审计；报告决策须携带`Idempotency-Key`。批准进入ready；独立publish接口核对材料、授权、审核、知识及安全后原子保存发布与APP待触达记录。APP拉取提醒、逐身份展示/已读回执及反馈待办已接入；外部渠道送达、待办处理和并发验收尚未完成。接口、验证与限制见[报告审核链路](docs/reviews/report-workflow.md)。
+报告已接入统一审核队列：授权医学审核者可批准、修改生成新版本或驳回，修改保留原版内容和决策审计；报告决策须携带`Idempotency-Key`。批准进入ready；独立publish接口核对材料、授权、审核、知识及安全后原子保存发布与APP待触达记录。APP拉取提醒、逐身份展示/已读回执及反馈待办已接入；反馈处理闭环已接入（resolve 端点 + 审计列 + 角色/范围/并发校验）；外部渠道真实送达尚未完成。原生 PG 并发验收（release 撤回/发布竞争、质量快照并发）已通过。接口、验证与限制见[报告审核链路](docs/reviews/report-workflow.md)。
 
 启动新版 API 前，先在目标开发数据库执行迁移（从项目根目录运行）：
 
@@ -45,7 +45,7 @@ PR及main通过[GitHub Actions检查](.github/workflows/ci.yml)后，按[CI与�
 python -m scripts.migrate_database
 ```
 
-迁移命令读取 `ZHONGAN_DATABASE_URL`，依次执行 SQL 并记录版本哈希。旧库尚无迁移记录时会执行已有幂等迁移；应先备份目标库。新增表见 `services/api/sql/011_conversations.sql`。模型仍使用 `LLM_BASE_URL`、`LLM_API_KEY`、`LLM_MODEL_ID`，供应方必须支持 OpenAI-compatible 工具调用。缺模型配置时明确报错并保存失败消息，可用原请求 ID 重试。前端访问令牌仅存在当前浏览器会话存储中。
+迁移命令读取 `ZHONGAN_DATABASE_URL`，依次执行 SQL 并记录版本哈希。旧库尚无迁移记录时会执行已有幂等迁移；应先备份目标库。最新迁移见 `services/api/sql/019_feedback_resolution.sql`（迁移列表 `services/api/sql/`）。模型仍使用 `LLM_BASE_URL`、`LLM_API_KEY`、`LLM_MODEL_ID`，供应方必须支持 OpenAI-compatible 工具调用。缺模型配置时明确报错并保存失败消息，可用原请求 ID 重试。前端访问令牌仅存在当前浏览器会话存储中。
 
 ```powershell
 cd apps/web
@@ -91,7 +91,7 @@ python scripts/bootstrap_dev.py
 
 当前 API 仅接受合成案件，未配置数据库时返回 503。材料隔离存储、受控文本解析、原生 PDF 文字提取、腾讯云高精度 OCR，以及五类证据绑定字段候选已经实现。DeepSeek V4.1 Flash 结构化抽取、Schema 校验、一次修复预算、逐字引用验证和冲突合并已经通过合成材料真实调用验收；图表视觉理解尚未接入。不得向此原型上传真实医疗数据。
 
-新运行额外保存有原文依据的费用构成（分类与支付口径分别展示），进入费用事件和关怀报告输入；不把明细合计当总费，不求和重复/范围未确认的项目，不推算自付比例。契约、发布重查和验证边界见[费用构成说明](docs/reviews/cost-breakdown.md)。
+新运行额外保存有原文依据的费用构成（分类与支付口径分别展示），进入费用事件和关怀报告输入；不把明细合计当总费用，不求和重复/范围未确认的项目，不推算自付比例。契约、发布重查和验证边界见[费用构成说明](docs/reviews/cost-breakdown.md)。
 
 REQ-04 已将有效字段重建为诊断、手术、用药、住院和费用事件，并通过 `GET /v1/cases/{case_id}/events?run_id=...` 返回事件和 `belongs_to_encounter` 关系。没有材料日期时 `occurred_at=null`、`time_precision=unknown`；冲突事实保持 `assertion=unknown` 和 `relation.status=indeterminate`，不按页面顺序推断医学时间关系。
 
@@ -109,6 +109,6 @@ REQ-04 已将有效字段重建为诊断、手术、用药、住院和费用事�
 - 合成测试凭证：仅保存在服务器 `/home/ubuntu/.config/zhongan/dev-fixture.env`，权限为 `600`。
 - 材料存储：`/home/ubuntu/zhongan-data/documents`；按案件与文档分目录保存，文件权限为 `600`，不通过响应暴露服务器路径。
 
-部署脚本为 `scripts/install_api_ubuntu.sh`；数据库、API、Parser Worker 与 Nginx 均已设置为开机启动。REQ-01～03 的认证、隔离、授权撤回、按页解析、扫描页 OCR、Evidence，以及诊断、手术、用药、住院天数、医疗总费用五类字段候选已通过真实 PostgreSQL 与腾讯云 OCR 集成检查。字段保留原值、规范值、状态、断言、置信度、单位和来源；缺少材料时显式返回 missing。当前抽取版本 `evidence-pattern-candidate-v1` 是保守规则候选，不代表模型语义抽取或官方效果达标。当前公网入口仍是 HTTP；配置域名和证书前不得传输真实或敏感数据。
+部署脚本为 `scripts/install_api_ubuntu.sh`；数据库、API、Parser Worker 与 Nginx 均已设置为开机启动。REQ-01～03 的认证、隔离、授权撤回、按页解析、扫描页 OCR、Evidence，以及诊断、手术、用药、住院天数、医疗总费用五类字段候选已通过真实 PostgreSQL 与腾讯云 OCR 集成检查。字段保留原值、规范值、状态、断言、置信度、单位和来源；缺少材料时显式返回 missing。字段抽取已叠加 B 层 LLM 辅助（extract_llm.py），候选必须带原文引用并锚定回页/行；确定性规则层与 LLM 候选层合并（冲突规则层优先）。不代表官方效果达标。当前公网入口仍是 HTTP；配置域名和证书前不得传输真实或敏感数据。
 
 LLM 使用服务器端 `/home/ubuntu/.config/zhongan/llm.env` 注入：`LLM_PROVIDER`、`LLM_BASE_URL`、`LLM_API_KEY`、`LLM_MODEL_ID`。未配置时运行结果明确记录 `model_status=not_configured`；不会回放固定模型结果。模型输出、修复输出、候选、用量、模型 ID、Prompt 版本和错误状态分别写入 PostgreSQL。
