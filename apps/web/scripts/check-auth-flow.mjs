@@ -48,12 +48,14 @@ async function submit(){await act(async()=>document.querySelector('form:not([hid
 try{
   await act(async()=>root.render(React.createElement(modules.App)));await flush();
   await click('注册');
-  await input('input[autocomplete="nickname"]','合成用户');await input('input[autocomplete="username"]','synthetic_user');
+  await input('input[autocomplete="nickname"]','合成用户');await input('input[autocomplete="username"]','13900000001');
   const passwords=[...document.querySelectorAll('input[type="password"]')];
-  await input('input[type="password"]','synthetic-password');
+  assert.equal(document.querySelector('input[autocomplete="username"]').type,'tel');
+  for(const field of passwords){assert.equal(field.hasAttribute('minlength'),false);assert.equal(field.hasAttribute('maxlength'),false);}
+  await input('input[type="password"]','1');
   await act(async()=>{Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype,'value').set.call(passwords[1],'different-password');passwords[1].dispatchEvent(new dom.window.Event('input',{bubbles:true}));});
   await submit();assert.match(document.body.textContent,/两次输入的密码不一致/);assert.equal(calls.length,0);
-  await act(async()=>{Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype,'value').set.call(passwords[1],'synthetic-password');passwords[1].dispatchEvent(new dom.window.Event('input',{bubbles:true}));});
+  await act(async()=>{Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype,'value').set.call(passwords[1],'1');passwords[1].dispatchEvent(new dom.window.Event('input',{bubbles:true}));});
   await submit();assert.equal(calls.find(c=>c.path==='/v1/auth/register').body.care_consent,false);
   assert.equal(sessionStorage.getItem('zhongan_chat_token'),'synthetic-token');
   await click('我的');await click('确认并授权关怀');assert.match(document.body.textContent,/已授权/);

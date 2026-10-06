@@ -16,8 +16,8 @@ from .contracts.core import Contract
 
 
 class Credentials(Contract):
-    username: str = Field(min_length=3, max_length=32, pattern=r'^[a-zA-Z0-9_]+$')
-    password: str = Field(min_length=10, max_length=128)
+    username: str = Field(pattern=r'^1[3-9][0-9]{9}$')
+    password: str = Field(min_length=1)
 
     @field_validator('username')
     @classmethod
@@ -112,7 +112,7 @@ def register(conn, body):
     with conn.transaction():
         conn.execute('SELECT pg_advisory_xact_lock(hashtextextended(%s,0))', ('register:'+body.username,))
         if conn.execute('SELECT 1 FROM user_accounts WHERE username=%s', (body.username,)).fetchone():
-            raise HTTPException(409, '该用户名已被注册，请换一个或直接登录。')
+            raise HTTPException(409, '该手机号已被注册，请换一个或直接登录。')
         actor, subject, consent = uuid4(), uuid4(), uuid4()
         # Account actors have no usable legacy token; only expiring sessions authenticate them.
         conn.execute('INSERT INTO actors(actor_id,token_sha256) VALUES (%s,%s)',
@@ -186,6 +186,6 @@ def login(conn, body):
     encoded = user['password_hash'] if user else _DUMMY_PASSWORD_HASH
     valid = verify_password(body.password, encoded)
     if not user or not valid:
-        raise HTTPException(401, '用户名或密码不正确。')
+        raise HTTPException(401, '手机号或密码不正确。')
     with conn.transaction():
         return session(conn, user['actor_id'])

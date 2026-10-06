@@ -8,7 +8,7 @@ const API_BASE = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
 export async function authenticate(mode:'login'|'register',body:unknown):Promise<SessionResponse> {
   const response=await apiFetch(`${API_BASE}/v1/auth/${mode}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   const result=await response.json();
-  if(!response.ok)throw new ApiError(response.status===422?'请检查用户名、密码和授权信息。':result.message || '登录失败',response.status);
+  if(!response.ok)throw new ApiError(response.status===422?'请检查手机号、密码和授权信息。':result.message || '登录失败',response.status);
   return result;
 }
 
