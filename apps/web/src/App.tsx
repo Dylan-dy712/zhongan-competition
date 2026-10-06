@@ -7,6 +7,12 @@ import {CareHome,CareRecords,CareReport,EvidencePanel,brand,reading} from './Car
 import {ReviewWorkbench} from './ReviewWorkbench';
 import {CareRecommendations} from './CareRecommendations';
 import {publishedCare,type CarePanel} from './carePresentation';
+import {readCarePanel,useCareNavigation} from './careNavigation';
+import {PageBoundary} from './PageBoundary';
+import AuthPage from './AuthPage';
+import ClaimIntake from './ClaimIntake';
+import AccountPage from './AccountPage';
+import {revokeSession} from './api';
 import './chat.css';
 import './care.css';
 
@@ -33,7 +39,6 @@ function ToolActivity({events}:{events:ToolEvent[]}) {
 
 export default function App() {
   const [token,setToken] = useState(()=>sessionStorage.getItem('zhongan_chat_token') || '');
-  const [tokenInput,setTokenInput] = useState('');
   const [connected,setConnected] = useState(false);
   const [conversations,setConversations] = useState<Conversation[]>([]);
   const [subjects,setSubjects] = useState<ChatSubject[]>([]);
@@ -48,7 +53,9 @@ export default function App() {
   const [uploading,setUploading] = useState(false);
   const [error,setError] = useState('');
   const [evidence,setEvidence] = useState<Evidence|null>(null);
-  const [panel,setPanel] = useState<CarePanel>('home');
+  const evidenceRequest=useRef(0);
+  const [panel,setPanel] = useCareNavigation();
+  const [loadingConversation,setLoadingConversation] = useState(false);
   const [reportFocus,setReportFocus] = useState<ReportSection['section_type']>();
   const [delivery,setDelivery] = useState<DeliveryNotice|null>(null);
   const [feedbackNotice,setFeedbackNotice] = useState('');
@@ -58,7 +65,7 @@ export default function App() {
   const currentReport = useRef('');
   currentReport.current=snapshot?.report.report_id || '';
   const [historyOpen,setHistoryOpen] = useState(false);
-  const [reviewOpen,setReviewOpen] = useState(false);
+  const reviewOpen=panel==='review';
   const [sharingBusy,setSharingBusy]=useState(false);
   const active = useRef('');
   const epoch = useRef(0);
@@ -69,12 +76,14 @@ export default function App() {
   const uploadInput = useRef<HTMLInputElement>(null);
   const bottom = useRef<HTMLDivElement>(null);
   const pendingSend = useRef<{id:string; text:string; docs:string[]}|null>(null);
+  const connecting=useRef(false);
 
   const invalidateAccess = useCallback((e:unknown,id:string,generation:number,auth=token) => {
     if(!(e instanceof ApiError) || ![401,403,404].includes(e.status) || epoch.current!==generation || active.current!==id)return false;
     const fresh=++epoch.current;active.current='';busyRef.current=false;
+    setLoadingConversation(false);setSharingBusy(false);
     setSnapshot(null);setOlder([]);setEvidence(null);setAttachments([]);setInput('');setDelivery(null);
-    setConversations([]);setSubjects([]);setSubject('');setCaseInput('');setTokenInput('');setFeedbackNotice('');setBusy(false);setUploading(false);
+    setConversations([]);setSubjects([]);setSubject('');setCaseInput('');setFeedbackNotice('');setBusy(false);setUploading(false);
     localStorage.removeItem('zhongan_last_conversation');
     pendingSend.current=null;careKeys.current.clear();
     setError(e.status===401?'连接已失效，请重新连接。':'这次就医目前不可访问，已清除页面内容。');
@@ -99,34 +108,41 @@ export default function App() {
     return state;
   },[invalidateAccess]);
 
-  const openConversation = useCallback(async (id:string, auth=token) => {
+  const openConversation = useCallback(async (id:string, auth=token, destination:CarePanel='home') => {
     const generation = ++epoch.current;
     active.current = id;
     olderExhausted.current = false;
     setSnapshot(null); setOlder([]); setAttachments([]); setInput(''); setEvidence(null); setError('');
-    setPanel('home');setReportFocus(undefined); setHistoryOpen(false); pendingSend.current = null;
+    busyRef.current=false;setBusy(false);setUploading(false);setSharingBusy(false);
+    setLoadingConversation(true);setHasOlder(false);setDelivery(null);setFeedbackNotice('');
+    setPanel(destination);setReportFocus(undefined); setHistoryOpen(false); pendingSend.current = null;
     try {
       await refresh(id,auth,generation);
       if (epoch.current===generation) localStorage.setItem('zhongan_last_conversation',id);
     } catch(e) {if(epoch.current===generation) setError(errorText(e));}
-  },[refresh,token]);
+    finally {if(epoch.current===generation)setLoadingConversation(false);}
+  },[refresh,token,setPanel]);
 
-  const connect = useCallback(async (auth:string) => {
-    if (!auth.trim()) return;
+  const connect = useCallback(async (auth:string,failLoud=false) => {
+    if (!auth.trim() || connecting.current) return;
+    connecting.current=true;
+    const generation=++epoch.current;
     setBusy(true); setError('');
     try {
       const [items,allowed] = await Promise.all([listConversations(auth),listSubjects(auth)]);
+      if(epoch.current!==generation)return;
       sessionStorage.setItem('zhongan_chat_token',auth); setToken(auth); setConnected(true);
       setConversations(items); setSubjects(allowed); setSubject(allowed[0]?.subject_id || '');
       const last = localStorage.getItem('zhongan_last_conversation');
       const chosen = items.find(x=>x.conversation_id===last) || items[0];
-      if(chosen) await openConversation(chosen.conversation_id,auth);
-    } catch(e) {setError(errorText(e));setConnected(false);sessionStorage.removeItem('zhongan_chat_token');}
-    finally {setBusy(false);}
+      if(chosen) await openConversation(chosen.conversation_id,auth,readCarePanel(window.location.hash));
+    } catch(e) {if(epoch.current===generation){setError(errorText(e));setConnected(false);sessionStorage.removeItem('zhongan_chat_token');sessionStorage.removeItem('zhongan_account_name');}if(failLoud)throw e;}
+    finally {connecting.current=false;setBusy(false);}
   },[openConversation]);
 
   useEffect(()=>{if(!initialized.current){initialized.current=true;if(token) void connect(token);}},[connect,token]);
-  useEffect(()=>{bottom.current?.scrollIntoView({behavior:'smooth'});},[snapshot?.turns.length,busy,panel]);
+  useEffect(()=>{if(panel==='chat')bottom.current?.scrollIntoView({behavior:'smooth'});},[snapshot?.turns.length,busy,panel]);
+  useEffect(()=>{++evidenceRequest.current;setHistoryOpen(false);setEvidence(null);},[panel]);
 
   const careKey = (operation:string) => {
     const existing=careKeys.current.get(operation);
@@ -176,21 +192,28 @@ export default function App() {
 
   const newChat = async (sameCase=false) => {
     if (busyRef.current || busy || uploading) return;
-    setBusy(true); setError('');
+    const generation=epoch.current;
+    busyRef.current=true;setBusy(true); setError('');
     try {
       const item = await createConversation(token,requestId(),subject,
         sameCase ? snapshot?.conversation.case_id : caseInput.trim() || undefined);
-      setConversations(await listConversations(token));
-      await openConversation(item.conversation_id);
-      setPanel('chat');
+      if(epoch.current!==generation)return;
+      const items=await listConversations(token);
+      if(epoch.current!==generation)return;
+      setConversations(items);
+      await openConversation(item.conversation_id,token,'chat');
       setCaseInput('');
-    } catch(e) {setError(errorText(e));} finally {setBusy(false);}
+    } catch(e) {if(epoch.current===generation)setError(errorText(e));}
+    finally {if(epoch.current===generation){busyRef.current=false;setBusy(false);}}
   };
 
   const prepareNewChat = () => {
     ++epoch.current;active.current='';olderExhausted.current=false;
+    busyRef.current=false;setBusy(false);setUploading(false);setSharingBusy(false);setLoadingConversation(false);
+    setDelivery(null);setFeedbackNotice('');setHasOlder(false);setReportFocus(undefined);setCaseInput('');
     setSnapshot(null);setOlder([]);setAttachments([]);setInput('');setEvidence(null);setError('');
     setHistoryOpen(false);pendingSend.current=null;
+    setPanel('home');
   };
 
   // Processing labels come from persisted backend events, never timed animations.
@@ -259,21 +282,28 @@ export default function App() {
 
   const showEvidence = async(id:string) => {
     const generation=epoch.current,conversationId=active.current;setError('');setEvidence(null);
-    try {const result=await getEvidence(id,token);if(epoch.current===generation)setEvidence(result);}
-    catch(e){if(!invalidateAccess(e,conversationId,generation) && epoch.current===generation)setError(errorText(e));}
+    const request=++evidenceRequest.current;
+    try {const result=await getEvidence(id,token);if(epoch.current===generation && evidenceRequest.current===request)setEvidence(result);}
+    catch(e){if(evidenceRequest.current===request && !invalidateAccess(e,conversationId,generation) && epoch.current===generation)setError(errorText(e));}
   };
   const loadOlder = async()=>{
-    if(!snapshot)return;
+    if(!snapshot || !hasOlder || !(older[0] || snapshot.turns[0]))return;
     const id=active.current,generation=epoch.current,first=older[0] || snapshot.turns[0];
     try {const rows=await getOlderTurns(token,id,first.turn_id);if(epoch.current===generation){setOlder(v=>[...rows,...v]);olderExhausted.current=rows.length<50;setHasOlder(rows.length===50);}}
     catch(e){if(!invalidateAccess(e,id,generation) && epoch.current===generation)setError(errorText(e));}
   };
   const logout = ()=>{
     ++epoch.current;active.current='';sessionStorage.removeItem('zhongan_chat_token');
-    setToken('');setTokenInput('');setConnected(false);setConversations([]);setSnapshot(null);
+    sessionStorage.removeItem('zhongan_account_name');
+    setToken('');setConnected(false);setConversations([]);setSnapshot(null);
     setOlder([]);setAttachments([]);setEvidence(null);setError('');setHistoryOpen(false);pendingSend.current=null;
     setSubjects([]);setSubject('');setCaseInput('');setInput('');localStorage.removeItem('zhongan_last_conversation');
     setDelivery(null);setFeedbackNotice('');careKeys.current.clear();
+    busyRef.current=false;setBusy(false);setUploading(false);setLoadingConversation(false);setSharingBusy(false);setPanel('home');
+  };
+  const signOut=async()=>{
+    try {await revokeSession(token);logout();}
+    catch(e){setError(errorText(e));}
   };
   const toggleRecall=async()=>{
     if(!snapshot)return;
@@ -294,7 +324,7 @@ export default function App() {
     finally{setSharingBusy(false);}
   };
   const turns=[...older,...(snapshot?.turns || [])].filter((t,i,all)=>all.findIndex(x=>x.turn_id===t.turn_id)===i);
-  const working=busy || uploading || !!snapshot?.turns.some(t=>t.status==='running');
+  const working=busy || uploading || loadingConversation || !!snapshot?.turns.some(t=>t.status==='running');
   const submit=(e:FormEvent)=>{e.preventDefault();void send();};
   const openReport=(section?:ReportSection['section_type'])=>{setReportFocus(section);setPanel('report');};
 
@@ -305,34 +335,40 @@ export default function App() {
         <div className="history-list"><p>以前的对话</p>{conversations.map(c=><button disabled={working} key={c.conversation_id}
           className={active.current===c.conversation_id?'selected':''} onClick={()=>void openConversation(c.conversation_id)}>
           <strong>{c.title}</strong><small>{new Date(c.updated_at).toLocaleDateString('zh-CN')}</small></button>)}</div>
-        <button className="quiet-button" disabled={working} onClick={logout}>退出连接</button></>}
+        <button className="quiet-button" disabled={working} onClick={()=>void signOut()}>退出登录</button></>}
     </aside>
     <section className="chat-workspace">
       <header className="chat-header"><button className="history-toggle" onClick={()=>setHistoryOpen(v=>!v)} aria-label="打开历史对话">☰</button>
-        <div><strong>{reviewOpen?'医学复核':panel==='report'?'本次关怀':panel==='records'?'就医记录':panel==='chat'?'问暖暖':'暖愈智护'}</strong><span>{connected?'结合你的授权资料，慢慢理清楚':'从你最关心的事聊起'}</span></div>
-        {snapshot && <button className="care-header-report" onClick={()=>openReport()}>关怀指引</button>}
+        <div><strong>{reviewOpen?'医学复核':panel==='report'?'本次关怀':panel==='records'?'就医记录':panel==='chat'?'问暖暖':panel==='claim'?'理赔资料整理':panel==='account'?'我的账号':'暖愈智护'}</strong><span>{connected?'开发环境 · 仅使用合成资料':'从你最关心的事聊起'}</span></div>
+        {snapshot && !reviewOpen && <button className="care-header-report" onClick={()=>openReport()}>关怀指引</button>}
       </header>
       {delivery && snapshot?.report.report_id===delivery.report_id && <div className="analysis-status care-notice" role="status">{delivery.message}
         {delivery.receipt_state==='read' ? <span>已查看</span> : <button onClick={()=>openReport()}>查看指引</button>}</div>}
       {error && <div role="alert" className="chat-error persistent-error">{error}<button aria-label="关闭提示" onClick={()=>setError('')}>×</button></div>}
-      {!connected ? <main className="start-screen care-connect"><img className="care-login-art" src={reading} alt="捧着笔记本陪伴你的暖暖"/><h1>看懂一点，安心一点。</h1>
-        <p>把病历、检查单或发票放进对话。我们一起看清楚发生了什么，下一步可以做什么。</p>
-        <form className="connect-form" onSubmit={e=>{e.preventDefault();void connect(tokenInput.trim());}}>
-          <label htmlFor="access-token">访问令牌</label><input id="access-token" type="password" autoComplete="off" value={tokenInput} onChange={e=>setTokenInput(e.target.value)} placeholder="输入你的开发访问令牌" required/>
-          <button disabled={busy}>{busy?'正在连接…':'开始对话'}</button>
-          <small>当前开发环境仅接收合成材料。聊天保存在你的授权空间，重新连接后可以继续。</small>
-        </form></main>
+      <PageBoundary resetKey={`${panel}:${snapshot?.conversation.conversation_id || ''}`}>
+      {connected && <div className="claim-panel" hidden={panel!=='claim'}><ClaimIntake key={`${token}:${subject}`} token={token} subject={subject} onOpen={async id=>{
+          const generation=epoch.current;const items=await listConversations(token);
+          if(epoch.current!==generation)return;setConversations(items);await openConversation(id,token,'chat');}}/></div>}
+      {!connected ? <AuthPage onAuthenticated={auth=>connect(auth,true)}/>
+      : panel==='claim' ? null
+      : panel==='account' ? <AccountPage token={token} onLogout={signOut} onChanged={async()=>{
+          const generation=++epoch.current;active.current='';setSnapshot(null);setEvidence(null);setOlder([]);setAttachments([]);setInput('');setDelivery(null);
+          pendingSend.current=null;localStorage.removeItem('zhongan_last_conversation');
+          const [items,allowed]=await Promise.all([listConversations(token),listSubjects(token)]);
+          if(epoch.current!==generation)return;
+          setConversations(items);setSubjects(allowed);setSubject(allowed[0]?.subject_id || '');}}/>
+      : reviewOpen ? <ReviewWorkbench token={token}/>
+      : loadingConversation ? <main className="start-screen" role="status"><h1>正在打开就医记录…</h1></main>
       : panel==='records' ? <CareRecords conversations={conversations} currentCase={snapshot?.conversation.case_id} busy={working}
           onOpen={id=>void openConversation(id)} onNew={()=>{prepareNewChat();setPanel('home');}}/>
       : !snapshot ? <main className="start-screen"><img className="care-login-art" src={reading} alt="陪你整理看病资料的暖暖"/><h1>你好，我是暖暖</h1><p>可以先聊聊，也可以上传材料。没有报告也能开始。</p>
+        <button className="claim-entry-link" onClick={()=>setPanel('claim')}>整理理赔资料，开启专属关怀</button>
         <div className="connect-form">{subjects.length>1 && <label>关怀对象<select value={subject} onChange={e=>setSubject(e.target.value)}>
           {Array.from(new Map(subjects.map(s=>[s.subject_id,s])).values()).map((s,i)=><option key={s.subject_id} value={s.subject_id}>已授权对象 {i+1} · {s.subject_id.slice(0,8)}</option>)}</select></label>}
           <details><summary>接续已有案件（可选）</summary><input aria-label="已有案件ID" placeholder="已有案件 ID，不需要报告版本" value={caseInput} onChange={e=>setCaseInput(e.target.value)}/></details>
           <button disabled={busy || (!subjects.length && !caseInput)} onClick={()=>void newChat()}>{busy?'正在打开…':'开始新的对话'}</button>
           {!subjects.length && !caseInput && <small>当前账号没有可新建案件的授权，可以填写已有案件ID。</small>}</div></main>
-      : reviewOpen && connected ? <ReviewWorkbench token={token}/>
-      : panel==='home' && connected ? <><CareHome snapshot={snapshot} onChat={()=>setPanel('chat')} onReport={openReport} onRecords={()=>setPanel('records')}/><CareRecommendations token={token}/></>
-      : panel==='home' ? <CareHome snapshot={snapshot} onChat={()=>setPanel('chat')} onReport={openReport} onRecords={()=>setPanel('records')}/>
+      : panel==='home' ? <div className="care-home-scroll"><button className="claim-entry-link" onClick={()=>setPanel('claim')}>整理理赔资料，开启专属关怀</button><CareHome snapshot={snapshot} onChat={()=>setPanel('chat')} onReport={openReport} onRecords={()=>setPanel('records')}/><CareRecommendations key={snapshot.conversation.case_id} token={token}/></div>
       : panel==='report' ? <main className="chat-report"><h1>本次关怀指引</h1>
           {publishedCare(snapshot.report) ? <><p className="care-report-version">第 {snapshot.report.report_version} 版 · 已审核发布</p>
             <CareReport report={snapshot.report} initialSection={reportFocus} onEvidence={id=>void showEvidence(id)}/>
@@ -370,10 +406,12 @@ export default function App() {
             <button disabled={working} onClick={()=>void newChat(true)}>另开对话，接着聊这次就医</button></div>
           <p className="chat-disclaimer">开发环境仅使用合成材料 · 解释与关怀不能替代医生诊疗</p>
         </footer></>}
+      </PageBoundary>
       {connected && <nav className="care-navigation" aria-label="关怀页面"><button aria-current={panel==='home'?'page':undefined} onClick={()=>setPanel('home')}><span aria-hidden="true">⌂</span>首页</button>
         <button aria-current={panel==='chat'?'page':undefined} onClick={()=>setPanel('chat')}><span aria-hidden="true">◌</span>问暖暖</button>
         <button aria-current={panel==='records'?'page':undefined} onClick={()=>setPanel('records')}><span aria-hidden="true">▤</span>就医记录</button>
-        <button aria-current={reviewOpen?'page':undefined} onClick={()=>{setReviewOpen(v=>!v);setPanel('home');}}>✓ 复核工作台</button></nav>}
+        <button aria-current={panel==='account'?'page':undefined} onClick={()=>setPanel('account')}>我的</button>
+        <button aria-current={reviewOpen?'page':undefined} onClick={()=>setPanel('review')}>✓ 复核工作台</button></nav>}
     </section>
     {evidence && <EvidencePanel evidence={evidence} onClose={()=>setEvidence(null)}/>}
   </div>;

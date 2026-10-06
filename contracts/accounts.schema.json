@@ -1,0 +1,167 @@
+{
+  "SessionResponse": {
+    "$defs": {
+      "AccountUser": {
+        "additionalProperties": false,
+        "properties": {
+          "username": {
+            "title": "Username",
+            "type": "string"
+          },
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "username",
+          "display_name"
+        ],
+        "title": "AccountUser",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "schema_version": {
+        "const": "account-v1",
+        "default": "account-v1",
+        "title": "Schema Version",
+        "type": "string"
+      },
+      "access_token": {
+        "title": "Access Token",
+        "type": "string"
+      },
+      "token_type": {
+        "const": "bearer",
+        "default": "bearer",
+        "title": "Token Type",
+        "type": "string"
+      },
+      "expires_at": {
+        "format": "date-time",
+        "title": "Expires At",
+        "type": "string"
+      },
+      "user": {
+        "$ref": "#/$defs/AccountUser"
+      }
+    },
+    "required": [
+      "access_token",
+      "expires_at",
+      "user"
+    ],
+    "title": "SessionResponse",
+    "type": "object"
+  },
+  "ConsentResponse": {
+    "additionalProperties": false,
+    "properties": {
+      "schema_version": {
+        "const": "account-consent-v1",
+        "default": "account-consent-v1",
+        "title": "Schema Version",
+        "type": "string"
+      },
+      "subject_id": {
+        "format": "uuid",
+        "title": "Subject Id",
+        "type": "string"
+      },
+      "consent_id": {
+        "anyOf": [
+          {
+            "format": "uuid",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "title": "Consent Id"
+      },
+      "version": {
+        "title": "Version",
+        "type": "integer"
+      },
+      "status": {
+        "enum": [
+          "active",
+          "revoked",
+          "expired",
+          "not_granted"
+        ],
+        "title": "Status",
+        "type": "string"
+      },
+      "notice_version": {
+        "title": "Notice Version",
+        "type": "string"
+      },
+      "purpose": {
+        "const": "case_guidance",
+        "title": "Purpose",
+        "type": "string"
+      }
+    },
+    "required": [
+      "subject_id",
+      "consent_id",
+      "version",
+      "status",
+      "notice_version",
+      "purpose"
+    ],
+    "title": "ConsentResponse",
+    "type": "object"
+  },
+  "ProfileResponse": {
+    "$defs": {
+      "AccountUser": {
+        "additionalProperties": false,
+        "properties": {
+          "username": {
+            "title": "Username",
+            "type": "string"
+          },
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "username",
+          "display_name"
+        ],
+        "title": "AccountUser",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "schema_version": {
+        "const": "account-v1",
+        "default": "account-v1",
+        "title": "Schema Version",
+        "type": "string"
+      },
+      "user": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/AccountUser"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "required": [
+      "user"
+    ],
+    "title": "ProfileResponse",
+    "type": "object"
+  }
+}

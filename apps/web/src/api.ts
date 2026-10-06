@@ -1,15 +1,38 @@
 import type { AssistantAnswer, Evidence, Report, Conversation, ChatSnapshot, ChatSubject, ChatTurn,
   DeliveryNotice, DeliveryReceipt, FeedbackType, FeedbackResult, ReviewTask, ReviewCorrection,
   ReviewDecision, ReleaseResult, RecommendationResponse } from "./types";
+import type {SessionResponse,ConsentResponse} from './api/generated/accounts';
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
+
+export async function authenticate(mode:'login'|'register',body:unknown):Promise<SessionResponse> {
+  const response=await apiFetch(`${API_BASE}/v1/auth/${mode}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const result=await response.json();
+  if(!response.ok)throw new ApiError(response.status===422?'请检查用户名、密码和授权信息。':result.message || '登录失败',response.status);
+  return result;
+}
+
+export async function revokeSession(token:string) {
+  const response=await apiFetch(`${API_BASE}/v1/auth/logout`,{method:'POST',headers:{Authorization:`Bearer ${token}`}});
+  if(!response.ok && response.status!==401)throw new Error('退出登录失败，请重试。');
+}
 
 export class ApiError extends Error {
   constructor(message: string, public status: number, public traceId?: string) { super(message); }
 }
 
+async function apiFetch(url:string,options:RequestInit):Promise<Response> {
+  try {
+    return await fetch(url,{...options,signal:AbortSignal.timeout(options.method && options.method!=='GET' ? 120000 : 15000)});
+  } catch(e) {
+    if(e instanceof Error && ['TimeoutError','AbortError'].includes(e.name))
+      throw new Error('连接超时，请稍后重试。');
+    throw e;
+  }
+}
+
 async function request<T>(path: string, token: string): Promise<T> {
-  const response = await fetch(`${API_BASE}${path}`, {
+  const response = await apiFetch(`${API_BASE}${path}`, {
     headers: { Authorization: `Bearer ${token}` }
   });
   if (!response.ok) {
@@ -26,7 +49,7 @@ export const getEvidence = (evidenceId: string, token: string) =>
   request<Evidence>(`/v1/evidence/${encodeURIComponent(evidenceId)}`, token);
 
 export async function askAssistant(caseId: string, reportVersion: number, question: string, token: string) {
-  const response = await fetch(`${API_BASE}/v1/cases/${encodeURIComponent(caseId)}/assistant/messages`, {
+  const response = await apiFetch(`${API_BASE}/v1/cases/${encodeURIComponent(caseId)}/assistant/messages`, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
     body: JSON.stringify({ question, report_version: reportVersion })
@@ -40,7 +63,7 @@ export async function askAssistant(caseId: string, reportVersion: number, questi
 
 async function chatRequest<T>(path: string, token: string, method = 'GET', data?: unknown, idempotencyKey?:string): Promise<T> {
   const multipart = data instanceof FormData;
-  const response = await fetch(`${API_BASE}${path}`, {
+  const response = await apiFetch(`${API_BASE}${path}`, {
     method,
     headers: {Authorization: `Bearer ${token}`, ...(!multipart && data !== undefined ? {'Content-Type':'application/json'} : {}),
       ...(idempotencyKey ? {'Idempotency-Key':idempotencyKey} : {})},
@@ -61,7 +84,13 @@ export const submitCareFeedback = (token:string,reportId:string,version:number,t
   chatRequest<FeedbackResult>('/v1/feedback',token,'POST',{report_id:reportId,report_version:version,type},key);
 export const listSubjects = (token: string) => chatRequest<ChatSubject[]>('/v1/chat/subjects', token);
 export const createConversation = (token: string, conversationId: string, subjectId?: string, caseId?: string) =>
-  chatRequest<Conversation>('/v1/conversations', token, 'POST', {conversation_id:conversationId, subject_id:subjectId || null, case_id:caseId || null});
+  chatRequest<Conversation>('/v1/conversations', token, 'POST', {conversation_id:conversationId, subject_id:subjectId || null, case_id:caseId || null,recall_enabled:false});
+
+export type CareConsent=ConsentResponse;
+export const getCareConsent=(token:string)=>chatRequest<CareConsent>('/v1/me/consents',token);
+export const changeCareConsent=(token:string,confirmation:boolean,expected_version:number)=>
+  chatRequest<CareConsent>('/v1/me/consents',token,'POST',{confirmation,expected_version},
+    Array.from(crypto.getRandomValues(new Uint8Array(16)),b=>b.toString(16).padStart(2,'0')).join(''));
 export const getConversation = (token: string, id: string) => chatRequest<ChatSnapshot>(`/v1/conversations/${id}`, token);
 export const getOlderTurns = (token: string, id: string, before: string) =>
   chatRequest<ChatTurn[]>(`/v1/conversations/${id}/turns?before=${encodeURIComponent(before)}`, token);

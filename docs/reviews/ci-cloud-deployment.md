@@ -18,4 +18,6 @@ deploy_remote拒绝脏工作树、非当前远端main、没有对应ci.yml成功
 
 ## 移动端原型预览
 
+2026-10-06 统一入口更新：新的 Nginx 配置将 `/mobile-demo` 与 `/mobile-demo/` 重定向到 `/#/claim`。部署后的主网页版本检查使用 `/CI_REVISION`；历史原型产物检查改用 `/.mobile-demo-releases/<sha>/CI_REVISION`，避免旧路径重定向导致部署误失败。另校验重定向目标及账号接口的 OpenAPI 路由。下段保留原型打包机制说明，静态产物仍可作为设计参考保存。
+
 `output_dir/product-design` 是独立的虚构交互原型，集成后 CI 增加病例隔离检查和 `mobile-dist` 构建产物。它与主聊天应用共同接受同一 main 提交 CI 门禁，部署到 `/mobile-demo/`；默认显示首页。产物包含提交 SHA 与文件哈希，资源地址为 `/.mobile-demo-releases/<sha>/`，旧浏览器继续使用旧资源。发布切换 symlink 并保留旧版，失败恢复前一入口；不会把原型静态内容当作真实医疗报告。`output_dir/医疗费用` 知识草稿不在部署白名单中，未注册成已审核知识。

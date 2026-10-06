@@ -4,6 +4,11 @@
 .chat-sidebar .history-list>button{color:#244438;border-radius:12px}.chat-sidebar .history-list strong{font-size:14px}
 .chat-sidebar .history-list>button.selected{background:#dcefe5}.chat-sidebar .quiet-button{color:#315e4a;font-size:14px;min-height:44px}
 .chat-workspace{background:#f5faf7}.chat-header{background:#f8fffc;min-height:64px;padding:14px 24px;border-color:#dcebe3}
+.chat-workspace{min-height:0}.chat-header{flex-shrink:0}
+.care-home-scroll{flex:1;min-height:0;overflow:auto;padding-bottom:24px}
+.care-home-scroll .care-home{overflow:visible;flex:none}
+.care-home-scroll .care-recommend{margin:0 max(20px,calc((100% - 780px)/2));max-width:none}
+.review-workbench{flex:1;min-height:0;overflow:auto}
 .chat-header strong{font-size:18px}.chat-header span{font-size:13px;color:#597367}.care-header-report{background:#e8f4ed;color:#17664b;border:0;border-radius:12px;padding:10px 14px;font-size:14px;min-height:44px}
 .care-home,.care-records{flex:1;min-height:0;overflow:auto;padding:0 max(20px,calc((100% - 780px)/2)) 28px}
 .care-hero{position:relative;min-height:280px;background:radial-gradient(ellipse at 90% 55%,#c7f4e4,transparent 65%);padding:24px 0 18px}

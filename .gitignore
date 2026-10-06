@@ -2,11 +2,14 @@ __pycache__/
 *.py[cod]
 .venv/
 .env
+/apps/web/.env.local
 .pytest_cache/
 .secrets/
 /2
 /-p/
 node_modules/
 dist/
+dist-mobile-demo/
 *.tsbuildinfo
 /output_dir/mobile-demo/
+/apps/web/.test-modules/

@@ -42,8 +42,11 @@ def connect(dsn: str):
 
 def actor_for_token(conn, token: str) -> UUID | None:
     row = conn.execute(
-        "SELECT actor_id FROM actors WHERE token_sha256 = %s AND active = true",
-        (token_digest(token),),
+        """SELECT a.actor_id FROM actors a WHERE a.active=true AND (
+           (a.token_sha256=%s AND NOT EXISTS (SELECT 1 FROM user_accounts u WHERE u.actor_id=a.actor_id))
+           OR EXISTS (SELECT 1 FROM auth_sessions s WHERE s.actor_id=a.actor_id
+              AND s.token_sha256=%s AND s.revoked_at IS NULL AND s.expires_at>now()))""",
+        (token_digest(token), token_digest(token)),
     ).fetchone()
     return row["actor_id"] if row else None
 
