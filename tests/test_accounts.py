@@ -24,12 +24,17 @@ class PasswordTests(unittest.TestCase):
         self.assertFalse(accounts.verify_password('synthetic-test-password','broken'))
 
     def test_registration_cannot_select_identity_or_role(self):
-        base=dict(username='Example_User',password='synthetic-test-password',display_name='合成账号',care_consent=False)
-        self.assertEqual(accounts.Registration(**base).username,'example_user')
+        base=dict(username='13900000001',password='synthetic-test-password',display_name='合成账号',care_consent=False)
+        self.assertEqual(accounts.Registration(**base).username,'13900000001')
         for extra in ('actor_id','subject_id','role'):
             with self.assertRaises(ValidationError):accounts.Registration(**base,**{extra:str(uuid4())})
         with self.assertRaises(ValidationError):accounts.Registration(**{**base,'display_name':'   '})
-        with self.assertRaises(ValidationError):accounts.Credentials(username='abc',password='short')
+        for password in ('1','short','x'*256):
+            self.assertEqual(accounts.Credentials(username='13900000001',password=password).password,password)
+            self.assertTrue(accounts.verify_password(password,accounts.hash_password(password)))
+        for invalid in ('abc','123','1390000000','139000000000'):
+            with self.assertRaises(ValidationError):accounts.Credentials(username=invalid,password='1')
+        with self.assertRaises(ValidationError):accounts.Credentials(username='13900000001',password='')
 
     def test_http_contract_rejects_invalid_payload_and_does_not_echo_password(self):
         async def stub_database():return object()
@@ -47,7 +52,7 @@ class PasswordTests(unittest.TestCase):
             self.assertEqual(error.exception.status_code,401)
             with patch.object(accounts,'rate_limit'),patch.object(accounts,'login',side_effect=HTTPException(401,'用户名或密码不正确。')):
                 with self.assertRaises(HTTPException) as error:
-                    login_account(accounts.Credentials(username='abc',password='synthetic-test-password'),Request({'type':'http','client':('127.0.0.1',80)}),Response(),object())
+                    login_account(accounts.Credentials(username='13900000001',password='synthetic-test-password'),Request({'type':'http','client':('127.0.0.1',80)}),Response(),object())
                 self.assertEqual(error.exception.status_code,401)
         finally:app.dependency_overrides.pop(database,None)
 
@@ -77,12 +82,12 @@ class NativeAccountTests(unittest.TestCase):
         app.dependency_overrides[database]=isolated_database
         try:
             with TestClient(app) as client:
-                body={'username':'alpha','password':'synthetic-test-password','display_name':'合成A','care_consent':False}
+                body={'username':'13900000001','password':'synthetic-test-password','display_name':'合成A','care_consent':False}
                 created=client.post('/v1/auth/register',json=body)
                 self.assertEqual(created.status_code,201,created.text)
                 token=created.json()['access_token'];headers={'Authorization':'Bearer '+token,'Idempotency-Key':'grant-one'}
                 self.assertEqual(client.get('/v1/chat/subjects',headers=headers).json(),[])
-                self.assertEqual(client.post('/v1/auth/register',json={**body,'username':'ALPHA'}).status_code,409)
+                self.assertEqual(client.post('/v1/auth/register',json={**body,'username':'13900000001'}).status_code,409)
                 grant=client.post('/v1/me/consents',headers=headers,json={'confirmation':True,'expected_version':0})
                 self.assertEqual(grant.status_code,200,grant.text)
                 self.assertEqual(client.post('/v1/me/consents',headers=headers,json={'confirmation':True,'expected_version':0}).json()['version'],1)
@@ -91,7 +96,7 @@ class NativeAccountTests(unittest.TestCase):
                 first_subject=client.get('/v1/chat/subjects',headers=headers).json()[0]['subject_id']
                 conversation=client.post('/v1/conversations',headers=headers,json={'conversation_id':str(uuid4()),'subject_id':first_subject,'recall_enabled':False})
                 self.assertIn(conversation.status_code,(200,201),conversation.text)
-                other=client.post('/v1/auth/register',json={**body,'username':'beta','care_consent':True}).json()['access_token']
+                other=client.post('/v1/auth/register',json={**body,'username':'13900000002','care_consent':True}).json()['access_token']
                 other_headers={'Authorization':'Bearer '+other}
                 self.assertNotEqual(first_subject,client.get('/v1/chat/subjects',headers=other_headers).json()[0]['subject_id'])
                 denied=client.get('/v1/conversations/'+conversation.json()['conversation_id'],headers=other_headers)

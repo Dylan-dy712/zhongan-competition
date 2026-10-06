@@ -30,8 +30,8 @@ export default function AuthPage({onAuthenticated}:{onAuthenticated:(token:strin
       finally {setBusy(false);}
     }}>
       {register && <label>怎么称呼你<input value={name} onChange={e=>setName(e.target.value)} maxLength={40} autoComplete="nickname" required disabled={busy}/></label>}
-      <label>用户名<input value={username} onChange={e=>setUsername(e.target.value)} minLength={3} maxLength={32} pattern="[A-Za-z0-9_]+" placeholder="3–32 位字母、数字或下划线" autoComplete="username" required disabled={busy}/></label>
-      <label>密码<input type="password" value={password} onChange={e=>setPassword(e.target.value)} minLength={10} maxLength={128} placeholder="至少 10 位" autoComplete={register?'new-password':'current-password'} required disabled={busy}/></label>
+      <label>手机号<input type="tel" inputMode="numeric" value={username} onChange={e=>setUsername(e.target.value)} pattern="1[3-9][0-9]{9}" placeholder="请输入手机号" autoComplete="username" required disabled={busy}/></label>
+      <label>密码<input type="password" value={password} onChange={e=>setPassword(e.target.value)} placeholder="请输入密码" autoComplete={register?'new-password':'current-password'} required disabled={busy}/></label>
       {register && <><label>确认密码<input type="password" value={confirm} onChange={e=>setConfirm(e.target.value)} autoComplete="new-password" required disabled={busy}/></label>
         <label className="auth-consent"><input type="checkbox" checked={consent} onChange={e=>setConsent(e.target.checked)} disabled={busy}/><span>可选：同意将主动提供的合成资料用于本次关怀，并保存相关对话与记录。不包含长期记忆、推荐或评测用途。也可注册后再授权。版本：account-care-v1。</span></label></>}
       {error && <p role="alert" className="auth-error">{error}</p>}

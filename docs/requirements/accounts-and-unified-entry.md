@@ -4,7 +4,7 @@
 
 ## 行为与不变量
 
-注册使用用户名、显示称呼及密码，不接收外部主体 ID 或角色。服务端新建独立 actor 和 synthetic 关怀 subject，仅建立自己的访问关系；账号与 subject 采用不同 UUID。用户名统一小写。密码 10–128 字符，scrypt 随机盐哈希，不保存明文。
+注册使用中国大陆 11 位手机号、显示称呼及密码，不接收外部主体 ID 或角色。服务端新建独立 actor 和 synthetic 关怀 subject，仅建立自己的访问关系；账号与 subject 采用不同 UUID。手机号通过兼容字段 username 传输。密码必填，但无位数上下限，scrypt 随机盐哈希，不保存明文。
 
 关怀授权可在注册时单独选择，也可登录后确认；未选择仍可注册、登录，不创建用途授权。授权仅覆盖 case_guidance，不包含资源推荐、长期记忆、研究评测。新对话 recall_enabled=false，后续启用沿用现有用户显式操作。我的页面可查看、授予及撤回自己的关怀授权，变更携带 expected_version。撤回后的业务访问仍由既有后端实时权限校验阻断。
 
@@ -14,7 +14,7 @@ Demo 的理赔准备三步迁入 React，使用同一账号、主题素材及导
 
 ## 契约
 
-- POST /v1/auth/register：username、password、display_name、care_consent；201 会话，重复用户名 409，输入不合法 422，限流 429。
+- POST /v1/auth/register：username、password、display_name、care_consent；201 会话，重复手机号 409，输入不合法 422，限流 429。
 - POST /v1/auth/login：username、password；200 会话，统一错误 401，限流 429。
 - GET /v1/auth/me：当前账号资料；401 未认证。
 - POST /v1/auth/logout：撤销当前 bearer；204。
