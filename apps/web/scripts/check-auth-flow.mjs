@@ -7,6 +7,7 @@ const dom=new JSDOM('<div id="root"></div>',{url:'http://localhost/#/home'});
 for(const key of ['window','document','sessionStorage','localStorage','HTMLElement'])globalThis[key]=dom.window[key];
 globalThis.IS_REACT_ACT_ENVIRONMENT=true;
 dom.window.HTMLElement.prototype.scrollIntoView=function(){};
+dom.window.HTMLDialogElement.prototype.showModal=function(){this.open=true;};dom.window.HTMLDialogElement.prototype.close=function(){this.open=false;};
 const {createRoot}=await import('react-dom/client');
 const modules=await loadTestModules();
 const calls=[];let consent={version:0,status:'not_granted',notice_version:'account-care-v1',purpose:'case_guidance'};
@@ -39,7 +40,7 @@ globalThis.fetch=async(url,options={})=>{
 const root=createRoot(document.getElementById('root'));
 const flush=()=>act(async()=>{await new Promise(r=>setTimeout(r,15));});
 const visible=node=>!node.closest('[hidden]');
-const button=text=>[...document.querySelectorAll('button')].find(n=>visible(n) && n.textContent.trim().endsWith(text));
+const button=text=>[...document.querySelectorAll('button')].find(n=>visible(n) && (n.textContent.trim().endsWith(text)||n.getAttribute('aria-label')===text));
 async function click(text){const node=button(text);assert.ok(node,'Missing button '+text);assert.equal(node.disabled,false);await act(async()=>node.click());await flush();}
 async function input(selector,value){const node=document.querySelector(selector);assert.ok(node,selector);await act(async()=>{
   Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype,'value').set.call(node,value);
@@ -59,17 +60,19 @@ try{
   await submit();assert.equal(calls.find(c=>c.path==='/v1/auth/register').body.care_consent,false);
   assert.equal(sessionStorage.getItem('zhongan_chat_token'),'synthetic-token');
   assert.equal(window.location.hash,'#/claim');
-  assert.match(document.body.textContent,/准备本次理赔材料/);
+  assert.match(document.body.textContent,/申请医疗理赔/);
   await click('我的');await click('确认并授权关怀');assert.match(document.body.textContent,/已授权/);
-  await click('首页');await click('整理理赔资料，开启专属关怀');await click('下一步');
+  await click('首页');await click('整理理赔资料，开启专属关怀');await click('下一步，上传材料');assert.match(document.body.textContent,/请填写病历上的诊断/);await click('填入示例信息');await click('下一步，上传材料');
+  await click('下一步，核对申请');assert.match(document.body.textContent,/请补充/);
   const fileInput=document.querySelector('input[type="file"]');
   Object.defineProperty(fileInput,'files',{value:[new File(['synthetic-one'],'one.pdf',{type:'application/pdf'}),new File(['synthetic-two'],'two.pdf',{type:'application/pdf'})],configurable:true});
-  await act(async()=>fileInput.dispatchEvent(new dom.window.Event('change',{bubbles:true})));await click('下一步');
+  await act(async()=>fileInput.dispatchEvent(new dom.window.Event('change',{bubbles:true})));for(const title of ['医疗费用发票','费用明细清单','医保结算单']){await click('添加'+title);document.querySelector('dialog').close();Object.defineProperty(fileInput,'files',{value:[new File(['synthetic'],'synthetic-'+title+'.pdf',{type:'application/pdf'})],configurable:true});await act(async()=>fileInput.dispatchEvent(new dom.window.Event('change',{bubbles:true})));}
+  await click('下一步，核对申请');
   const confirmation=[...document.querySelectorAll('input[type="checkbox"]')].find(visible);await act(async()=>confirmation.click());
   await click('确认并开始关怀');assert.match(document.body.textContent,/合成上传中断/);
   await click('我的');await click('首页');await click('整理理赔资料，开启专属关怀');
   await click('重试整理');assert.match(document.body.textContent,/资料已进入你的关怀空间/);
-  assert.equal(uploadCount,3,'Retry must not reupload first file');
+  assert.equal(uploadCount,6,'Retry must not reupload first file');
   const creations=calls.filter(c=>c.path==='/v1/conversations' && c.body);
   assert.equal(creations.length,2);assert.equal(creations[0].body.conversation_id,creations[1].body.conversation_id);
   assert.equal(creations[0].body.recall_enabled,false);
