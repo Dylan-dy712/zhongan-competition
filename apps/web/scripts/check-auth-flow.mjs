@@ -3,7 +3,7 @@ import {JSDOM} from 'jsdom';
 import React,{act} from 'react';
 import {loadTestModules} from './test-modules.mjs';
 
-const dom=new JSDOM('<div id="root"></div>',{url:'http://localhost/#/claim'});
+const dom=new JSDOM('<div id="root"></div>',{url:'http://localhost/#/home'});
 for(const key of ['window','document','sessionStorage','localStorage','HTMLElement'])globalThis[key]=dom.window[key];
 globalThis.IS_REACT_ACT_ENVIRONMENT=true;
 dom.window.HTMLElement.prototype.scrollIntoView=function(){};
@@ -58,6 +58,8 @@ try{
   await act(async()=>{Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype,'value').set.call(passwords[1],'1');passwords[1].dispatchEvent(new dom.window.Event('input',{bubbles:true}));});
   await submit();assert.equal(calls.find(c=>c.path==='/v1/auth/register').body.care_consent,false);
   assert.equal(sessionStorage.getItem('zhongan_chat_token'),'synthetic-token');
+  assert.equal(window.location.hash,'#/claim');
+  assert.match(document.body.textContent,/准备本次理赔材料/);
   await click('我的');await click('确认并授权关怀');assert.match(document.body.textContent,/已授权/);
   await click('首页');await click('整理理赔资料，开启专属关怀');await click('下一步');
   const fileInput=document.querySelector('input[type="file"]');

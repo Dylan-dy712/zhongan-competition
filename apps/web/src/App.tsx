@@ -134,9 +134,10 @@ export default function App() {
       const last = localStorage.getItem('zhongan_last_conversation');
       const chosen = items.find(x=>x.conversation_id===last) || items[0];
       if(chosen) await openConversation(chosen.conversation_id,auth,readCarePanel(window.location.hash));
+      else if(failLoud || readCarePanel(window.location.hash)==='home') setPanel('claim');
     } catch(e) {if(epoch.current===generation){setError(errorText(e));setConnected(false);sessionStorage.removeItem('zhongan_chat_token');sessionStorage.removeItem('zhongan_account_name');}if(failLoud)throw e;}
     finally {connecting.current=false;setBusy(false);}
-  },[openConversation]);
+  },[openConversation,setPanel]);
 
   useEffect(()=>{if(!initialized.current){initialized.current=true;if(token) void connect(token);}},[connect,token]);
   useEffect(()=>{if(panel==='chat')bottom.current?.scrollIntoView({behavior:'smooth'});},[snapshot?.turns.length,busy,panel]);
@@ -344,7 +345,7 @@ export default function App() {
         {delivery.receipt_state==='read' ? <span>已查看</span> : <button onClick={()=>openReport()}>查看指引</button>}</div>}
       {error && <div role="alert" className="chat-error persistent-error">{error}<button aria-label="关闭提示" onClick={()=>setError('')}>×</button></div>}
       <PageBoundary resetKey={`${panel}:${snapshot?.conversation.conversation_id || ''}`}>
-      {connected && <div className="claim-panel" hidden={panel!=='claim'}><ClaimIntake key={`${token}:${subject}`} token={token} subject={subject} onOpen={async id=>{
+      {connected && <div className="claim-panel" hidden={panel!=='claim'}><ClaimIntake key={`${token}:${subject}`} token={token} subject={subject} onAuthorize={()=>setPanel('account')} onOpen={async id=>{
           const generation=epoch.current;const items=await listConversations(token);
           if(epoch.current!==generation)return;setConversations(items);await openConversation(id,token,'chat');}}/></div>}
       {!connected ? <AuthPage onAuthenticated={auth=>connect(auth,true)}/>
