@@ -39,6 +39,7 @@ from .delivery_repository import (list_deliveries, record_receipt, submit_feedba
 from .care_assistant import AssistantAnswer, answer_question
 from . import conversation_repository as chats
 from .conversation_agent import CareTools, run_agent
+from . import accounts
 
 app = FastAPI(title="众安·暖愈智护", version="0.1.0")
 
@@ -206,6 +207,44 @@ def current_actor(authorization: str | None = Header(default=None), conn=Depends
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok", "scope": "conversation_agent_v1"}
+
+
+@app.post('/v1/auth/register', status_code=201, response_model=accounts.SessionResponse)
+def register_account(body: accounts.Registration, request: Request, response: Response, conn=Depends(database)):
+    accounts.rate_limit(conn, 'register-ip:'+(request.client.host if request.client else 'unknown'), 10)
+    response.headers['Cache-Control'] = 'no-store'
+    return accounts.register(conn, body)
+
+
+@app.post('/v1/auth/login', response_model=accounts.SessionResponse)
+def login_account(body: accounts.Credentials, request: Request, response: Response, conn=Depends(database)):
+    accounts.rate_limit(conn, 'login-ip:'+(request.client.host if request.client else 'unknown'), 60)
+    response.headers['Cache-Control'] = 'no-store'
+    return accounts.login(conn, body)
+
+
+@app.get('/v1/auth/me', response_model=accounts.ProfileResponse)
+def account_profile(response: Response, actor_id=Depends(current_actor), conn=Depends(database)):
+    response.headers['Cache-Control'] = 'no-store'
+    user = conn.execute('SELECT username,display_name FROM user_accounts WHERE actor_id=%s', (actor_id,)).fetchone()
+    return {'user': user}
+
+
+@app.post('/v1/auth/logout', status_code=204)
+def logout_account(authorization: str = Header(), actor_id=Depends(current_actor), conn=Depends(database)):
+    conn.execute('UPDATE auth_sessions SET revoked_at=now() WHERE token_sha256=%s AND actor_id=%s',
+                 (accounts.token_digest(authorization.removeprefix('Bearer ')), actor_id))
+    return Response(status_code=204)
+
+
+@app.get('/v1/me/consents', response_model=accounts.ConsentResponse)
+def get_account_consent(actor_id=Depends(current_actor), conn=Depends(database)):
+    return accounts.care_consent(conn, actor_id)
+
+
+@app.post('/v1/me/consents', response_model=accounts.ConsentResponse)
+def set_account_consent(body: accounts.ConsentChange, idempotency_key: str = Header(min_length=1,max_length=128), actor_id=Depends(current_actor), conn=Depends(database)):
+    return accounts.change_consent(conn, actor_id, body, idempotency_key)
 
 
 @app.post("/v1/cases", response_model=Case, status_code=201)

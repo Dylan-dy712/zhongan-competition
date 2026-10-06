@@ -110,6 +110,10 @@ done
 sudo systemctl reload nginx
 systemctl is-active zhongan-api zhongan-worker nginx
 curl -fsS http://127.0.0.1/health
-test "$(curl -fsS http://127.0.0.1/mobile-demo/CI_REVISION)" = "$revision"
+test "$(curl -fsS http://127.0.0.1/CI_REVISION)" = "$revision"
+test "$(curl -fsS "http://127.0.0.1/.mobile-demo-releases/$revision/CI_REVISION")" = "$revision"
+curl -fsSI http://127.0.0.1/mobile-demo/ | tr -d '\r' | grep -qi '^Location: .*[/]#/claim$'
+curl -fsS http://127.0.0.1/openapi.json | "$app_dir/.venv/bin/python" -c \
+    'import json,sys; paths=json.load(sys.stdin)["paths"]; assert all(p in paths for p in ("/v1/auth/register","/v1/auth/login","/v1/auth/logout","/v1/me/consents"))'
 printf '\nDEPLOYED_REVISION=%s\n' "$(< "$app_dir/REVISION")"
 trap - ERR

@@ -1,5 +1,11 @@
 # 众安·暖愈智护
 
+统一应用位于 `apps/web`：账号注册/登录 → 理赔资料整理 → 上传与关怀对话 → 就医记录与已发布报告。已复用原 Demo 的品牌素材与三步资料流程，资料通过真实 API 保存。`output_dir/product-design/home-proposal.html` 保留为设计参考。部署配置将旧 `/mobile-demo/` 入口跳转到统一应用 `/#/claim`；这项代码变更尚未表示服务器已更新。
+
+账号功能使用数据库迁移 `020_accounts.sql`，启动前执行 `python -m scripts.migrate_database`。密码采用随机盐 scrypt 哈希；登录为 12 小时可撤销会话。注册可暂不授权关怀，登录后在“我的”中单独授权或撤回；不捆绑资源匹配、长期记忆与评测用途。新对话默认关闭历史回忆。理赔资料整理会创建关怀记录，不会向保险公司提交理赔申请。仅使用合成资料。
+
+切片设计与验收范围见 [账号与统一入口](docs/requirements/accounts-and-unified-entry.md)。前端验证运行 `npm run test:auth`、`npm run test:navigation`；账号测试为 `python -m unittest discover -s tests -p test_accounts.py -v`。配置专用 `ZHONGAN_AUTH_TEST_DATABASE_URL` 后，测试将在独立临时 PostgreSQL schema 中执行注册、主体隔离、授权、撤回、登录、退出与过期校验；未配置会明确跳过数据库测试。
+
 众安比赛项目。本仓库按 [众安·暖愈智护 SDD 规格 v0.1](docs/spec.md) 开发；功能完成、官方效果达标与内部质量通过分别验收，规格中的待冻结决策见第 14 节。
 
 ## 本地运行
