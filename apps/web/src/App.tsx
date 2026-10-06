@@ -345,7 +345,7 @@ export default function App() {
         {delivery.receipt_state==='read' ? <span>已查看</span> : <button onClick={()=>openReport()}>查看指引</button>}</div>}
       {error && <div role="alert" className="chat-error persistent-error">{error}<button aria-label="关闭提示" onClick={()=>setError('')}>×</button></div>}
       <PageBoundary resetKey={`${panel}:${snapshot?.conversation.conversation_id || ''}`}>
-      {connected && <div className="claim-panel" hidden={panel!=='claim'}><ClaimIntake key={`${token}:${subject}`} token={token} subject={subject} onAuthorize={()=>setPanel('account')} onOpen={async id=>{
+      {connected && <div className="claim-panel" hidden={panel!=='claim'}><ClaimIntake key={token} token={token} subject={subject} onAuthorize={()=>setPanel('account')} onOpen={async id=>{
           const generation=epoch.current;const items=await listConversations(token);
           if(epoch.current!==generation)return;setConversations(items);await openConversation(id,token,'chat');}}/></div>}
       {!connected ? <AuthPage onAuthenticated={auth=>connect(auth,true)}/>
