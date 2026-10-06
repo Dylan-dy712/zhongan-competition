@@ -8,7 +8,6 @@
 .care-home-scroll{flex:1;min-height:0;overflow:auto;padding-bottom:24px}
 .care-home-scroll .care-home{overflow:visible;flex:none}
 .care-home-scroll .care-recommend{margin:0 max(20px,calc((100% - 780px)/2));max-width:none}
-.review-workbench{flex:1;min-height:0;overflow:auto}
 .chat-header strong{font-size:18px}.chat-header span{font-size:13px;color:#597367}.care-header-report{background:#e8f4ed;color:#17664b;border:0;border-radius:12px;padding:10px 14px;font-size:14px;min-height:44px}
 .care-home,.care-records{flex:1;min-height:0;overflow:auto;padding:0 max(20px,calc((100% - 780px)/2)) 28px}
 .care-hero{position:relative;min-height:280px;background:radial-gradient(ellipse at 90% 55%,#c7f4e4,transparent 65%);padding:24px 0 18px}
@@ -66,34 +65,7 @@
 @media(prefers-reduced-motion:reduce){.chat-shell button,.care-report-section summary{transition:none}}
 
 /* ---- 医学复核工作台 ---- */
-.review-workbench { padding: 18px 20px 48px; max-width: 1080px; margin: 0 auto; }
-.review-head { display: flex; align-items: baseline; gap: 14px; }
-.review-head h1 { font-size: 20px; }
-.review-note, .review-empty { color: #6b655c; font-size: 13.5px; }
-.review-notice { background: #e3efec; color: #3d7a6f; border-radius: 10px; padding: 8px 14px; font-size: 13.5px; margin: 8px 0; }
-.review-error { background: #fbe9e7; color: #b3543f; border-radius: 10px; padding: 8px 14px; font-size: 13.5px; margin: 8px 0; }
-.review-layout { display: grid; grid-template-columns: 300px 1fr; gap: 16px; margin-top: 12px; align-items: start; }
-.review-queue { list-style: none; display: grid; gap: 8px; }
-.review-queue button { width: 100%; text-align: left; background: #fff; border: 1px solid #ece6de; border-radius: 11px; padding: 10px 12px; cursor: pointer; display: grid; gap: 2px; }
-.review-queue button.selected { border-color: #c96f4a; background: #fdf6f1; }
-.review-queue small { color: #6b655c; font-size: 12px; }
-.review-queue .review-reason { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.review-detail { background: #fff; border: 1px solid #ece6de; border-radius: 14px; padding: 16px 18px; }
-.review-reason-box label { display: grid; gap: 4px; font-size: 13px; color: #6b655c; }
-.review-reason-box textarea, .review-detail textarea { width: 100%; border: 1px solid #ece6de; border-radius: 9px; padding: 7px 10px; font: inherit; }
-.review-actions-bar { display: flex; gap: 8px; margin: 10px 0; }
-.review-actions-bar button { border: 1px solid #3d7a6f; background: #3d7a6f; color: #fff; border-radius: 9px; padding: 6px 16px; cursor: pointer; }
-.review-actions-bar button.danger { border-color: #b3543f; background: #fff; color: #b3543f; }
-.review-section { border: 1px dashed #ece6de; border-radius: 11px; padding: 10px 14px; margin: 10px 0; }
-.review-section summary { cursor: pointer; font-weight: 600; font-size: 14px; }
-.review-section article { padding: 8px 0; border-bottom: 1px dashed #f0ebe4; }
-.review-claim-meta { display: flex; gap: 8px; font-size: 12px; color: #9a9287; flex-wrap: wrap; }
-.review-claim-meta strong { color: #2d2a26; }
 .citation { display: inline-block; border: 0; background: none; color: #c96f4a; cursor: pointer; font-size: 12.5px; text-decoration: underline dotted; padding: 2px 0; }
-.review-publish { margin-top: 18px; background: #fdf3dd; border: 1px solid #ecd9ae; border-radius: 12px; padding: 14px 18px; }
-.review-publish-item { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; font-size: 13.5px; }
-.review-publish-item button { border: 1px solid #3d7a6f; background: #fff; color: #3d7a6f; border-radius: 9px; padding: 5px 14px; cursor: pointer; }
-@media (max-width: 860px) { .review-layout { grid-template-columns: 1fr; } }
 
 /* ---- 就医参考（KR4 患者端） ---- */
 .care-recommend { margin: 18px auto 0; max-width: 720px; background: #fff; border: 1px solid var(--line, #ece6de); border-radius: 14px; padding: 16px 20px; }
@@ -111,5 +83,3 @@
 .care-recommend-why { font-size: 12.5px; color: #a07424; }
 .care-recommend-limit { font-size: 12px; color: #9a9287; }
 
-.review-insight-edit { display: grid; gap: 8px; font-size: 13px; color: #6b655c; }
-.review-insight-edit select, .review-insight-edit textarea { border: 1px solid #ece6de; border-radius: 9px; padding: 6px 10px; font: inherit; width: 100%; }

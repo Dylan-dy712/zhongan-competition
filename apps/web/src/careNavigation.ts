@@ -3,7 +3,7 @@ import type {CarePanel} from './carePresentation';
 
 export function readCarePanel(hash:string):CarePanel {
   const name=hash.replace(/^#\/?/, '').split('?')[0];
-  return ['home','chat','report','records','review','claim','account'].includes(name) ? name as CarePanel : 'home';
+  return ['home','chat','report','records','claim','account'].includes(name) ? name as CarePanel : 'home';
 }
 
 export function useCareNavigation() {

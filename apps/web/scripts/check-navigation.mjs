@@ -22,7 +22,6 @@ globalThis.fetch=async url=>{
   const path=new URL(url,'http://localhost').pathname;calls.push(path);
   if(path==='/v1/conversations')return Response.json([conversation]);
   if(path==='/v1/chat/subjects')return Response.json([{subject_id:'synthetic-subject',consent_id:'synthetic-consent'}]);
-  if(path==='/v1/reviews')return Response.json({message:'当前账号没有审核权限'},{status:403});
   if(path==='/v1/cases/case-a/deliveries')return Response.json([]);
   if(path==='/v1/evidence/synthetic-evidence')return delayedEvidence.promise;
   if(path==='/v1/conversations/synthetic-a')return delayed ? delayed.promise : Response.json(snapshot);
@@ -39,10 +38,13 @@ try {
   root=createRoot(document.getElementById('root'));
   await act(async()=>root.render(React.createElement(App)));await flush();
   assert.match(document.body.textContent,/这次看病/);
-  await click('复核工作台');assert.match(document.body.textContent,/没有医学审核角色/);
+  assert.equal(button('复核工作台'),undefined);
   await click('首页');assert.match(document.body.textContent,/这次看病/);
   assert.doesNotMatch(document.body.textContent,/没有医学审核角色/);
   assert.equal(document.querySelectorAll('.care-navigation [aria-current="page"]').length,1);
+  await act(async()=>{window.location.hash='/review';});await flush();
+  assert.match(document.body.textContent,/这次看病/,'Removed review route must fall back to home');
+  await click('首页');
   await click('问暖暖');assert.equal(window.location.hash,'#/chat');assert.ok(document.querySelector('.composer'));
   await act(async()=>window.history.back());await flush();assert.equal(window.location.hash,'#/home');
   assert.match(document.body.textContent,/这次看病/);
@@ -56,7 +58,6 @@ try {
   await flush();assert.equal(document.querySelector('dialog'),null,'Late evidence must not reopen a modal on another page');
   assert.match(document.body.textContent,/这次看病/);
   await click('新的关怀对话');assert.match(document.body.textContent,/开始新的对话/);
-  await click('复核工作台');assert.match(document.body.textContent,/没有医学审核角色/,'Review must work without an active patient conversation');
   await click('就医记录');
   let resolve;
   delayed={promise:new Promise(r=>{resolve=r;})};
@@ -75,7 +76,7 @@ try {
   assert.match(document.body.textContent,/这个页面暂时没能打开/);
   await act(async()=>root.render(React.createElement(PageBoundary,{resetKey:'healthy'},React.createElement('p',null,'可恢复页面'))));
   assert.match(document.body.textContent,/可恢复页面/);
-  console.log('PASS: review exit, unique navigation, history back, reload, stale evidence suppression, review without a conversation, slow conversation loading, access failure unlock, render failure recovery. Synthetic React DOM tests; no server data accessed.');
+  console.log('PASS: unique navigation, history back, reload, stale evidence suppression, slow conversation loading, access failure unlock, render failure recovery. Synthetic React DOM tests; no server data accessed.');
 } finally {
   if(root)await act(async()=>root.unmount());
   await modules.close();dom.window.close();

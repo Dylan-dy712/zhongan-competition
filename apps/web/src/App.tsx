@@ -4,7 +4,6 @@ import {ApiError, continueAnalysis, createConversation, getConversation, getEvid
   listDeliveries, recordDeliveryReceipt, submitCareFeedback} from './api';
 import type {ChatSnapshot, ChatSubject, ChatTurn, Conversation, Evidence, ToolEvent, DeliveryNotice, FeedbackType,ReportSection} from './types';
 import {CareHome,CareRecords,CareReport,EvidencePanel,brand,reading} from './CarePages';
-import {ReviewWorkbench} from './ReviewWorkbench';
 import {CareRecommendations} from './CareRecommendations';
 import {publishedCare,type CarePanel} from './carePresentation';
 import {readCarePanel,useCareNavigation} from './careNavigation';
@@ -65,7 +64,6 @@ export default function App() {
   const currentReport = useRef('');
   currentReport.current=snapshot?.report.report_id || '';
   const [historyOpen,setHistoryOpen] = useState(false);
-  const reviewOpen=panel==='review';
   const [sharingBusy,setSharingBusy]=useState(false);
   const active = useRef('');
   const epoch = useRef(0);
@@ -339,8 +337,8 @@ export default function App() {
     </aside>
     <section className="chat-workspace">
       <header className="chat-header"><button className="history-toggle" onClick={()=>setHistoryOpen(v=>!v)} aria-label="打开历史对话">☰</button>
-        <div><strong>{reviewOpen?'医学复核':panel==='report'?'本次关怀':panel==='records'?'就医记录':panel==='chat'?'问暖暖':panel==='claim'?'理赔资料整理':panel==='account'?'我的账号':'暖愈智护'}</strong><span>{connected?'开发环境 · 仅使用合成资料':'从你最关心的事聊起'}</span></div>
-        {snapshot && !reviewOpen && <button className="care-header-report" onClick={()=>openReport()}>关怀指引</button>}
+        <div><strong>{panel==='report'?'本次关怀':panel==='records'?'就医记录':panel==='chat'?'问暖暖':panel==='claim'?'理赔资料整理':panel==='account'?'我的账号':'暖愈智护'}</strong><span>{connected?'开发环境 · 仅使用合成资料':'从你最关心的事聊起'}</span></div>
+        {snapshot && <button className="care-header-report" onClick={()=>openReport()}>关怀指引</button>}
       </header>
       {delivery && snapshot?.report.report_id===delivery.report_id && <div className="analysis-status care-notice" role="status">{delivery.message}
         {delivery.receipt_state==='read' ? <span>已查看</span> : <button onClick={()=>openReport()}>查看指引</button>}</div>}
@@ -357,7 +355,6 @@ export default function App() {
           const [items,allowed]=await Promise.all([listConversations(token),listSubjects(token)]);
           if(epoch.current!==generation)return;
           setConversations(items);setSubjects(allowed);setSubject(allowed[0]?.subject_id || '');}}/>
-      : reviewOpen ? <ReviewWorkbench token={token}/>
       : loadingConversation ? <main className="start-screen" role="status"><h1>正在打开就医记录…</h1></main>
       : panel==='records' ? <CareRecords conversations={conversations} currentCase={snapshot?.conversation.case_id} busy={working}
           onOpen={id=>void openConversation(id)} onNew={()=>{prepareNewChat();setPanel('home');}}/>
@@ -411,7 +408,7 @@ export default function App() {
         <button aria-current={panel==='chat'?'page':undefined} onClick={()=>setPanel('chat')}><span aria-hidden="true">◌</span>问暖暖</button>
         <button aria-current={panel==='records'?'page':undefined} onClick={()=>setPanel('records')}><span aria-hidden="true">▤</span>就医记录</button>
         <button aria-current={panel==='account'?'page':undefined} onClick={()=>setPanel('account')}>我的</button>
-        <button aria-current={reviewOpen?'page':undefined} onClick={()=>setPanel('review')}>✓ 复核工作台</button></nav>}
+        </nav>}
     </section>
     {evidence && <EvidencePanel evidence={evidence} onClose={()=>setEvidence(null)}/>}
   </div>;
