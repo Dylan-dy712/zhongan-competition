@@ -8,7 +8,7 @@ function uuid() {
   return `${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20)}`;
 }
 
-export default function ClaimIntake({token,subject,onOpen}:{token:string;subject:string;onOpen:(id:string)=>Promise<void>}) {
+export default function ClaimIntake({token,subject,onOpen,onAuthorize}:{token:string;subject:string;onAuthorize:()=>void;onOpen:(id:string)=>Promise<void>}) {
   const [step,setStep]=useState(0);
   const [kind,setKind]=useState('住院医疗');
   const [diagnosis,setDiagnosis]=useState('');
@@ -47,8 +47,8 @@ export default function ClaimIntake({token,subject,onOpen}:{token:string;subject
     <p>保险理赔申请尚未提交，正式理赔请通过保险公司的服务渠道办理。</p>
     {error && <p role="alert">{error}</p>}
     <button disabled={busy} onClick={async()=>{setBusy(true);try{await onOpen(pending.current!.id);}catch(e){setError(e instanceof Error?e.message:'打开失败，请重试。');}finally{setBusy(false);}}}>查看专属关怀</button></main>;
-  return <main className="claim-intake"><span className="auth-brand">理赔准备 · 专属关怀</span><h1>把资料整理好，安心走下一步</h1>
-    <p>沿用理赔演示的三步流程，材料将上传至你的账号，并交给暖暖整理。</p>
+  return <main className="claim-intake"><span className="auth-brand">理赔准备 · 专属关怀</span><h1>准备本次理赔材料</h1>
+    <p>把这次就医的事，一步步整理好。填写就医信息、添加材料，再核对本次资料。</p>
     <p aria-live="polite">{['① 填写信息','② 添加材料','③ 核对并开始关怀'][step]}</p>
     <form onSubmit={e=>{e.preventDefault();if(step<2)setStep(step+1);else void submit();}}>
       {step===0 && <><label>就医类型<select value={kind} onChange={e=>setKind(e.target.value)}><option>住院医疗</option><option>门急诊医疗</option></select></label>
@@ -65,6 +65,7 @@ export default function ClaimIntake({token,subject,onOpen}:{token:string;subject
       {error && <p role="alert" className="auth-error">{error}</p>}
       <button disabled={busy || (step===1 && files.length===0) || (step===2 && (!confirmed || !subject))}>{busy?'正在整理材料…':step<2?'下一步':locked?'重试整理':'确认并开始关怀'}</button>
       {step>0 && <button type="button" disabled={busy || locked} onClick={()=>{setStep(step-1);setError('');}}>上一步</button>}
-      {!subject && <small>当前账号没有可创建关怀记录的授权，请先使用已授权账号登录。</small>}
+      {!subject && <button type="button" onClick={onAuthorize}>确认资料用途授权</button>}
+      {!subject && <small>你可以先准备材料。开始关怀前，请到“我的”确认资料用途授权。</small>}
     </form></main>;
 }
