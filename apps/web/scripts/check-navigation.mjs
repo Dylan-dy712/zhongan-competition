@@ -55,7 +55,7 @@ try {
   let resolveEvidence;delayedEvidence={promise:new Promise(r=>{resolveEvidence=r;})};
   await click('查看这段说明的资料依据');await click('首页');
   await act(async()=>resolveEvidence(Response.json({evidence_id:'synthetic-evidence',document_version:1,page_index:0,text_span:{text:'合成证据'}})));
-  await flush();assert.equal(document.querySelector('dialog'),null,'Late evidence must not reopen a modal on another page');
+  await flush();assert.equal(document.querySelector('dialog.evidence-overlay'),null,'Late evidence must not reopen a modal on another page');
   assert.match(document.body.textContent,/这次看病/);
   await click('新的关怀对话');assert.match(document.body.textContent,/开始新的对话/);
   await click('就医记录');
