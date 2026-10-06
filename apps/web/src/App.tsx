@@ -328,16 +328,16 @@ export default function App() {
   const openReport=(section?:ReportSection['section_type'])=>{setReportFocus(section);setPanel('report');};
 
   return <div className="chat-shell">
-    <aside className={`chat-sidebar ${historyOpen?'is-open':''}`}>
+    {connected && panel==='chat' && <aside className={`chat-sidebar ${historyOpen?'is-open':''}`}>
       <div className="brand"><img src={brand} alt="暖愈智护"/></div>
       {connected && <><button className="new-chat" disabled={working} onClick={prepareNewChat}>＋ 新的关怀对话</button>
         <div className="history-list"><p>以前的对话</p>{conversations.map(c=><button disabled={working} key={c.conversation_id}
           className={active.current===c.conversation_id?'selected':''} onClick={()=>void openConversation(c.conversation_id)}>
           <strong>{c.title}</strong><small>{new Date(c.updated_at).toLocaleDateString('zh-CN')}</small></button>)}</div>
         <button className="quiet-button" disabled={working} onClick={()=>void signOut()}>退出登录</button></>}
-    </aside>
+    </aside>}
     <section className="chat-workspace">
-      <header className="chat-header"><button className="history-toggle" onClick={()=>setHistoryOpen(v=>!v)} aria-label="打开历史对话">☰</button>
+      <header className="chat-header">{connected && panel==='chat' && <button className="history-toggle" onClick={()=>setHistoryOpen(v=>!v)} aria-label="打开历史对话">☰</button>}
         <div><strong>{panel==='report'?'本次关怀':panel==='records'?'就医记录':panel==='chat'?'问暖暖':panel==='claim'?'理赔资料整理':panel==='account'?'我的账号':'暖愈智护'}</strong><span>{connected?'开发环境 · 仅使用合成资料':'从你最关心的事聊起'}</span></div>
         {snapshot && <button className="care-header-report" onClick={()=>openReport()}>关怀指引</button>}
       </header>

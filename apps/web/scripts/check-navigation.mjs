@@ -39,13 +39,15 @@ try {
   await act(async()=>root.render(React.createElement(App)));await flush();
   assert.match(document.body.textContent,/这次看病/);
   assert.equal(button('复核工作台'),undefined);
+  assert.equal(document.querySelector('.chat-sidebar'),null);
+  assert.equal(document.querySelector('.history-toggle'),null);
   await click('首页');assert.match(document.body.textContent,/这次看病/);
   assert.doesNotMatch(document.body.textContent,/没有医学审核角色/);
   assert.equal(document.querySelectorAll('.care-navigation [aria-current="page"]').length,1);
   await act(async()=>{window.location.hash='/review';});await flush();
   assert.match(document.body.textContent,/这次看病/,'Removed review route must fall back to home');
   await click('首页');
-  await click('问暖暖');assert.equal(window.location.hash,'#/chat');assert.ok(document.querySelector('.composer'));
+  await click('问暖暖');assert.equal(window.location.hash,'#/chat');assert.ok(document.querySelector('.composer'));assert.ok(document.querySelector('.chat-sidebar'));
   await act(async()=>window.history.back());await flush();assert.equal(window.location.hash,'#/home');
   assert.match(document.body.textContent,/这次看病/);
   await click('问暖暖');await act(async()=>root.unmount());
@@ -57,6 +59,7 @@ try {
   await act(async()=>resolveEvidence(Response.json({evidence_id:'synthetic-evidence',document_version:1,page_index:0,text_span:{text:'合成证据'}})));
   await flush();assert.equal(document.querySelector('dialog.evidence-overlay'),null,'Late evidence must not reopen a modal on another page');
   assert.match(document.body.textContent,/这次看病/);
+  await click('问暖暖');
   await click('新的关怀对话');assert.match(document.body.textContent,/开始新的对话/);
   await click('就医记录');
   let resolve;
@@ -66,7 +69,7 @@ try {
   assert.doesNotMatch(document.body.textContent,/开始新的对话/,'Loading must not masquerade as a new case');
   await act(async()=>resolve(Response.json({message:'不可访问'},{status:404})));await flush();
   assert.doesNotMatch(document.body.textContent,/正在打开就医记录/,'Access failure must clear loading');
-  assert.equal(button('新的关怀对话').disabled,false,'Access failure must not leave controls locked');
+  await click('问暖暖');assert.equal(button('新的关怀对话').disabled,false,'Access failure must not leave controls locked');
   const {PageBoundary}=modules;
   const bad=()=>{throw new Error('Synthetic render failure');};
   await act(async()=>root.unmount());root=createRoot(document.getElementById('root'));
