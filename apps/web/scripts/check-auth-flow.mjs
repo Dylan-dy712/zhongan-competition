@@ -70,6 +70,7 @@ try{
   assert.equal(document.querySelector('[data-claim-field="diagnosis"]')===diagnosisControl,true);
   assert.equal(diagnosisControl.value,'保留填写内容');assert.equal(scroller.scrollTop,240);
   assert.equal(document.activeElement===causeControl,true);
+  await input('[data-claim-field="diagnosis"]','');
 
   await click('确认资料用途授权');await click('确认并授权关怀');assert.match(document.body.textContent,/已授权/);
   await click('首页');await click('整理理赔资料，开启专属关怀');await click('下一步，上传材料');assert.match(document.body.textContent,/请填写病历上的诊断/);await click('填入示例信息');await click('下一步，上传材料');
