@@ -1,0 +1,161 @@
+.chat-original .inline-report-thread{padding:14px 14px 22px}.nuan-time{text-align:center;font-size:11px;color:#89918d;margin:0 0 18px}.nuan-message{display:flex;gap:8px;align-items:flex-start;margin-bottom:16px}.nuan-avatar{width:30px;height:34px;object-fit:contain;flex-shrink:0}.nuan-message-body{min-width:0;flex:1;border-radius:3px 15px 15px 15px;background:white;padding:16px;box-shadow:0 2px 8px #163c2403}.nuan-message-body p{font-size:14px;line-height:1.95;color:#4b5550;margin:0}.nuan-message-body p strong{color:#252e29;font-weight:600}.nuan-hint{display:block;margin-top:9px;font-size:11px;color:#849087}.nuan-message-label{display:flex;align-items:center;gap:6px;font-size:12px;color:#348568;margin-bottom:15px}.nuan-key{display:inline;padding:0 1px;font-size:inherit;font-weight:600;line-height:inherit;text-align:left;color:#167c5d;text-decoration:underline;text-decoration-color:#8bcdb5;text-decoration-thickness:1px;text-underline-offset:4px;background:transparent;border-radius:2px}.nuan-key span{font-weight:400;font-size:10px;display:inline;margin-left:3px;text-decoration:none}.nuan-date-card{display:flex;align-items:center;gap:12px;background:#eff8f3;border-radius:10px;margin-bottom:13px;padding:12px}.nuan-calendar{width:45px;flex-shrink:0;background:white;border-radius:7px;text-align:center;padding:5px 0}.nuan-calendar small{font-size:10px;color:#6f8778}.nuan-calendar strong{display:block;font-size:29px;line-height:1.2;color:#263f30}.nuan-calendar span{font-size:10px;color:#718279}.nuan-date-card h3{font-size:14px;color:#26382e;line-height:1.6}.nuan-status{font-size:10px;color:#7b887f;display:block;margin-top:4px}.cost-label{color:#5986a1}.nuan-money{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 0 18px;margin-bottom:12px;border-bottom:1px solid #edf0ee}.nuan-money small{display:block;font-size:11px;color:#7a8680}.nuan-money strong{display:block;font-size:27px;font-weight:650;color:#2d3831;margin-top:6px;white-space:nowrap}.nuan-money strong span{font-size:16px}.nuan-money strong small{display:inline;font-size:16px;color:inherit}.nuan-money-unknown{border-left:1px solid #e3e9e5;padding-left:18px}.nuan-money-unknown b{display:block;font-size:15px;font-weight:500;color:#7b8780;margin-top:10px}.amber-label{color:#a08149}.nuan-add{font-size:12px;color:#56745f;background:#f3f7f3;border-radius:8px;padding:10px;margin-top:13px;width:100%;text-align:left}.nuan-end{text-align:center;color:#9aa29d;font-size:10px;margin:20px 0}.inline-report-thread .report-prompts{margin-left:38px}.inline-report-thread .report-prompts button{font-size:12px}#nuan-explanation{padding:15px 24px 24px;color:#29322d;background:#fff}#nuan-explanation::backdrop{background:#15261f66}#nuan-explanation .dialog-head{margin-bottom:4px}#nuan-explanation .dialog-head button{font-size:25px;color:#7c857f}.explain-type{font-size:12px;color:#328566;background:#edf8f1;padding:4px 9px;border-radius:5px}#nuan-explanation h2{font-size:21px;line-height:1.5;margin-bottom:15px}#nuan-explanation .explain-body{font-size:15px;color:#4f5d54;line-height:1.9;margin-bottom:20px}.explain-evidence,.explain-knowledge{padding:15px;background:#f5f8f6;border-radius:10px;margin:12px 0}.explain-evidence h3,.explain-knowledge h3{font-size:12px;color:#627a6b}.explain-evidence blockquote{font-size:13px;line-height:1.85;margin:9px 0;color:#56655c}.explain-evidence small,.explain-knowledge small{font-size:10px;color:#86918a}.explain-knowledge p{font-size:13px;line-height:1.85;margin:8px 0;color:#56655c}@media(max-width:350px){.nuan-message-body{padding:12px}.nuan-date-card{padding:9px;gap:8px}.nuan-avatar{width:25px}.nuan-money strong{font-size:24px}.nuan-money-unknown{padding-left:12px}}
+
+.chat-original,.records-screen{color:#1e2926;background:#f7f9f8}
+.chat-original .topbar,.records-screen .topbar{background:#ecfcf5f2;border-bottom:1px solid #e1eee7;min-height:58px}
+.chat-original .topbar h1,.records-screen .topbar h1{font-size:18px;font-weight:650;letter-spacing:.5px;color:#1e2926}
+.chat-original .inline-report-thread{padding:0 16px 24px;background:radial-gradient(ellipse 250px 200px at 100% 0,#a9efd8,transparent),linear-gradient(#ecfcf5,#f7f9f8 330px);scrollbar-width:thin;scrollbar-color:#d7e5dc transparent}
+.nuan-welcome{position:relative;isolation:isolate;display:flex;align-items:center;min-height:186px;margin:0 -2px 5px;padding:20px 8px 19px}
+.nuan-welcome::before{content:"";position:absolute;width:142px;height:142px;right:4px;top:23px;border-radius:50%;background:linear-gradient(140deg,#ffffffa8,#cdeedeb0);border:1px solid #ffffffcf;z-index:-1}
+.nuan-welcome-copy{position:relative;z-index:1;max-width:calc(100% - 130px)}
+.nuan-welcome-kicker{font-size:11px;letter-spacing:1px;color:#4f9778}
+.nuan-welcome h2{font-size:27px;letter-spacing:-.6px;line-height:1.4;font-weight:700;color:#1e2926;margin:9px 0 9px}
+.nuan-welcome p{font-size:12px;line-height:1.85;color:#68716e}
+.nuan-welcome img{position:absolute;width:142px;height:154px;object-fit:contain;right:1px;top:24px;filter:drop-shadow(0 12px 12px #267d4820);pointer-events:none}
+.nuan-reading-heading{display:flex;justify-content:space-between;align-items:center;gap:8px;margin:9px 1px 18px}
+.nuan-reading-heading>span{font-size:13px;font-weight:600;display:flex;gap:7px;align-items:center;color:#45765a}
+.nuan-reading-heading>span::before{content:"";display:block;width:3px;height:12px;background:#18ab7b;border-radius:3px}
+.nuan-reading-heading>small{font-size:10px;color:#84988a}
+.nuan-message{gap:8px;margin-bottom:18px}
+.nuan-avatar{margin-top:4px;width:28px;height:32px;filter:drop-shadow(0 2px 2px #175b3312)}
+.nuan-message-body{padding:17px 16px;border:1px solid #e4ede6;border-radius:6px 20px 20px 20px;box-shadow:0 5px 18px #2e664808}
+.nuan-message-body p{font-size:14px;line-height:1.9;color:#68716e}
+.nuan-message-body p strong{color:#00865f;font-weight:600}
+.nuan-message-label{font-size:12px;color:#368563;letter-spacing:.1px;margin-bottom:16px;gap:7px;font-weight:600}
+.nuan-message-label>svg{box-sizing:content-box;padding:6px;border-radius:9px;background:#edf8f0}
+.nuan-message-label.cost-label>svg{background:#edf5fa}.nuan-message-label.amber-label>svg{background:#faf4e8}
+.nuan-hint{font-size:11px;line-height:1.6;color:#819685}
+.nuan-date-card{position:relative;background:linear-gradient(115deg,#eef9f2,#e3f5ea);border:1px solid #d6eadf;border-radius:14px;padding:14px 12px;margin-bottom:16px;gap:12px}
+.nuan-calendar{width:47px;border-radius:8px;padding:0 0 7px;box-shadow:0 3px 8px #26784b0b;overflow:hidden}
+.nuan-calendar small{display:block;background:#71bc99;color:white;font-size:10px;padding:3px 0;line-height:1.5;margin-bottom:4px}
+.nuan-calendar strong{font-size:28px;color:#00865f}
+.nuan-date-card h3{font-size:14px;font-weight:650;line-height:1.6}
+.nuan-status{font-size:11px;line-height:1.6;color:#6d927b;margin-top:7px}
+.nuan-key{color:#148563;text-decoration-style:dotted;text-decoration-thickness:1px;text-underline-offset:4px}
+.nuan-key:hover{background:#eaf7ee}
+.nuan-money{background:linear-gradient(110deg,#f2f8fc,#fafdfd);border:1px solid #e5eef1;border-radius:12px;padding:15px 12px;margin-bottom:15px;gap:10px}
+.nuan-money strong{font-size:27px;color:#285568;letter-spacing:-.5px;font-variant-numeric:tabular-nums}
+.nuan-money-unknown{padding-left:12px;border-color:#dce8ec}.nuan-money-unknown b{font-size:14px;color:#79929a}
+.nuan-money small{font-size:11px;color:#75929c}
+.nuan-add{background:#effaf5;color:#468674;border:1px solid #d6eee3;min-height:43px;font-size:12px;border-radius:10px;margin-top:15px}
+.nuan-end{display:flex;align-items:center;justify-content:center;gap:10px;font-size:10px;color:#99a99e;margin:24px 0}
+.nuan-end::before,.nuan-end::after{content:"";height:1px;flex:1;max-width:50px;background:#dce7df}
+.chat-original .bubble.me{background:linear-gradient(110deg,#daf1e2,#caead9);border:1px solid #c8e6d3;border-radius:17px 5px 17px 17px;box-shadow:0 3px 12px #255a3405;margin-left:52px;color:#28523b;padding:14px 17px}
+.chat-original .chat-dock{background:#fbfefcf5;border-top:1px solid #e3eee6;padding:11px 13px 6px;box-shadow:0 -6px 22px #2d624706}
+.chat-original .composer{gap:8px;align-items:center}
+.chat-original .composer textarea{height:46px;min-height:46px;border-color:#dbe9df;border-radius:16px;padding:12px;font-size:13px;box-shadow:0 2px 6px #27493203;line-height:20px}
+.chat-original .composer textarea::placeholder{color:#82988f}
+.chat-original .composer button{height:44px;width:44px;border-radius:14px;background:linear-gradient(135deg,#00bd95,#00aa86);box-shadow:0 4px 9px #00865d1a}
+.chat-original .composer .attach{width:36px;background:#edf6f0;border:1px solid #e0eee5;box-shadow:none;color:#548c6d;border-radius:13px}
+.chat-original .chat-dock .notice{color:#899c90;font-size:10px;margin-top:7px}
+.nuan-welcome::before{background:linear-gradient(140deg,#ffffffa8,#a9efd880)}
+.nuan-welcome-kicker,.nuan-reading-heading>span{color:#008565}
+.nuan-date-card{background:linear-gradient(115deg,#e4fcf1,#dcf8ed);border-color:#c9eddf}
+.nuan-calendar small{background:#00b68a}
+.nuan-message-label>svg{background:#e4fcf1}
+.nuan-message-label{color:#008565}
+.nuan-add{background:#effaf5;color:#39816d;border-color:#d6eee3}
+.chat-original .bubble.me{background:linear-gradient(110deg,#d8fae9,#bdf2de);border-color:#bcead8;color:#235946}
+.chat-original .composer button,.records-filters button[aria-pressed=true]{background:linear-gradient(110deg,#50dc83,#00bd95 40%,#00aa86)}
+.chat-original .chat-scroll{padding:14px;flex:1;min-height:0;overflow:auto;background:#f6faf7}.chat-original .chat-footer{padding:10px 14px 8px;background:#f6faf7;border-top:1px solid #e1eae4}.chat-original .composer{display:flex;gap:8px;align-items:center;background:transparent;border:0;padding:0;box-shadow:none}.chat-original .composer textarea{flex:1;resize:none;min-width:0;background:white;border:1px solid #dbe9df;border-radius:16px;height:46px;min-height:46px;padding:12px;font-size:13px;line-height:20px}.chat-original .composer button{width:44px;height:44px;min-width:44px;padding:0;border-radius:14px;font-size:18px}.chat-original .composer .attach-button{width:36px;min-width:36px;background:#edf6f0;color:#548c6d}.chat-original .nuan-quick-actions{display:flex;gap:8px;margin:0 0 9px}.chat-original .nuan-quick-actions button{border:1px solid #e0ebe4;border-radius:18px;padding:7px 11px;font-size:11px;background:white;color:#567464}.chat-original .chat-options{font-size:12px;margin:6px 0}.chat-original .chat-settings summary{cursor:pointer;color:#6e8478;font-size:11px;padding:7px 0}.chat-original .chat-disclaimer{font-size:10px;margin:6px 0 0}.chat-original .nuan-avatar{display:grid;place-items:center;background:#164537;color:#f5c9ad;border-radius:12px;width:30px;height:30px;flex:none}.chat-original .message-row.assistant .message-bubble{border:0;background:transparent;padding:0;box-shadow:none}.chat-original .message-row.assistant{gap:8px}.chat-original .message-row.user .message-bubble{background:#dff3e8;border-radius:18px;font-size:14px}.chat-original .nuan-welcome-copy{max-width:calc(100% - 105px)}.chat-original .nuan-welcome img{width:115px;right:0}.chat-original .nuan-welcome h2{font-size:25px}.chat-original .chat-page-tools{display:flex;justify-content:space-between;padding:0 14px 6px;background:#f6faf7}.chat-original .chat-page-tools button{border:0;background:none;color:#698175;font-size:11px}
+.nuan-conversation-caption {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 9px;
+  margin: 15px 2px 13px;
+  padding: 0;
+  color: #82958a;
+  font-size: 13px;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+
+.nuan-conversation-caption strong {
+  font-size: 14px;
+  font-weight: 600;
+  color: #4b5550;
+}
+
+.nuan-conversation-caption small {
+  font-size: 12px;
+  color: #82958a;
+}
+
+.nuan-topic-details {
+  min-width: 0;
+  margin: 0 0 14px 36px;
+  border: 1px solid #deebe2;
+  border-radius: 14px;
+  background: #ffffffc9;
+}
+
+.nuan-topic-details > summary,
+.records-remaining > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 48px;
+  padding: 12px 14px;
+  cursor: pointer;
+  list-style: none;
+  color: #008565;
+  font-size: 14px;
+  line-height: 1.65;
+}
+
+.nuan-topic-details > summary::-webkit-details-marker,
+.records-remaining > summary::-webkit-details-marker {
+  display: none;
+}
+
+.nuan-topic-details > summary::after,
+.records-remaining > summary::after {
+  content: "";
+  flex: 0 0 7px;
+  width: 7px;
+  height: 7px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(45deg) translateY(-2px);
+  margin-right: 3px;
+}
+
+.nuan-topic-details[open] > summary::after,
+.records-remaining[open] > summary::after {
+  transform: rotate(225deg) translate(-2px, -1px);
+}
+
+.nuan-topic-details[open] > summary {
+  border-bottom: 1px solid #e1eee6;
+}
+
+.nuan-topic-details > summary > span {
+  margin-left: auto;
+  color: #82958a;
+  font-size: 12px;
+  text-align: right;
+}
+
+.nuan-topic-details > .nuan-message {
+  margin: 12px 10px;
+}
+
+.nuan-topic-details .nuan-message-body {
+  padding: 12px;
+  border: 0;
+  border-radius: 12px;
+  box-shadow: none;
+}
+
+.nuan-topic-details > p {
+  margin: 12px 14px;
+  color: #4b5550;
+  font-size: 15px;
+  line-height: 1.85;
+}
+
+.chat-original .message-row.assistant .message-bubble{background:white;border:1px solid #e4ede6;border-radius:6px 20px 20px 20px;padding:14px 16px;font-size:14px;line-height:1.9;box-shadow:0 5px 18px #2e664808}
+
+
+
