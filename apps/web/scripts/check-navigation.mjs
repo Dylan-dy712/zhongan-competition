@@ -41,6 +41,7 @@ try {
   assert.equal(button('复核工作台'),undefined);
   assert.equal(document.querySelector('.chat-sidebar'),null);
   assert.equal(document.querySelector('.history-toggle'),null);
+  assert.equal(document.querySelector('.chat-header'),null);
   await click('首页');assert.match(document.body.textContent,/这次看病/);
   assert.doesNotMatch(document.body.textContent,/没有医学审核角色/);
   assert.equal(document.querySelectorAll('.care-navigation [aria-current="page"]').length,1);
