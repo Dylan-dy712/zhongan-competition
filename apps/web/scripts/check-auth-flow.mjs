@@ -61,7 +61,18 @@ try{
   assert.equal(sessionStorage.getItem('zhongan_chat_token'),'synthetic-token');
   assert.equal(window.location.hash,'#/claim');
   assert.match(document.body.textContent,/申请医疗理赔/);
-  await click('我的');await click('确认并授权关怀');assert.match(document.body.textContent,/已授权/);
+  assert.equal(document.querySelector('.care-navigation'),null);
+  const scroller=document.querySelector('.claim-main');scroller.scrollTop=240;
+  const diagnosisControl=document.querySelector('[data-claim-field="diagnosis"]');
+  await input('[data-claim-field="diagnosis"]','保留填写内容');
+  const causeControl=document.querySelector('[data-claim-field="cause"]');causeControl.focus();
+  await act(async()=>{causeControl.value='意外';causeControl.dispatchEvent(new dom.window.Event('change',{bubbles:true}));});
+  assert.equal(document.querySelector('[data-claim-field="diagnosis"]')===diagnosisControl,true);
+  assert.equal(diagnosisControl.value,'保留填写内容');assert.equal(scroller.scrollTop,240);
+  assert.equal(document.activeElement===causeControl,true);
+  await input('[data-claim-field="diagnosis"]','');
+
+  await click('确认资料用途授权');await click('确认并授权关怀');assert.match(document.body.textContent,/已授权/);
   await click('首页');await click('整理理赔资料，开启专属关怀');await click('下一步，上传材料');assert.match(document.body.textContent,/请填写病历上的诊断/);await click('填入示例信息');await click('下一步，上传材料');
   await click('下一步，核对申请');assert.match(document.body.textContent,/请补充/);
   const fileInput=document.querySelector('input[type="file"]');
@@ -70,7 +81,7 @@ try{
   await click('下一步，核对申请');
   const confirmation=[...document.querySelectorAll('input[type="checkbox"]')].find(visible);await act(async()=>confirmation.click());
   await click('确认并开始关怀');assert.match(document.body.textContent,/合成上传中断/);
-  await click('我的');await click('首页');await click('整理理赔资料，开启专属关怀');
+  await click('返回首页');await click('我的');await click('首页');await click('整理理赔资料，开启专属关怀');
   await click('重试整理');assert.match(document.body.textContent,/资料已进入你的关怀空间/);
   assert.equal(uploadCount,6,'Retry must not reupload first file');
   const creations=calls.filter(c=>c.path==='/v1/conversations' && c.body);
