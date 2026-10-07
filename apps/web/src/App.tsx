@@ -337,10 +337,6 @@ export default function App() {
         <button className="quiet-button" disabled={working} onClick={()=>void signOut()}>退出登录</button></>}
     </aside>}
     <section className="chat-workspace">
-      <header className="chat-header">{connected && panel==='chat' && <button className="history-toggle" onClick={()=>setHistoryOpen(v=>!v)} aria-label="打开历史对话">☰</button>}
-        <div><strong>{panel==='report'?'本次关怀':panel==='records'?'就医记录':panel==='chat'?'问暖暖':panel==='claim'?'理赔资料整理':panel==='account'?'我的账号':'暖愈智护'}</strong><span>{connected?'开发环境 · 仅使用合成资料':'从你最关心的事聊起'}</span></div>
-        {snapshot && <button className="care-header-report" onClick={()=>openReport()}>关怀指引</button>}
-      </header>
       {delivery && snapshot?.report.report_id===delivery.report_id && <div className="analysis-status care-notice" role="status">{delivery.message}
         {delivery.receipt_state==='read' ? <span>已查看</span> : <button onClick={()=>openReport()}>查看指引</button>}</div>}
       {error && <div role="alert" className="chat-error persistent-error">{error}<button aria-label="关闭提示" onClick={()=>setError('')}>×</button></div>}
@@ -405,6 +401,7 @@ export default function App() {
           <p className="chat-disclaimer">开发环境仅使用合成材料 · 解释与关怀不能替代医生诊疗</p>
         </footer></>}
       </PageBoundary>
+      {connected && panel==='chat' && <div className="chat-options"><button onClick={()=>setHistoryOpen(v=>!v)}>历史对话</button>{snapshot && <button onClick={()=>openReport()}>关怀指引</button>}</div>}
       {connected && <nav className="care-navigation" aria-label="关怀页面"><button aria-current={panel==='home'?'page':undefined} onClick={()=>setPanel('home')}><span aria-hidden="true">⌂</span>首页</button>
         <button aria-current={panel==='chat'?'page':undefined} onClick={()=>setPanel('chat')}><span aria-hidden="true">◌</span>问暖暖</button>
         <button aria-current={panel==='records'?'page':undefined} onClick={()=>setPanel('records')}><span aria-hidden="true">▤</span>就医记录</button>
