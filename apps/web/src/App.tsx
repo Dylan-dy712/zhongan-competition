@@ -12,8 +12,10 @@ import AuthPage from './AuthPage';
 import ClaimIntake from './ClaimIntake';
 import AccountPage from './AccountPage';
 import {revokeSession} from './api';
+import OriginalChatGuide from './OriginalChatGuide';
 import './chat.css';
 import './care.css';
+import './chat-original.css';
 
 // randomUUID requires HTTPS in some browsers; retain a cryptographic HTTP development fallback.
 function requestId() {
@@ -336,7 +338,7 @@ export default function App() {
           <strong>{c.title}</strong><small>{new Date(c.updated_at).toLocaleDateString('zh-CN')}</small></button>)}</div>
         <button className="quiet-button" disabled={working} onClick={()=>void signOut()}>退出登录</button></>}
     </aside>}
-    <section className="chat-workspace">
+    <section className={`chat-workspace ${panel==='chat'?'chat-original':''}`}>
       {delivery && snapshot?.report.report_id===delivery.report_id && <div className="analysis-status care-notice" role="status">{delivery.message}
         {delivery.receipt_state==='read' ? <span>已查看</span> : <button onClick={()=>openReport()}>查看指引</button>}</div>}
       {error && <div role="alert" className="chat-error persistent-error">{error}<button aria-label="关闭提示" onClick={()=>setError('')}>×</button></div>}
@@ -374,34 +376,34 @@ export default function App() {
               {feedbackNotice && <p role="status">{feedbackNotice}</p>}</div>}</>
           : <div className="empty-report"><p>{snapshot.report.status==='not_generated'?'还没有报告。你可以在对话中上传材料，让暖暖帮你分析。':'报告尚未发布，部分内容可能需要复核。你仍可以在对话中查阅材料、核对事实。'}</p>
             <button onClick={()=>setPanel('chat')}>回到对话</button></div>}</main>
-      : <><main className="chat-scroll"><div className="conversation-intro care-chat-intro"><img src={reading} alt=""/><div><h1>有不明白的，<em>慢慢问</em></h1><span>你说的、材料写的，我们一起核对清楚</span></div></div>
+      : <><main className="chat-scroll inline-report-thread"><OriginalChatGuide snapshot={snapshot} onEvidence={id=>void showEvidence(id)}/>
         {hasOlder && turns.length>0 && <button className="load-history" onClick={()=>void loadOlder()}>查看更早的聊天</button>}
         <div className="messages">{turns.length===0 && <div className="message-row assistant"><div className="avatar">✦</div><div className="message-bubble"><p>你好，我是暖暖。你可以告诉我现在最关心什么，也可以直接上传病历或发票，我会结合材料帮你梳理。</p></div></div>}
           {turns.map(t=><div className="chat-turn" key={t.turn_id} id={`turn-${t.turn_id}`}>
             {t.input_kind==='analysis_ready' ? <p className="analysis-continuation">材料分析结束 · 暖暖继续为你解释</p> : <div className="message-row user"><div className="message-bubble"><p>{t.question}</p>
             {t.attachments.map(a=><span className="attachment" key={a.document_id}>▤ {a.name}</span>)}</div></div>}
-            <div className="message-row assistant"><img className="avatar care-avatar" src={reading} alt="暖暖"/><div className="message-bubble"><ToolActivity events={t.tool_events}/>
+            <div className="message-row assistant"><span className="nuan-avatar" aria-hidden="true">✦</span><div className="message-bubble"><ToolActivity events={t.tool_events}/>
               {t.answer ? <><p>{t.answer.text}</p><div className="citation-group">{t.answer.evidence_refs.map(id=><button className="citation" key={id} onClick={()=>void showEvidence(id)}>查看原始依据</button>)}</div>
                 {t.answer.history_refs.length>0 && <small className="history-reference">参考了 {t.answer.history_refs.length} 条你允许回忆的历史记录</small>}</>
                 : t.status==='failed' ? <><p>这次回答没有完成，你的消息已保存。</p><button disabled={working} onClick={()=>void send(t)}>重试这条消息</button></>
                 : <p role="status">正在结合对话处理你的请求…</p>}
             </div></div></div>)}
         </div><div ref={bottom}/></main>
-        <footer className="chat-footer">{snapshot.analysis.run_id && <div className="analysis-status" role="status">{statusLabels[snapshot.analysis.status] || snapshot.analysis.status}
+        <footer className="chat-footer">{snapshot.analysis.run_id && ['queued','running'].includes(snapshot.analysis.status) && <div className="analysis-status" role="status">{statusLabels[snapshot.analysis.status] || snapshot.analysis.status}
           {['completed','waiting_review'].includes(snapshot.analysis.status) && <button disabled={working} onClick={()=>{setInput('请查看最新分析，继续帮我解释。');}}>继续了解</button>}</div>}
           <div className="upload-list">{attachments.map(a=><span className="attachment" key={a.document_id}>▤ {a.name} · 已上传</span>)}</div>
-          <form className="composer" onSubmit={submit}><input ref={uploadInput} hidden type="file" multiple accept=".pdf,.png,.jpg,.jpeg,.txt" onChange={e=>void upload(e.target.files)}/>
+          <div className="nuan-quick-actions">{[['summary','看病经过'],['cost','费用解读'],['action','下一步安排']].map(([id,label])=><button key={id} onClick={()=>{const target=document.getElementById('chat-topic-'+id);if(target?.tagName==='DETAILS')target.setAttribute('open','');target?.scrollIntoView({behavior:'smooth',block:'start'});}}>{label}</button>)}</div><form className="composer" onSubmit={submit}><input ref={uploadInput} hidden type="file" multiple accept=".pdf,.png,.jpg,.jpeg,.txt" onChange={e=>void upload(e.target.files)}/>
             <button type="button" className="attach-button" title="上传病历或发票" aria-label="上传病历或发票" disabled={working} onClick={()=>uploadInput.current?.click()}>＋</button>
-            <textarea aria-label="给暖暖的消息" value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.nativeEvent.isComposing){e.preventDefault();void send();}}} rows={2} placeholder="聊聊你的情况，或上传病历、发票…"/>
-            <button className="send-button" disabled={working || (!input.trim()&&!attachments.length)}>{uploading?'上传中':busy?'处理中':'发送'}</button>
-          </form><div className="chat-options"><label><input type="checkbox" checked={snapshot.conversation.report_context_enabled ?? false} disabled={sharingBusy} onChange={()=>void toggleReportContext()}/>让关怀报告结合本次聊天</label>
+            <textarea aria-label="给暖暖的消息" value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.nativeEvent.isComposing){e.preventDefault();void send();}}} rows={1} placeholder="哪一句没看懂？接着问暖暖"/>
+            <button className="send-button" disabled={working || (!input.trim()&&!attachments.length)}>{uploading?'…':busy?'…':'↑'}</button>
+          </form><details className="chat-settings"><summary>对话与资料使用设置</summary><div className="chat-options"><label><input type="checkbox" checked={snapshot.conversation.report_context_enabled ?? false} disabled={sharingBusy} onChange={()=>void toggleReportContext()}/>让关怀报告结合本次聊天</label>
             <p>开启后，报告可采用本次对话最近12条用户消息，审核者及本案件的授权查看者可见。关闭后，使用这些消息的报告将隐藏；重新开启需重新分析。</p>
             <label><input type="checkbox" checked={snapshot.conversation.recall_enabled} disabled={working} onChange={()=>void toggleRecall()}/>允许新对话回忆本次聊天</label>
             <button disabled={working} onClick={()=>void newChat(true)}>另开对话，接着聊这次就医</button></div>
-          <p className="chat-disclaimer">开发环境仅使用合成材料 · 解释与关怀不能替代医生诊疗</p>
+          </details><p className="chat-disclaimer">开发环境仅使用合成材料 · 解释与关怀不能替代医生诊疗</p>
         </footer></>}
       </PageBoundary>
-      {connected && panel==='chat' && <div className="chat-options"><button onClick={()=>setHistoryOpen(v=>!v)}>历史对话</button>{snapshot && <button onClick={()=>openReport()}>关怀指引</button>}</div>}
+      {connected && panel==='chat' && <div className="chat-page-tools"><button onClick={()=>setHistoryOpen(v=>!v)}>历史对话</button>{snapshot && <button onClick={()=>openReport()}>关怀指引</button>}</div>}
       {connected && panel!=='claim' && <nav className="care-navigation" aria-label="关怀页面"><button aria-current={panel==='home'?'page':undefined} onClick={()=>setPanel('home')}><span aria-hidden="true">⌂</span>首页</button>
         <button aria-current={panel==='chat'?'page':undefined} onClick={()=>setPanel('chat')}><span aria-hidden="true">◌</span>问暖暖</button>
         <button aria-current={panel==='records'?'page':undefined} onClick={()=>setPanel('records')}><span aria-hidden="true">▤</span>就医记录</button>
