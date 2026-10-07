@@ -3,8 +3,8 @@ import {ApiError, continueAnalysis, createConversation, getConversation, getEvid
   listConversations, listSubjects, sendChatMessage, setRecall, setReportContext, uploadChatDocument,
   listDeliveries, recordDeliveryReceipt, submitCareFeedback} from './api';
 import type {ChatSnapshot, ChatSubject, ChatTurn, Conversation, Evidence, ToolEvent, DeliveryNotice, FeedbackType,ReportSection} from './types';
-import {CareHome,CareRecords,CareReport,EvidencePanel,brand,reading} from './CarePages';
-import {CareRecommendations} from './CareRecommendations';
+import {CareReport,EvidencePanel,brand} from './CarePages';
+import {DemoHome,DemoRecords,DemoIcon} from './DemoPages';
 import {publishedCare,type CarePanel} from './carePresentation';
 import {readCarePanel,useCareNavigation} from './careNavigation';
 import {PageBoundary} from './PageBoundary';
@@ -12,7 +12,7 @@ import AuthPage from './AuthPage';
 import ClaimIntake from './ClaimIntake';
 import AccountPage from './AccountPage';
 import {revokeSession} from './api';
-import OriginalChatGuide from './OriginalChatGuide';
+import OriginalChatGuide,{OriginalChatWelcome} from './OriginalChatGuide';
 import './chat.css';
 import './care.css';
 import './chat-original.css';
@@ -214,7 +214,7 @@ export default function App() {
     setDelivery(null);setFeedbackNotice('');setHasOlder(false);setReportFocus(undefined);setCaseInput('');
     setSnapshot(null);setOlder([]);setAttachments([]);setInput('');setEvidence(null);setError('');
     setHistoryOpen(false);pendingSend.current=null;
-    setPanel('home');
+    setPanel('chat');
   };
 
   // Processing labels come from persisted backend events, never timed animations.
@@ -355,16 +355,16 @@ export default function App() {
           if(epoch.current!==generation)return;
           setConversations(items);setSubjects(allowed);setSubject(allowed[0]?.subject_id || '');}}/>
       : loadingConversation ? <main className="start-screen" role="status"><h1>正在打开就医记录…</h1></main>
-      : panel==='records' ? <CareRecords conversations={conversations} currentCase={snapshot?.conversation.case_id} busy={working}
-          onOpen={id=>void openConversation(id)} onNew={()=>{prepareNewChat();setPanel('home');}}/>
-      : !snapshot ? <main className="start-screen"><img className="care-login-art" src={reading} alt="陪你整理看病资料的暖暖"/><h1>你好，我是暖暖</h1><p>可以先聊聊，也可以上传材料。没有报告也能开始。</p>
+      : panel==='records' ? <DemoRecords conversations={conversations} currentCase={snapshot?.conversation.case_id} busy={working}
+          onOpen={id=>void openConversation(id)} onNew={()=>setPanel('claim')} onAccount={()=>setPanel('account')}/>
+      : panel==='home' ? <DemoHome snapshot={snapshot} onChat={()=>setPanel('chat')} onReport={openReport} onRecords={()=>setPanel('records')} onClaim={()=>setPanel('claim')}/>
+      : !snapshot ? <main className="original-chat-start"><OriginalChatWelcome/><div className="nuan-message"><span className="nuan-avatar" aria-hidden="true">✦</span><div className="nuan-message-body"><p>你好，我是暖暖。可以先聊聊，也可以上传材料。没有报告也能开始。</p></div></div>
         <button className="claim-entry-link" onClick={()=>setPanel('claim')}>整理理赔资料，开启专属关怀</button>
         <div className="connect-form">{subjects.length>1 && <label>关怀对象<select value={subject} onChange={e=>setSubject(e.target.value)}>
           {Array.from(new Map(subjects.map(s=>[s.subject_id,s])).values()).map((s,i)=><option key={s.subject_id} value={s.subject_id}>已授权对象 {i+1} · {s.subject_id.slice(0,8)}</option>)}</select></label>}
           <details><summary>接续已有案件（可选）</summary><input aria-label="已有案件ID" placeholder="已有案件 ID，不需要报告版本" value={caseInput} onChange={e=>setCaseInput(e.target.value)}/></details>
           <button disabled={busy || (!subjects.length && !caseInput)} onClick={()=>void newChat()}>{busy?'正在打开…':'开始新的对话'}</button>
-          {!subjects.length && !caseInput && <small>当前账号没有可新建案件的授权，可以填写已有案件ID。</small>}</div></main>
-      : panel==='home' ? <div className="care-home-scroll"><button className="claim-entry-link" onClick={()=>setPanel('claim')}>整理理赔资料，开启专属关怀</button><CareHome snapshot={snapshot} onChat={()=>setPanel('chat')} onReport={openReport} onRecords={()=>setPanel('records')}/><CareRecommendations key={snapshot.conversation.case_id} token={token}/></div>
+          {!subjects.length && !caseInput && <small>请先到“我的”确认关怀资料授权，再开始对话。</small>}</div></main>
       : panel==='report' ? <main className="chat-report"><h1>本次关怀指引</h1>
           {publishedCare(snapshot.report) ? <><p className="care-report-version">第 {snapshot.report.report_version} 版 · 已审核发布</p>
             <CareReport report={snapshot.report} initialSection={reportFocus} onEvidence={id=>void showEvidence(id)}/>
@@ -404,10 +404,10 @@ export default function App() {
         </footer></>}
       </PageBoundary>
       {connected && panel==='chat' && <div className="chat-page-tools"><button onClick={()=>setHistoryOpen(v=>!v)}>历史对话</button>{snapshot && <button onClick={()=>openReport()}>关怀指引</button>}</div>}
-      {connected && panel!=='claim' && <nav className="care-navigation" aria-label="关怀页面"><button aria-current={panel==='home'?'page':undefined} onClick={()=>setPanel('home')}><span aria-hidden="true">⌂</span>首页</button>
-        <button aria-current={panel==='chat'?'page':undefined} onClick={()=>setPanel('chat')}><span aria-hidden="true">◌</span>问暖暖</button>
-        <button aria-current={panel==='records'?'page':undefined} onClick={()=>setPanel('records')}><span aria-hidden="true">▤</span>就医记录</button>
-        <button aria-current={panel==='account'?'page':undefined} onClick={()=>setPanel('account')}>我的</button>
+      {connected && panel!=='claim' && <nav className="care-navigation" aria-label="关怀页面"><button aria-current={panel==='home'?'page':undefined} onClick={()=>setPanel('home')}><DemoIcon name="leaf"/>首页</button>
+        <button aria-current={panel==='chat'?'page':undefined} onClick={()=>setPanel('chat')}><DemoIcon name="chat"/>问暖暖</button>
+        <button aria-current={panel==='records'?'page':undefined} onClick={()=>setPanel('records')}><DemoIcon name="file"/>就医记录</button>
+        <button aria-current={panel==='account'?'page':undefined} onClick={()=>setPanel('account')}><DemoIcon name="user"/>我的</button>
         </nav>}
     </section>
     {evidence && <EvidencePanel evidence={evidence} onClose={()=>setEvidence(null)}/>}

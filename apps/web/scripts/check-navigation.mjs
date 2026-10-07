@@ -63,9 +63,15 @@ try {
   await click('问暖暖');
   await click('新的关怀对话');assert.match(document.body.textContent,/开始新的对话/);
   await click('就医记录');
+  assert.ok(document.querySelector('.records-profile'),'Original archive profile must be mounted');
+  const requestsBeforeView=calls.length;
+  await click('按时间');assert.ok(document.querySelector('.records-timeline'));
+  await click('按就医');assert.ok(document.querySelector('.records-group'));
+  assert.equal(calls.length,requestsBeforeView,'Changing record arrangement must not reload the backend');
+  await click('查看这次就医');assert.ok(document.querySelector('.records-detail'));
   let resolve;
   delayed={promise:new Promise(r=>{resolve=r;})};
-  await act(async()=>button('›').click());await flush();
+  await click('合成测试记录');
   assert.match(document.body.textContent,/正在打开就医记录/);
   assert.doesNotMatch(document.body.textContent,/开始新的对话/,'Loading must not masquerade as a new case');
   await act(async()=>resolve(Response.json({message:'不可访问'},{status:404})));await flush();
