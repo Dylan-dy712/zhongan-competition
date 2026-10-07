@@ -341,7 +341,7 @@ export default function App() {
         {delivery.receipt_state==='read' ? <span>已查看</span> : <button onClick={()=>openReport()}>查看指引</button>}</div>}
       {error && <div role="alert" className="chat-error persistent-error">{error}<button aria-label="关闭提示" onClick={()=>setError('')}>×</button></div>}
       <PageBoundary resetKey={`${panel}:${snapshot?.conversation.conversation_id || ''}`}>
-      {connected && <div className="claim-panel" hidden={panel!=='claim'}><ClaimIntake key={token} token={token} subject={subject} onAuthorize={()=>setPanel('account')} onOpen={async id=>{
+      {connected && <div className="claim-panel" hidden={panel!=='claim'}><ClaimIntake key={token} token={token} subject={subject} onExit={()=>setPanel('home')} onAuthorize={()=>setPanel('account')} onOpen={async id=>{
           const generation=epoch.current;const items=await listConversations(token);
           if(epoch.current!==generation)return;setConversations(items);await openConversation(id,token,'chat');}}/></div>}
       {!connected ? <AuthPage onAuthenticated={auth=>connect(auth,true)}/>
@@ -402,7 +402,7 @@ export default function App() {
         </footer></>}
       </PageBoundary>
       {connected && panel==='chat' && <div className="chat-options"><button onClick={()=>setHistoryOpen(v=>!v)}>历史对话</button>{snapshot && <button onClick={()=>openReport()}>关怀指引</button>}</div>}
-      {connected && <nav className="care-navigation" aria-label="关怀页面"><button aria-current={panel==='home'?'page':undefined} onClick={()=>setPanel('home')}><span aria-hidden="true">⌂</span>首页</button>
+      {connected && panel!=='claim' && <nav className="care-navigation" aria-label="关怀页面"><button aria-current={panel==='home'?'page':undefined} onClick={()=>setPanel('home')}><span aria-hidden="true">⌂</span>首页</button>
         <button aria-current={panel==='chat'?'page':undefined} onClick={()=>setPanel('chat')}><span aria-hidden="true">◌</span>问暖暖</button>
         <button aria-current={panel==='records'?'page':undefined} onClick={()=>setPanel('records')}><span aria-hidden="true">▤</span>就医记录</button>
         <button aria-current={panel==='account'?'page':undefined} onClick={()=>setPanel('account')}>我的</button>

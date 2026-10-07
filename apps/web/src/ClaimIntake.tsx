@@ -1,7 +1,8 @@
-import {useEffect,useRef,useState} from 'react';
+import {useEffect,useLayoutEffect,useRef,useState} from 'react';
 import {createConversation,sendChatMessage,uploadChatDocument} from './api';
 import {claimTemplate,initialClaimForm,validateClaimInfo,type ClaimFile,type ClaimForm} from './claimTemplate';
 import './claim-original.css';
+import {syncClaimMarkup} from './claimDom';
 
 function uuid() {
   const bytes=crypto.getRandomValues(new Uint8Array(16));bytes[6]=(bytes[6]&15)|64;bytes[8]=(bytes[8]&63)|128;
@@ -9,7 +10,7 @@ function uuid() {
   return `${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20)}`;
 }
 
-export default function ClaimIntake({token,subject,onOpen,onAuthorize}:{token:string;subject:string;onAuthorize:()=>void;onOpen:(id:string)=>Promise<void>}) {
+export default function ClaimIntake({token,subject,onOpen,onAuthorize,onExit}:{token:string;subject:string;onAuthorize:()=>void;onExit:()=>void;onOpen:(id:string)=>Promise<void>}) {
   const [step,setStep]=useState(0);
   const form=useRef<ClaimForm>(initialClaimForm());
   const [files,setFiles]=useState<ClaimFile[]>([]);
@@ -56,13 +57,16 @@ export default function ClaimIntake({token,subject,onOpen,onAuthorize}:{token:st
     finally{running.current=false;if(mounted.current)setBusy(false);}
   };
   const template=claimTemplate(form.current,files,step,finished);
+  const html=locked&&!finished?template.html.replace(/<(input|select) /g,'<$1 disabled '):template.html;
+  useLayoutEffect(()=>{if(shell.current)syncClaimMarkup(shell.current,html);},[html]);
+  useLayoutEffect(()=>{shell.current?.querySelector('.claim-main')?.scrollTo?.(0,0);},[step]);
   const next=()=>{
     const invalid=validateClaimInfo(form.current);if(invalid){setError(invalid);return;}
     if(step===1){const missing=template.groups.filter(g=>g.required&&!files.some(f=>f.category===g.id));if(missing.length){setError('请补充：'+missing.map(g=>g.title).join('、'));return;}}
     setError('');setStep(step+1);shell.current?.querySelector('.claim-main')?.scrollTo?.(0,0);
   };
-  return <main className="claim-react">
-    <div className="claim-shell" ref={shell} dangerouslySetInnerHTML={{__html:locked&&!finished?template.html.replace(/<(input|select) /g,'<$1 disabled '):template.html}} onInput={e=>{
+  return <main className="claim-react"><button className="claim-text" onClick={onExit}>返回首页</button>
+    <div className="claim-shell" ref={shell} onInput={e=>{
       const input=e.target as HTMLInputElement;const key=input.dataset.claimField as keyof ClaimForm;
       if(key && key in form.current){form.current[key]=input.value;}
     }} onChange={e=>{
