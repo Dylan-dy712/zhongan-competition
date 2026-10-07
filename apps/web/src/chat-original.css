@@ -81,8 +81,6 @@
   color: #82958a;
 }
 
-.nuan-reading-heading {
-  gap: 10px;
 .nuan-topic-details {
   min-width: 0;
   margin: 0 0 14px 36px;
@@ -157,6 +155,7 @@
   line-height: 1.85;
 }
 
-.report-chat-screen .chat-dock {
-  padding: 9px 12px 7px;
 .chat-original .message-row.assistant .message-bubble{background:white;border:1px solid #e4ede6;border-radius:6px 20px 20px 20px;padding:14px 16px;font-size:14px;line-height:1.9;box-shadow:0 5px 18px #2e664808}
+
+
+
