@@ -17,7 +17,7 @@ class AnalysisReview(BaseModel):
     model_config=ConfigDict(extra='forbid')
     accepted:bool=Field(strict=True)
     unverified:bool=Field(default=False,strict=True)
-    issues:list[ReviewIssue]=Field(max_length=3)
+    issues:list[ReviewIssue]=Field(max_length=8)
 
     @model_validator(mode='after')
     def consistent(self):
@@ -49,6 +49,7 @@ def review_analysis(config,packed,text):
                 'text':'\n'.join(span[1] for span in page['spans'])} for page in packed]
     messages=[{'role':'system','content':INSTRUCTION},
               {'role':'user','content':json.dumps({'original_material_pages':originals,'draft':text},ensure_ascii=False,separators=(',',':'))}]
+    literal_issues=literal_scope_issues(packed,text)
     compact=lambda value:re.sub(r'[\s，,；;：:（）()“”\"。*]','',value)
     draft=compact(text)
     material=[compact(page['text']) for page in originals]
@@ -69,7 +70,7 @@ def review_analysis(config,packed,text):
             # can be omitted and the remainder reviewed independently.
             pending=[ReviewIssue(category='scope',explanation='该重点的原文依据暂未逐字核对，只暂不交付该点，不据此改写事实。',
                                  source_quote='',draft_quote=issue.draft_quote) for issue in verdict.issues]
-            return AnalysisReview(accepted=False,unverified=True,issues=pending),{'request_usages':usages}
+            return AnalysisReview(accepted=False,unverified=True,issues=[*pending,*literal_issues]),{'request_usages':usages}
         messages.extend([{'role':'assistant','content':verdict.model_dump_json()},
             {'role':'user','content':'复核引句未能在原文或草稿中逐字找到，不能用于改写或判定。请重新比对并逐字复制引句，保留OCR中的O/0、标点和数值；不要把多个不同位置拼成一句，不自行规范药名、数字或原文。只提交能用实际引句证明的具体问题；没有事实问题则accepted为true。'}])
     if verdict.issues:
@@ -86,6 +87,8 @@ def review_analysis(config,packed,text):
         confirmed=[issue for i,issue in enumerate(verdict.issues,1) if getattr(flags,f'confirmed_{i}') or (issue.category=='emphasis' and re.search(r'(?:不能排除|疑似|未见|否认|既往|待排|不支持|无)\s*\*\*',issue.draft_quote))]
         verdict=AnalysisReview(accepted=not confirmed,issues=confirmed)
         usages.append(judged.get('usage',{}))
+    if literal_issues:
+        verdict=AnalysisReview(accepted=False,unverified=True,issues=[*verdict.issues,*literal_issues])
     return verdict,{'request_usages':usages}
 
 
@@ -105,7 +108,9 @@ def source_verdict(config,messages):
             'issues':[data[f'issue_{i}'] for i in range(1,4) if data[f'issue_{i}']['category']!='none']})
     else:
         payload,content=config._call(messages,timeout=(10,90),workload='fidelity')
-    return AnalysisReview.model_validate_json(content),payload
+    verdict=AnalysisReview.model_validate_json(content)
+    if len(verdict.issues)>3:raise ValueError('ANALYSIS_REVIEW_FORMAT')
+    return verdict,payload
 
 
 def review_tool():
@@ -136,3 +141,22 @@ ADJUDICATION="""你是原文复核问题的裁定员，仅比较每项提供的s
 加粗仅包住疾病而把紧邻的“疑似、未见、不能排除、既往”等限定放在加粗外也必须判true。疑似改确诊、否定变肯定、既往变当前、住院变出院、自费变现金、17.22变172.02必须判true。
 不能核实的批评不用于改写；指出问题不是新的医学依据。只返回JSON：{"confirmed_1":false,"confirmed_2":false,"confirmed_3":false}，不存在的项填false。
 """
+
+
+def literal_scope_issues(packed,text):
+    # Patient explanation may repeat explicit recorded interpretations; it must
+    # not invent a normal-range judgment from numbers or model background knowledge.
+    source=''.join(span[1] for page in packed for span in page['spans'])
+    source=''.join(source.split())
+    plain=text.replace('**','')
+    issues=[]
+    for match in re.finditer(r'[^。！？\n]{0,200}(?:参考范围内|正常范围内)[^。！？\n]{0,100}',plain):
+        clause=match.group(0)
+        keyword='参考范围内' if '参考范围内' in clause else '正常范围内'
+        if keyword in source:continue
+        # A caution that explicitly denies the inference is safe to retain.
+        tail=clause.rsplit('，',1)[-1]
+        if re.search(r'(?:不能|无法|不代表|不等于|不要|未明确|尚不能|不应)[^，,；;]{0,30}'+keyword,tail):continue
+        issues.append(ReviewIssue(category='scope',explanation='原文没有明确的范围内评价，本段不作检验正常判断。',
+                                  draft_quote=clause,source_quote=''))
+    return issues
