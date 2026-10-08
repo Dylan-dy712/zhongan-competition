@@ -66,6 +66,9 @@ export default function App() {
   const currentReport = useRef('');
   currentReport.current=snapshot?.report.report_id || '';
   const [historyOpen,setHistoryOpen] = useState(false);
+  const [mobileHistory,setMobileHistory]=useState(()=>window.matchMedia?.('(max-width:760px)').matches ?? false);
+  const historyDialog=useRef<HTMLDialogElement>(null);
+  const historyTrigger=useRef<HTMLButtonElement>(null);
   const active = useRef('');
   const epoch = useRef(0);
   const busyRef = useRef(false);
@@ -146,6 +149,19 @@ export default function App() {
   useEffect(()=>{if(!initialized.current){initialized.current=true;if(token) void connect(token);}},[connect,token]);
   useEffect(()=>{if(panel==='chat')bottom.current?.scrollIntoView({behavior:'smooth'});},[snapshot?.turns.length,busy,panel]);
   useEffect(()=>{++evidenceRequest.current;setHistoryOpen(false);setEvidence(null);},[panel]);
+  useEffect(()=>{
+    const media=window.matchMedia?.('(max-width:760px)');
+    if(!media)return;
+    const update=()=>{setMobileHistory(media.matches);setHistoryOpen(false);};
+    media.addEventListener('change',update);
+    return()=>media.removeEventListener('change',update);
+  },[]);
+  useEffect(()=>{
+    const dialog=historyDialog.current;
+    if(!dialog || !historyOpen || !mobileHistory || !connected || panel!=='chat')return;
+    dialog.showModal();
+    return()=>{dialog.close();if(window.matchMedia?.('(max-width:760px)').matches)historyTrigger.current?.focus({preventScroll:true});};
+  },[historyOpen,mobileHistory,connected,panel]);
 
   const careKey = (operation:string) => {
     const existing=careKeys.current.get(operation);
@@ -312,16 +328,19 @@ export default function App() {
   const working=busy || uploading || loadingConversation || !!snapshot?.turns.some(t=>t.status==='running');
   const submit=(e:FormEvent)=>{e.preventDefault();void send();};
   const openReport=(section?:ReportSection['section_type'])=>{setReportFocus(section);setPanel('report');};
+  const historyPanel=<aside className="chat-sidebar" aria-label="历史对话列表">
+      <div className="history-panel-head"><div className="brand"><img src={brand} alt="暖愈智护"/></div><button className="history-close" autoFocus={mobileHistory} aria-label="关闭历史对话" onClick={()=>setHistoryOpen(false)}>×</button></div>
+      <button className="new-chat" disabled={working} onClick={prepareNewChat}>＋ 新的关怀对话</button>
+      <div className="history-list"><p>以前的对话</p>{conversations.length===0 && <p>还没有历史对话</p>}{conversations.map(c=><button disabled={working} key={c.conversation_id}
+        className={active.current===c.conversation_id?'selected':''} onClick={()=>void openConversation(c.conversation_id,token,'chat')}>
+        <strong>{c.title}</strong><small>{new Date(c.updated_at).toLocaleDateString('zh-CN')}</small></button>)}</div>
+      <button className="quiet-button" disabled={working} onClick={()=>void signOut()}>退出登录</button>
+    </aside>;
 
   return <div className="chat-shell">
-    {connected && panel==='chat' && <aside className={`chat-sidebar ${historyOpen?'is-open':''}`}>
-      <div className="brand"><img src={brand} alt="暖愈智护"/></div>
-      {connected && <><button className="new-chat" disabled={working} onClick={prepareNewChat}>＋ 新的关怀对话</button>
-        <div className="history-list"><p>以前的对话</p>{conversations.map(c=><button disabled={working} key={c.conversation_id}
-          className={active.current===c.conversation_id?'selected':''} onClick={()=>void openConversation(c.conversation_id)}>
-          <strong>{c.title}</strong><small>{new Date(c.updated_at).toLocaleDateString('zh-CN')}</small></button>)}</div>
-        <button className="quiet-button" disabled={working} onClick={()=>void signOut()}>退出登录</button></>}
-    </aside>}
+    {connected && panel==='chat' && (mobileHistory ? historyOpen && <dialog id="history-dialog" ref={historyDialog} className="history-drawer" aria-label="历史对话"
+      onKeyDown={e=>{if(e.key!=='Tab')return;const buttons=Array.from(e.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)'));const first=buttons[0],last=buttons.at(-1);if(e.shiftKey&&document.activeElement===first){e.preventDefault();last?.focus();}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first?.focus();}}}
+      onCancel={e=>{e.preventDefault();setHistoryOpen(false);}} onClick={e=>{if(e.target===e.currentTarget)setHistoryOpen(false);}}>{historyPanel}</dialog> : historyPanel)}
     <section className={`chat-workspace ${panel==='chat'?'chat-original':''}`}>
       {delivery && snapshot?.report.report_id===delivery.report_id && <div className="analysis-status care-notice" role="status">{delivery.message}
         {delivery.receipt_state==='read' ? <span>已查看</span> : <button onClick={()=>openReport()}>查看指引</button>}</div>}
@@ -383,7 +402,7 @@ export default function App() {
           </form>
         </footer></>}
       </PageBoundary>
-      {connected && panel==='chat' && <div className="chat-page-tools"><button onClick={()=>setHistoryOpen(v=>!v)}>历史对话</button>{snapshot && <button onClick={()=>openReport()}>关怀指引</button>}</div>}
+      {connected && panel==='chat' && <div className="chat-page-tools"><button ref={historyTrigger} className="history-trigger" aria-haspopup="dialog" aria-controls="history-dialog" aria-expanded={historyOpen} onClick={()=>setHistoryOpen(true)}>历史对话</button>{snapshot && <button onClick={()=>openReport()}>关怀指引</button>}</div>}
       {connected && panel!=='claim' && <nav className="care-navigation" aria-label="关怀页面"><button aria-current={panel==='home'?'page':undefined} onClick={()=>setPanel('home')}><DemoIcon name="leaf"/>首页</button>
         <button aria-current={panel==='chat'?'page':undefined} onClick={()=>setPanel('chat')}><DemoIcon name="chat"/>问暖暖</button>
         <button aria-current={panel==='records'?'page':undefined} onClick={()=>setPanel('records')}><DemoIcon name="file"/>就医记录</button>
