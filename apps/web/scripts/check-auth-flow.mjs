@@ -86,7 +86,8 @@ try{
   assert.equal(document.activeElement===causeControl,true);
   await input('[data-claim-field="diagnosis"]','');
 
-  await click('确认资料用途授权');await click('确认并授权关怀');assert.match(document.body.textContent,/已授权/);
+  await click('确认资料用途授权');assert.ok(document.querySelector('.member-consent-confirm'));await click('确认并继续');assert.equal(consent.status,'active');assert.equal(window.location.hash,'#/claim','Consent confirmation stays in the intake flow');assert.equal(document.querySelector('.member-consent-confirm'),null);
+  await click('返回首页');await click('我的');assert.equal(document.querySelector('.demo-account').textContent.includes('资料用途授权'),false);assert.equal(document.querySelector('.demo-account').textContent.includes('家庭成员管理'),false);
   await click('首页');await click('提交理赔材料');await click('年龄未填写');await click('下一步，上传材料');assert.match(document.body.textContent,/请填写病历上的诊断/);await click('填入示例信息');await click('下一步，上传材料');
   await click('下一步，核对申请');assert.match(document.body.textContent,/请补充/);
   assert.equal(document.querySelectorAll('.claim-material').length,2,'Only record and invoice categories are required');
@@ -134,5 +135,5 @@ try{
   assert.equal(document.querySelector('.nuan-quick-actions'),null);
   await click('我的');await click('退出登录');assert.equal(sessionStorage.getItem('zhongan_chat_token'),null);
   assert.equal(sessionStorage.getItem('zhongan_account_name'),null);assert.ok(calls.some(c=>c.path==='/v1/auth/logout'));
-  console.log('PASS: password confirmation, optional consent, account authorization, three-step upload, interrupted upload retry across navigation, default recall off, real API wiring, server logout. Synthetic DOM fixtures only.');
+  console.log('PASS: password confirmation, optional consent, on-demand authorization and consolidated profile, three-step upload, interrupted upload retry across navigation, default recall off, real API wiring, server logout. Synthetic DOM fixtures only.');
 }finally{await act(async()=>root.unmount());await modules.close();dom.window.close();}

@@ -15,7 +15,7 @@ import {PageBoundary} from './PageBoundary';
 import AuthPage from './AuthPage';
 import ClaimIntake from './ClaimIntake';
 import AccountPage from './AccountPage';
-import {MemberEditor,MemberPicker} from './MemberControls';
+import {MemberEditor,MemberPicker,MemberConsentDialog} from './MemberControls';
 import PersonalRecords from './PersonalRecords';
 import type {MemberResponse} from './api';
 import {revokeSession} from './api';
@@ -67,6 +67,7 @@ export default function App() {
   const [viewSubject,setViewSubject]=useState('');
   const [recordCase,setRecordCase]=useState<string>();
   const [memberPicker,setMemberPicker]=useState<'chat'|'claim'>();
+  const [consentMember,setConsentMember]=useState<string>();
   const memberEpoch=useRef(0);
   const memberCacheKey=useRef('');
   const viewMember=members.find(member=>member.subject_id===viewSubject)||members[0];
@@ -488,7 +489,7 @@ export default function App() {
         {delivery.receipt_state==='read' ? <span>已查看</span> : <button onClick={()=>openReport()}>查看指引</button>}</div>}
       {error && <div role="alert" className="chat-error persistent-error">{error}<button aria-label="关闭提示" onClick={()=>setError('')}>×</button></div>}
       <PageBoundary resetKey={`${panel}:${snapshot?.conversation.conversation_id || ''}`}>
-      {connected && !needsProfile && claimSubject && <div className="claim-panel" hidden={panel!=='claim'}><ClaimIntake key={`${token}:${claimSubject}`} token={token} onDirty={setClaimDirty} subject={subjects.some(item=>item.subject_id===claimSubject)?claimSubject:''} visible={panel==='claim'} onExit={()=>setPanel('home')} onAuthorize={()=>{selectViewMember(claimSubject);setPanel('account');}} onOpen={async (id,report=false)=>{
+      {connected && !needsProfile && claimSubject && <div className="claim-panel" hidden={panel!=='claim'}><ClaimIntake key={`${token}:${claimSubject}`} token={token} onDirty={setClaimDirty} subject={subjects.some(item=>item.subject_id===claimSubject)?claimSubject:''} visible={panel==='claim'} onExit={()=>setPanel('home')} onAuthorize={()=>setConsentMember(claimSubject)} onOpen={async (id,report=false)=>{
           const generation=epoch.current;const items=await listConversations(token);
           if(epoch.current!==generation)return;setConversations(items);await openConversation(id,token,'chat',true);if(report)openReport();}}/></div>}
       {!connected ? token ? <main className="start-screen" role="status"><h1>{busy?'正在连接服务…':'服务暂时不可用'}</h1><p>登录状态已保留，恢复连接后可继续。</p><button className="care-primary" disabled={busy} onClick={()=>void connect(token)}>{busy?'正在连接…':'重新连接'}</button></main> : <AuthPage onAuthenticated={auth=>connect(auth,true)}/>
@@ -496,7 +497,7 @@ export default function App() {
       : panel==='claim' ? claimSubject ? null : <main className="original-chat-start member-choice-page"><section className="member-start-card"><h1>选择就医资料所属人员</h1><p>为本人或家人提交材料，暖暖会分别整理。</p><button className="member-primary" onClick={()=>requestBusiness('claim')}>选择人员</button></section></main>
       : panel==='account' && viewMember ? <AccountPage key={viewMember.subject_id} token={token} members={members} member={viewMember}
           onSelect={selectViewMember} onSaved={memberSaved} onRecords={caseId=>{setRecordCase(caseId);setPanel('records');}}
-          onNew={()=>requestBusiness('claim',viewMember.subject_id)} onChanged={refreshAccess} onLogout={signOut}/>
+          onNew={()=>requestBusiness('claim',viewMember.subject_id)} onLogout={signOut}/>
       : loadingConversation ? <main className="start-screen" role="status"><h1>正在打开就医记录…</h1></main>
       : panel==='records' && viewMember ? <PersonalRecords key={viewMember.subject_id} token={token} member={viewMember} selected={recordCase} onSelect={setRecordCase}
           currentCase={snapshot?.conversation.case_id} busy={working} onOpen={id=>void openConversation(id,token,'chat')}
@@ -507,7 +508,7 @@ export default function App() {
         <div className="connect-form member-start-card"><label>关怀对象<select value={subject} onChange={e=>setSubject(e.target.value)}><option value="">请选择人员</option>
           {members.map(member=><option key={member.subject_id} value={member.subject_id}>{member.name}{subjects.some(item=>item.subject_id===member.subject_id)?'':'（待授权）'}</option>)}</select></label>
           <button disabled={busy || !subjects.some(item=>item.subject_id===subject)} onClick={()=>void newChat()}>{busy?'正在打开…':'开始新的对话'}</button>
-          {subject&&!subjects.some(item=>item.subject_id===subject)&&<><small>请先确认该人员的关怀资料授权。</small><button onClick={()=>{selectViewMember(subject);setPanel('account');}}>前往授权</button></>}</div></main>
+          {subject&&!subjects.some(item=>item.subject_id===subject)&&<><small>请先确认该人员的关怀资料授权。</small><button onClick={()=>setConsentMember(subject)}>确认资料用途</button></>}</div></main>
       : panel==='report' ? <main className="chat-report"><h1>本次关怀指引</h1>
           {publishedCare(snapshot.report) ? <><p className="care-report-version">第 {snapshot.report.report_version} 版 · 已审核发布</p>
             <CareReport report={snapshot.report} initialSection={reportFocus} onEvidence={id=>void showEvidence(id)}/>
@@ -559,6 +560,7 @@ export default function App() {
         <button aria-current={['account','records'].includes(panel)?'page':undefined} onClick={()=>setPanel('account')}><DemoIcon name="user"/>我的</button>
         </nav>}
     </section>
+    {connected && consentMember && members.find(m=>m.subject_id===consentMember) && <MemberConsentDialog key={consentMember} token={token} member={members.find(m=>m.subject_id===consentMember)!} onClose={()=>setConsentMember(undefined)} onChanged={refreshAccess}/>}
     {connected && !needsProfile && memberPicker && <MemberPicker members={members} title={memberPicker==='claim'?'选择就医资料所属人员':'选择对话所属人员'} onSelect={chooseBusinessMember} onClose={()=>setMemberPicker(undefined)}/>}
     {evidence && <EvidencePanel evidence={evidence} onClose={()=>setEvidence(null)}/>}
   </div>;
