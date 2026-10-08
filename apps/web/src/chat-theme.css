@@ -89,8 +89,20 @@
 .chat-original .composer .send-button:hover:not(:disabled){background:#006e53}
 .chat-original .composer .send-button:disabled{background:#def9ed;color:#6ba890;opacity:1;box-shadow:none}
 .chat-original .chat-upload-menu>summary{width:40px;height:40px;background:#e5fbef;color:#008565;border:0;border-radius:13px;font-size:25px}
-.chat-original .chat-upload-options{background:#fff;color:var(--chat-ink);border-color:var(--chat-line);box-shadow:0 8px 28px #18362e14}
-.chat-original .composer .chat-upload-options button{background:#f8fbf9;color:var(--chat-ink);border-color:var(--chat-line)}
+.chat-original .chat-upload-options{width:min(304px,calc(100vw - 44px));padding:14px;background:#fff;color:var(--chat-ink);border:1px solid #d8eee3;border-radius:22px;box-shadow:0 12px 36px #176a4920}
+.chat-original .composer .chat-upload-options button{display:flex;flex-direction:row;align-items:center;justify-content:flex-start;gap:11px;min-height:78px;width:100%;height:auto;padding:13px 11px;margin:9px 0;border:1px solid #d5f1e3;border-radius:15px;background:linear-gradient(120deg,#f3fff8,#e9fbf2);color:var(--chat-ink);box-shadow:none}
+.chat-original .composer .chat-upload-options .upload-source-document{border-color:#d7edf5;background:linear-gradient(120deg,#f5fcff,#edf9ff)}
+.chat-original .chat-upload-options .upload-panel-heading{padding:1px 3px 5px}
+.chat-original .chat-upload-options .upload-panel-heading p{font-size:14px;font-weight:650;margin:0 0 3px;color:#233c30}
+.chat-original .chat-upload-options .upload-panel-heading small{padding:0;font-size:11px;color:#6b887a}
+.chat-original .chat-upload-options .upload-source-icon{display:grid;place-items:center;flex:0 0 44px;width:44px;height:46px;border:1px solid #fff;border-radius:13px;background:linear-gradient(135deg,#b8f4d5,#dbfff0);color:#009e73;box-shadow:0 3px 8px #00a67b08}
+.chat-original .chat-upload-options .upload-source-document .upload-source-icon{background:linear-gradient(135deg,#cceefa,#e5f7ff);color:#319cc0}
+.chat-original .chat-upload-options .upload-source-copy{flex:1;min-width:0}
+.chat-original .chat-upload-options .upload-source-copy strong{display:block;font-size:14px;font-weight:600;line-height:1.6;color:#233c30}
+.chat-original .chat-upload-options .upload-source-copy small{display:block;padding:0;margin-top:3px;font-size:11px;line-height:1.6;color:#6b887a}
+.chat-original .chat-upload-options button>svg{width:14px;height:14px;flex:none;color:#80ab97}
+.chat-original .chat-upload-options .upload-source-document>svg{color:#89b0c0}
+.chat-original .chat-upload-options .upload-panel-note{display:flex;align-items:center;justify-content:center;gap:5px;padding:5px 0 0;font-size:10px;color:#7a9386}
 .chat-original .chat-upload-options :is(button span,small){color:var(--chat-muted)}
 .chat-original .attachment{background:#f7faf8;color:#53685a;border-color:var(--chat-line)}
 .chat-original .original-chat-start>.nuan-message{margin:18px 0 10px}
