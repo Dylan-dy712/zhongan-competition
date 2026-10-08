@@ -427,7 +427,7 @@ def run_agent(history, question, attachments, tools, model=None, on_event=None, 
             review_calls+=1
             review_seconds+=time.monotonic()-review_started
             if not verdict.accepted:
-                if round_index>=1:
+                if round_index>=1 or verdict.unverified:
                     partial=verified_partial(reply.text,verdict.issues,packed,aliases,reply.evidence_refs)
                     if not partial:raise ValueError('ANALYSIS_FIDELITY_REJECTED')
                     if on_event:on_event(events)

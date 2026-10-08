@@ -16,6 +16,7 @@ class ReviewIssue(BaseModel):
 class AnalysisReview(BaseModel):
     model_config=ConfigDict(extra='forbid')
     accepted:bool=Field(strict=True)
+    unverified:bool=Field(default=False,strict=True)
     issues:list[ReviewIssue]=Field(max_length=3)
 
     @model_validator(mode='after')
@@ -48,31 +49,29 @@ def review_analysis(config,packed,text):
                 'text':'\n'.join(span[1] for span in page['spans'])} for page in packed]
     messages=[{'role':'system','content':INSTRUCTION},
               {'role':'user','content':json.dumps({'original_material_pages':originals,'draft':text},ensure_ascii=False,separators=(',',':'))}]
-    if workload_options(config.base_url,config.model_id,'fidelity'):
-        response=requests.post('https://api.deepseek.com/beta/chat/completions',
-            headers={'Authorization':f'Bearer {config.api_key}','Content-Type':'application/json'},
-            json={'model':config.model_id,'messages':messages,'temperature':0,'max_tokens':3000,
-                  'thinking':{'type':'disabled'},'tools':[review_tool()],
-                  'tool_choice':{'type':'function','function':{'name':'deliver_review'}}},timeout=(10,90))
-        response.raise_for_status();payload=response.json()
-        calls=payload['choices'][0]['message'].get('tool_calls') or []
-        if len(calls)!=1 or calls[0]['function']['name']!='deliver_review':raise ValueError('ANALYSIS_REVIEW_FORMAT')
-        data=json.loads(calls[0]['function']['arguments'])
-        if set(data)!={'accepted','issue_1','issue_2','issue_3'}:raise ValueError('ANALYSIS_REVIEW_FORMAT')
-        content=json.dumps({'accepted':data['accepted'],
-            'issues':[data[f'issue_{i}'] for i in range(1,4) if data[f'issue_{i}']['category']!='none']})
-    else:
-        payload,content=config._call(messages,timeout=(10,90),workload='fidelity')
-    verdict=AnalysisReview.model_validate_json(content)
-    compact=lambda value:''.join(value.replace('**','').split())
+    compact=lambda value:re.sub(r'[\s，,；;：:（）()“”\"。*]','',value)
     draft=compact(text)
     material=[compact(page['text']) for page in originals]
-    for issue in verdict.issues:
-        if (not compact(issue.draft_quote) or compact(issue.draft_quote) not in draft
-                or not compact(issue.source_quote)
-                or not any(compact(issue.source_quote) in source for source in material)):
-            raise ValueError('UNGROUNDED_ANALYSIS_REVIEW')
-    usages=[payload.get('usage',{})]
+    usages=[]
+    for attempt in range(2):
+        verdict,payload=source_verdict(config,messages)
+        usages.append(payload.get('usage',{}))
+        invalid=[issue for issue in verdict.issues if (
+            not compact(issue.draft_quote) or compact(issue.draft_quote) not in draft
+            or not compact(issue.source_quote)
+            or not any(compact(issue.source_quote) in source for source in material))]
+        if not invalid:break
+        if attempt:
+            if any(not compact(issue.draft_quote) or compact(issue.draft_quote) not in draft for issue in invalid):
+                raise ValueError('UNGROUNDED_ANALYSIS_REVIEW')
+            # No factual correction may rely on a quote we cannot verify.
+            # Mark the corresponding draft points as unverified instead, so they
+            # can be omitted and the remainder reviewed independently.
+            pending=[ReviewIssue(category='scope',explanation='该重点的原文依据暂未逐字核对，只暂不交付该点，不据此改写事实。',
+                                 source_quote='',draft_quote=issue.draft_quote) for issue in verdict.issues]
+            return AnalysisReview(accepted=False,unverified=True,issues=pending),{'request_usages':usages}
+        messages.extend([{'role':'assistant','content':verdict.model_dump_json()},
+            {'role':'user','content':'复核引句未能在原文或草稿中逐字找到，不能用于改写或判定。请重新比对并逐字复制引句，保留OCR中的O/0、标点和数值；不要把多个不同位置拼成一句，不自行规范药名、数字或原文。只提交能用实际引句证明的具体问题；没有事实问题则accepted为true。'}])
     if verdict.issues:
         # A focused reasoning pass judges the cited comparison, rather than
         # rereading hundreds of OCR fragments or trusting speculative criticism.
@@ -88,6 +87,25 @@ def review_analysis(config,packed,text):
         verdict=AnalysisReview(accepted=not confirmed,issues=confirmed)
         usages.append(judged.get('usage',{}))
     return verdict,{'request_usages':usages}
+
+
+def source_verdict(config,messages):
+    if workload_options(config.base_url,config.model_id,'fidelity'):
+        response=requests.post('https://api.deepseek.com/beta/chat/completions',
+            headers={'Authorization':f'Bearer {config.api_key}','Content-Type':'application/json'},
+            json={'model':config.model_id,'messages':messages,'temperature':0,'max_tokens':3000,
+                  'thinking':{'type':'disabled'},'tools':[review_tool()],
+                  'tool_choice':{'type':'function','function':{'name':'deliver_review'}}},timeout=(10,90))
+        response.raise_for_status();payload=response.json()
+        calls=payload['choices'][0]['message'].get('tool_calls') or []
+        if len(calls)!=1 or calls[0]['function']['name']!='deliver_review':raise ValueError('ANALYSIS_REVIEW_FORMAT')
+        data=json.loads(calls[0]['function']['arguments'])
+        if set(data)!={'accepted','issue_1','issue_2','issue_3'}:raise ValueError('ANALYSIS_REVIEW_FORMAT')
+        content=json.dumps({'accepted':data['accepted'],
+            'issues':[data[f'issue_{i}'] for i in range(1,4) if data[f'issue_{i}']['category']!='none']})
+    else:
+        payload,content=config._call(messages,timeout=(10,90),workload='fidelity')
+    return AnalysisReview.model_validate_json(content),payload
 
 
 def review_tool():

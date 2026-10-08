@@ -24,6 +24,15 @@ class ReviewTests(unittest.TestCase):
     def test_ungrounded_review_cannot_modify_or_approve_draft(self):
         config=MagicMock();config._call.return_value=({},json.dumps({'accepted':False,'issues':[{
             'category':'qualifier','explanation':'不符','source_quote':'不存在的来源','draft_quote':'当前肺炎'}]}))
+        verdict,_=review_analysis(config,[{'document':'D1','page':0,'spans':[['S1','既往肺炎']]}],'当前肺炎')
+        self.assertFalse(verdict.accepted)
+        self.assertTrue(verdict.unverified)
+        self.assertEqual(verdict.issues[0].source_quote,'')
+        self.assertNotIn('不存在的来源',verdict.issues[0].explanation)
+
+    def test_unlocatable_draft_cannot_be_used_to_remove_a_point(self):
+        config=MagicMock();config._call.return_value=({},json.dumps({'accepted':False,'issues':[{
+            'category':'scope','explanation':'不符','source_quote':'既往肺炎','draft_quote':'不存在的草稿句'}]}))
         with self.assertRaisesRegex(ValueError,'UNGROUNDED_ANALYSIS_REVIEW'):
             review_analysis(config,[{'document':'D1','page':0,'spans':[['S1','既往肺炎']]}],'当前肺炎')
 

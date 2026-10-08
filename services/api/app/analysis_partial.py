@@ -2,7 +2,7 @@
 import re
 
 POINT=r'(?m)(?=^\s*\d{1,2}(?:[.)]\s+|[、）]\s*))'
-def compact(text):return ''.join(text.replace('**','').split())
+def compact(text):return re.sub(r'[\s，,；;：:（）()“”\"。*]','',text)
 
 def verified_partial(text,issues,packed,aliases,refs):
     parts=re.split(POINT,text)
