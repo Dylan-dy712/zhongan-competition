@@ -15,7 +15,7 @@ import {PageBoundary} from './PageBoundary';
 import AuthPage from './AuthPage';
 import ClaimIntake from './ClaimIntake';
 import AccountPage from './AccountPage';
-import {MemberEditor,MemberPicker} from './MemberControls';
+import {MemberEditor,MemberPicker,MemberAvatar} from './MemberControls';
 import PersonalRecords from './PersonalRecords';
 import type {MemberResponse} from './api';
 import {revokeSession} from './api';
@@ -493,7 +493,7 @@ export default function App() {
           if(epoch.current!==generation)return;setConversations(items);await openConversation(id,token,'chat',true);if(report)openReport();}}/></div>}
       {!connected ? token ? <main className="start-screen" role="status"><h1>{busy?'正在连接服务…':'服务暂时不可用'}</h1><p>登录状态已保留，恢复连接后可继续。</p><button className="care-primary" disabled={busy} onClick={()=>void connect(token)}>{busy?'正在连接…':'重新连接'}</button></main> : <AuthPage onAuthenticated={auth=>connect(auth,true)}/>
       : needsProfile && selfMember ? <main className="member-onboarding"><MemberEditor token={token} member={selfMember} onboarding onSaved={memberSaved}/></main>
-      : panel==='claim' ? claimSubject ? null : <main className="original-chat-start"><h1>选择就医资料所属人员</h1><button className="member-primary" onClick={()=>requestBusiness('claim')}>选择人员</button></main>
+      : panel==='claim' ? claimSubject ? null : <main className="original-chat-start member-choice-page"><section className="member-start-card"><MemberAvatar/><span className="member-kicker">开始整理本次就医资料</span><h1>选择就医资料所属人员</h1><p>为本人或家人提交材料，暖暖会分别整理。</p><button className="member-primary" onClick={()=>requestBusiness('claim')}>选择人员</button></section></main>
       : panel==='account' && viewMember ? <AccountPage key={viewMember.subject_id} token={token} members={members} member={viewMember}
           onSelect={selectViewMember} onSaved={memberSaved} onRecords={caseId=>{setRecordCase(caseId);setPanel('records');}}
           onNew={()=>requestBusiness('claim',viewMember.subject_id)} onChanged={refreshAccess} onLogout={signOut}/>
@@ -504,7 +504,7 @@ export default function App() {
       : panel==='home' ? <DemoHome snapshot={snapshot} onChat={()=>snapshot?setPanel('chat'):requestBusiness('chat')} onReport={openReport} onClaim={()=>requestBusiness('claim')}/>
       : !snapshot ? <main className="original-chat-start"><OriginalChatWelcome/><div className="nuan-message"><span className="nuan-avatar" aria-hidden="true">✦</span><div className="nuan-message-body"><p>你好，我是暖暖。你现在有什么想说的，我愿意听。想聊聊身体上的不舒服、心里的牵挂，或一起看看材料，都可以按你的节奏来。</p></div></div>
         <button className="claim-entry-link" onClick={()=>requestBusiness('claim')}>整理理赔资料，开启专属关怀</button>
-        <div className="connect-form"><label>关怀对象<select value={subject} onChange={e=>setSubject(e.target.value)}><option value="">请选择人员</option>
+        <div className="connect-form member-start-card"><span className="member-kicker">开启一段新的关怀</span><label>关怀对象<select value={subject} onChange={e=>setSubject(e.target.value)}><option value="">请选择人员</option>
           {members.map(member=><option key={member.subject_id} value={member.subject_id}>{member.name}{subjects.some(item=>item.subject_id===member.subject_id)?'':'（待授权）'}</option>)}</select></label>
           <button disabled={busy || !subjects.some(item=>item.subject_id===subject)} onClick={()=>void newChat()}>{busy?'正在打开…':'开始新的对话'}</button>
           {subject&&!subjects.some(item=>item.subject_id===subject)&&<><small>请先确认该人员的关怀资料授权。</small><button onClick={()=>{selectViewMember(subject);setPanel('account');}}>前往授权</button></>}</div></main>
