@@ -143,7 +143,8 @@
 @media(max-width:360px){.claim-form-shell .claim-main{padding:8px 14px 24px}.claim-form-shell .claim-intro-illustrated h1{font-size:21px}.claim-intro-mascot{width:73px;right:-6px}.claim-form-shell .claim-steps{padding-left:14px;padding-right:14px}.claim-form-shell .claim-form-card{padding-left:13px;padding-right:13px}.claim-form-shell .claim-fields-pair{gap:8px}.claim-form-shell .claim-fields-pair input[type=date]{font-size:11px;padding-left:5px;padding-right:3px}.claim-form-shell .claim-footer{padding-left:14px;padding-right:14px}.claim-form-shell .claim-material{padding:14px}.claim-form-shell .claim-material-heading h3{font-size:13px}}
 .claim-form-shell .claim-review-overview strong small{color:#ccefe1}.claim-form-shell .claim-material-heading .claim-required{color:#8f7138}
 
-.claim-panel{overflow:hidden}.claim-react{height:100%;min-height:0;display:flex;flex-direction:column}.claim-react>.claim-shell{flex:1;min-height:0}.claim-react .claim-footer{flex-wrap:wrap}.claim-react .claim-footer .claim-consent{flex-basis:100%}.claim-react .claim-error{margin:0;padding:10px 20px}.claim-react button:disabled{opacity:.5;cursor:default}
+.claim-panel{display:flex;flex:1;min-height:0;overflow:hidden}.claim-panel[hidden]{display:none}.claim-react{flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden}.claim-react>.claim-shell{flex:1;min-height:0}.claim-react .claim-footer{flex-wrap:wrap}.claim-react .claim-footer .claim-consent{flex-basis:100%}.claim-react .claim-error{margin:0;padding:10px 20px}.claim-react button:disabled{opacity:.5;cursor:default}
+.claim-react .claim-header{justify-content:flex-start;gap:12px}.claim-back{display:inline-flex;align-items:center;gap:3px;flex:none;min-height:44px;padding:0 4px;border:0;border-radius:8px;background:transparent;color:#087f63;font-size:12px!important}.claim-back:active{background:#e0f3ea}
 
 .claim-react>footer.claim-shell{height:auto;flex:none;flex-direction:row}.claim-react>.claim-shell>.claim-shell{min-height:0;flex:1}
 
@@ -158,11 +159,6 @@
     max-width: 960px;
     margin-inline: auto;
     border-inline: 1px solid #dce8e1;
-  }
-
-  .claim-react > .claim-text {
-    align-self: flex-start;
-    margin-left: 24px;
   }
 
   .claim-react .claim-header {
