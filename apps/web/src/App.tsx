@@ -13,6 +13,7 @@ import ClaimIntake from './ClaimIntake';
 import AccountPage from './AccountPage';
 import {revokeSession} from './api';
 import OriginalChatGuide,{OriginalChatWelcome} from './OriginalChatGuide';
+import {prepareChatFiles} from './chatFiles';
 import './chat.css';
 import './care.css';
 import './chat-original.css';
@@ -76,6 +77,8 @@ export default function App() {
   const olderExhausted = useRef(false);
   const resumed = useRef(new Set<string>());
   const uploadInput = useRef<HTMLInputElement>(null);
+  const photoInput = useRef<HTMLInputElement>(null);
+  const uploadMenu = useRef<HTMLDetailsElement>(null);
   const bottom = useRef<HTMLDivElement>(null);
   const pendingSend = useRef<{id:string; text:string; docs:string[]}|null>(null);
   const connecting=useRef(false);
@@ -289,14 +292,12 @@ export default function App() {
     if(!files || !active.current || busyRef.current || busy || uploading)return;
     const id=active.current,generation=epoch.current;setUploading(true);setError('');
     try {
-      if(files.length+attachments.length>20)throw new Error('一次最多附加20份材料。');
-      for(const file of Array.from(files)) {
-        if(file.size>10*1024*1024)throw new Error(`${file.name} 超过10MB，请拆分后上传。`);
+      for(const file of prepareChatFiles(files,attachments.length)) {
         const doc=await uploadChatDocument(token,id,file);
         if(epoch.current===generation)setAttachments(v=>v.some(x=>x.document_id===doc.document_id)?v:[...v,{document_id:doc.document_id,name:file.name}]);
       }
     } catch(e){if(!invalidateAccess(e,id,generation) && epoch.current===generation)setError(errorText(e));}
-    finally {if(epoch.current===generation){setUploading(false);if(uploadInput.current)uploadInput.current.value='';}}
+    finally {if(epoch.current===generation){setUploading(false);if(uploadInput.current)uploadInput.current.value='';if(photoInput.current)photoInput.current.value='';}}
   };
 
   const showEvidence = async(id:string) => {
@@ -342,6 +343,10 @@ export default function App() {
       onKeyDown={e=>{if(e.key!=='Tab')return;const buttons=Array.from(e.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)'));const first=buttons[0],last=buttons.at(-1);if(e.shiftKey&&document.activeElement===first){e.preventDefault();last?.focus();}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first?.focus();}}}
       onCancel={e=>{e.preventDefault();setHistoryOpen(false);}} onClick={e=>{if(e.target===e.currentTarget)setHistoryOpen(false);}}>{historyPanel}</dialog> : historyPanel)}
     <section className={`chat-workspace ${panel==='chat'?'chat-original':''}`}>
+      {connected && panel==='chat' && (mobileHistory || snapshot) && <div className="chat-page-actions">
+        {mobileHistory && <button ref={historyTrigger} className="history-trigger" aria-haspopup="dialog" aria-controls="history-dialog" aria-expanded={historyOpen} onClick={()=>setHistoryOpen(true)}><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><path d="M4 8a8 8 0 1 1-1 7M4 3v5h5"/><path d="M12 7v5l3 2"/></svg>历史对话</button>}
+        {snapshot && <button className="chat-guide-entry" onClick={()=>openReport()}>关怀指引</button>}
+      </div>}
       {delivery && snapshot?.report.report_id===delivery.report_id && <div className="analysis-status care-notice" role="status">{delivery.message}
         {delivery.receipt_state==='read' ? <span>已查看</span> : <button onClick={()=>openReport()}>查看指引</button>}</div>}
       {error && <div role="alert" className="chat-error persistent-error">{error}<button aria-label="关闭提示" onClick={()=>setError('')}>×</button></div>}
@@ -395,14 +400,22 @@ export default function App() {
         <footer className="chat-footer">{snapshot.analysis.run_id && ['queued','running'].includes(snapshot.analysis.status) && <div className="analysis-status" role="status">{statusLabels[snapshot.analysis.status] || snapshot.analysis.status}
           {['completed','waiting_review'].includes(snapshot.analysis.status) && <button disabled={working} onClick={()=>{setInput('请查看最新分析，继续帮我解释。');}}>继续了解</button>}</div>}
           <div className="upload-list">{attachments.map(a=><span className="attachment" key={a.document_id}>▤ {a.name} · 已上传</span>)}</div>
-          <div className="nuan-quick-actions">{[['summary','看病经过'],['cost','费用解读'],['action','下一步安排']].map(([id,label])=><button key={id} onClick={()=>{const target=document.getElementById('chat-topic-'+id);if(target?.tagName==='DETAILS')target.setAttribute('open','');target?.scrollIntoView({behavior:'smooth',block:'start'});}}>{label}</button>)}</div><form className="composer" onSubmit={submit}><input ref={uploadInput} hidden type="file" multiple accept=".pdf,.png,.jpg,.jpeg,.txt" onChange={e=>void upload(e.target.files)}/>
-            <button type="button" className="attach-button" title="上传病历或发票" aria-label="上传病历或发票" disabled={working} onClick={()=>uploadInput.current?.click()}>＋</button>
+          <div className="nuan-quick-actions">{[['summary','看病经过'],['cost','费用解读'],['action','下一步安排']].map(([id,label])=><button key={id} onClick={()=>{const target=document.getElementById('chat-topic-'+id);if(target?.tagName==='DETAILS')target.setAttribute('open','');target?.scrollIntoView({behavior:'smooth',block:'start'});}}>{label}</button>)}</div><form className="composer" onSubmit={submit}>
+            <input ref={uploadInput} aria-label="选择文档文件" hidden type="file" multiple onChange={e=>void upload(e.target.files)}/>
+            <input ref={photoInput} aria-label="选择照片或图片" hidden type="file" multiple accept="image/jpeg,image/png" onChange={e=>void upload(e.target.files)}/>
+            <details ref={uploadMenu} className="chat-upload-menu" onBlur={e=>{if(!e.currentTarget.contains(e.relatedTarget))e.currentTarget.open=false;}} onKeyDown={e=>{if(e.key==='Escape'){e.preventDefault();e.currentTarget.open=false;e.currentTarget.querySelector('summary')?.focus();}}}>
+              <summary title="上传病历或发票" aria-label="上传病历或发票" aria-disabled={working} onClick={e=>{if(working)e.preventDefault();}}>＋</summary>
+              <div className="chat-upload-options" aria-label="选择上传方式"><p>上传就医材料</p>
+                <button type="button" disabled={working} onClick={()=>{if(uploadMenu.current)uploadMenu.current.open=false;photoInput.current?.click();}}>照片或图片<span>JPG、PNG</span></button>
+                <button type="button" disabled={working} onClick={()=>{if(uploadMenu.current)uploadMenu.current.open=false;uploadInput.current?.click();}}>PDF / TXT 文件<span>从手机文件中选择</span></button>
+                <small>支持多选，每份文件不超过 10MB</small>
+              </div>
+            </details>
             <textarea aria-label="给暖暖的消息" value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.nativeEvent.isComposing){e.preventDefault();void send();}}} rows={1} placeholder="哪一句没看懂？接着问暖暖"/>
             <button className="send-button" disabled={working || (!input.trim()&&!attachments.length)}>{uploading?'…':busy?'…':'↑'}</button>
           </form>
         </footer></>}
       </PageBoundary>
-      {connected && panel==='chat' && <div className="chat-page-tools"><button ref={historyTrigger} className="history-trigger" aria-haspopup="dialog" aria-controls="history-dialog" aria-expanded={historyOpen} onClick={()=>setHistoryOpen(true)}>历史对话</button>{snapshot && <button onClick={()=>openReport()}>关怀指引</button>}</div>}
       {connected && panel!=='claim' && <nav className="care-navigation" aria-label="关怀页面"><button aria-current={panel==='home'?'page':undefined} onClick={()=>setPanel('home')}><DemoIcon name="leaf"/>首页</button>
         <button aria-current={panel==='chat'?'page':undefined} onClick={()=>setPanel('chat')}><DemoIcon name="chat"/>问暖暖</button>
         <button aria-current={panel==='records'?'page':undefined} onClick={()=>setPanel('records')}><DemoIcon name="file"/>就医记录</button>
