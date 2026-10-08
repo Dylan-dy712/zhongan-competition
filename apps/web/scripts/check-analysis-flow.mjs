@@ -50,7 +50,9 @@ try{
  assert.deepEqual(submissions[0].document_ids,['doc-1','doc-2']);
  assert.equal(document.querySelector('.chat-workspace > dialog.analysis-dialog progress').value,0);
  for(const [next,percent] of [['extract',20],['insights',40],['guidance',60],['validate',80]]){
-  phase=next;await flush();assert.equal(document.querySelector('.chat-workspace > dialog.analysis-dialog progress').value,percent);
+  phase=next;await flush();const displayed=document.querySelector('.chat-workspace > dialog.analysis-dialog progress').value;
+  assert.ok(displayed>=percent+1 && displayed<percent+20,'Estimated progress stays within the actual stage');
+  assert.match(document.querySelector('.chat-workspace > dialog.analysis-dialog').textContent,/预估进度/);
  }
  await click('收起进度，稍后查看');assert.equal(document.querySelector('.chat-workspace > dialog.analysis-dialog').open,false);
  phase='ready';await flush();assert.match(document.querySelector('.analysis-card').textContent,/报告已生成/);
