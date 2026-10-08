@@ -88,6 +88,18 @@ try{
   assert.equal(creations.length,2);assert.equal(creations[0].body.conversation_id,creations[1].body.conversation_id);
   assert.equal(creations[0].body.recall_enabled,false);
   await click('查看专属关怀');assert.equal(window.location.hash,'#/chat');
+  assert.ok(document.querySelector('#chat-topic-action'),'Claim completion must show care cards');
+  assert.ok(document.querySelector('#chat-topic-summary'));assert.ok(document.querySelector('#chat-topic-cost'));
+  assert.ok(document.querySelector('.nuan-quick-actions'),'Claim cards must have working shortcuts');
+  await click('首页');await click('问暖暖');
+  assert.equal(document.querySelector('#chat-topic-action'),null,'Ordinary chat visits must not retain claim-entry cards');
+  assert.equal(document.querySelector('.nuan-quick-actions'),null,'No shortcuts to absent cards');
+  await click('新的关怀对话');await click('开始新的对话');
+  assert.ok(document.querySelector('.composer'),'Ordinary new chat must still support messages');
+  assert.equal(document.querySelector('.nuan-conversation-caption'),null);
+  assert.equal(document.querySelector('.nuan-topic-grid'),null,'Ordinary new chat must not show claim cards');
+  assert.equal(document.querySelector('.nuan-priority'),null);
+  assert.equal(document.querySelector('.nuan-quick-actions'),null);
   await click('我的');await click('退出登录');assert.equal(sessionStorage.getItem('zhongan_chat_token'),null);
   assert.equal(sessionStorage.getItem('zhongan_account_name'),null);assert.ok(calls.some(c=>c.path==='/v1/auth/logout'));
   console.log('PASS: password confirmation, optional consent, account authorization, three-step upload, interrupted upload retry across navigation, default recall off, real API wiring, server logout. Synthetic DOM fixtures only.');

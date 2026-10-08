@@ -48,6 +48,8 @@ export default function App() {
   const [subject,setSubject] = useState('');
   const [caseInput,setCaseInput] = useState('');
   const [snapshot,setSnapshot] = useState<ChatSnapshot|null>(null);
+  // Care cards belong to the claim-completion entry, not to ordinary chat visits.
+  const [claimGuideConversation,setClaimGuideConversation] = useState('');
   const [older,setOlder] = useState<ChatTurn[]>([]);
   const [hasOlder,setHasOlder] = useState(false);
   const [input,setInput] = useState('');
@@ -114,9 +116,10 @@ export default function App() {
     return state;
   },[invalidateAccess]);
 
-  const openConversation = useCallback(async (id:string, auth=token, destination:CarePanel='home') => {
+  const openConversation = useCallback(async (id:string, auth=token, destination:CarePanel='home', fromClaim=false) => {
     const generation = ++epoch.current;
     active.current = id;
+    setClaimGuideConversation(fromClaim ? id : '');
     olderExhausted.current = false;
     setSnapshot(null); setOlder([]); setAttachments([]); setInput(''); setEvidence(null); setError('');
     busyRef.current=false;setBusy(false);setUploading(false);
@@ -152,7 +155,7 @@ export default function App() {
 
   useEffect(()=>{if(!initialized.current){initialized.current=true;if(token) void connect(token);}},[connect,token]);
   useEffect(()=>{if(panel==='chat' && snapshot?.turns.length)bottom.current?.scrollIntoView({behavior:'smooth'});},[snapshot?.turns.length,busy,panel]);
-  useEffect(()=>{++evidenceRequest.current;setHistoryOpen(false);setEvidence(null);},[panel]);
+  useEffect(()=>{++evidenceRequest.current;setHistoryOpen(false);setEvidence(null);if(panel!=='chat')setClaimGuideConversation('');},[panel]);
   useEffect(()=>{
     const media=window.matchMedia?.('(max-width:760px)');
     if(!media)return;
@@ -236,6 +239,7 @@ export default function App() {
     setDelivery(null);setFeedbackNotice('');setHasOlder(false);setReportFocus(undefined);setCaseInput('');
     setSnapshot(null);setOlder([]);setAttachments([]);setInput('');setEvidence(null);setError('');
     setHistoryOpen(false);pendingSend.current=null;
+    setClaimGuideConversation('');
     setPanel('chat');
   };
 
@@ -327,6 +331,7 @@ export default function App() {
     catch(e){setError(errorText(e));}
   };
   const turns=[...older,...(snapshot?.turns || [])].filter((t,i,all)=>all.findIndex(x=>x.turn_id===t.turn_id)===i);
+  const showClaimGuide=!!snapshot && claimGuideConversation===snapshot.conversation.conversation_id;
   const working=busy || uploading || loadingConversation || !!snapshot?.turns.some(t=>t.status==='running');
   const submit=(e:FormEvent)=>{e.preventDefault();void send();};
   const openReport=(section?:ReportSection['section_type'])=>{setReportFocus(section);setPanel('report');};
@@ -355,7 +360,7 @@ export default function App() {
       <PageBoundary resetKey={`${panel}:${snapshot?.conversation.conversation_id || ''}`}>
       {connected && <div className="claim-panel" hidden={panel!=='claim'}><ClaimIntake key={token} token={token} subject={subject} onExit={()=>setPanel('home')} onAuthorize={()=>setPanel('account')} onOpen={async id=>{
           const generation=epoch.current;const items=await listConversations(token);
-          if(epoch.current!==generation)return;setConversations(items);await openConversation(id,token,'chat');}}/></div>}
+          if(epoch.current!==generation)return;setConversations(items);await openConversation(id,token,'chat',true);}}/></div>}
       {!connected ? token ? <main className="start-screen" role="status"><h1>{busy?'正在连接服务…':'服务暂时不可用'}</h1><p>登录状态已保留，恢复连接后可继续。</p><button className="care-primary" disabled={busy} onClick={()=>void connect(token)}>{busy?'正在连接…':'重新连接'}</button></main> : <AuthPage onAuthenticated={auth=>connect(auth,true)}/>
       : panel==='claim' ? null
       : panel==='account' ? <AccountPage token={token} onLogout={signOut} onChanged={async()=>{
@@ -386,7 +391,7 @@ export default function App() {
               {feedbackNotice && <p role="status">{feedbackNotice}</p>}</div>}</>
           : <div className="empty-report"><p>{snapshot.report.status==='not_generated'?'还没有报告。你可以在对话中上传材料，让暖暖帮你分析。':'报告尚未发布，部分内容可能需要复核。你仍可以在对话中查阅材料、核对事实。'}</p>
             <button onClick={()=>setPanel('chat')}>回到对话</button></div>}</main>
-      : <><main className="chat-scroll inline-report-thread"><OriginalChatGuide snapshot={snapshot} onEvidence={id=>void showEvidence(id)}/>
+      : <><main className="chat-scroll inline-report-thread">{showClaimGuide ? <OriginalChatGuide snapshot={snapshot} onEvidence={id=>void showEvidence(id)}/> : <OriginalChatWelcome/>}
         {hasOlder && turns.length>0 && <button className="load-history" onClick={()=>void loadOlder()}>查看更早的聊天</button>}
         <div className="nuan-chat-heading"><span><DemoIcon name="chat"/>和暖暖聊聊</span><small>有疑问，接着问</small></div>
         <div className="messages">{turns.length===0 && <div className="message-row assistant"><div className="avatar">✦</div><div className="message-bubble"><div className="nuan-reply-label"><DemoIcon name="leaf"/>暖暖</div><p>你好，我是暖暖。你可以告诉我现在最关心什么，也可以直接上传病历或发票，我会结合材料帮你梳理。</p></div></div>}
@@ -403,7 +408,7 @@ export default function App() {
         <footer className="chat-footer">{snapshot.analysis.run_id && ['queued','running'].includes(snapshot.analysis.status) && <div className="analysis-status" role="status">{statusLabels[snapshot.analysis.status] || snapshot.analysis.status}
           {['completed','waiting_review'].includes(snapshot.analysis.status) && <button disabled={working} onClick={()=>{setInput('请查看最新分析，继续帮我解释。');}}>继续了解</button>}</div>}
           <div className="upload-list">{attachments.map(a=><span className="attachment" key={a.document_id}>▤ {a.name} · 已上传</span>)}</div>
-          <div className="nuan-quick-actions">{[['summary','看病经过'],['cost','费用解读'],['action','下一步安排']].map(([id,label])=><button key={id} onClick={()=>{const target=document.getElementById('chat-topic-'+id);if(target?.tagName==='DETAILS')target.setAttribute('open','');target?.scrollIntoView({behavior:'smooth',block:'start'});}}><DemoIcon name={id==='summary'?'file':id==='cost'?'chat':'leaf'}/>{label}</button>)}</div><form className="composer" onSubmit={submit}>
+          {showClaimGuide && <div className="nuan-quick-actions">{[['summary','看病经过'],['cost','费用解读'],['action','下一步安排']].map(([id,label])=><button key={id} onClick={()=>{const target=document.getElementById('chat-topic-'+id);if(target?.tagName==='DETAILS')target.setAttribute('open','');target?.scrollIntoView({behavior:'smooth',block:'start'});}}><DemoIcon name={id==='summary'?'file':id==='cost'?'chat':'leaf'}/>{label}</button>)}</div>}<form className="composer" onSubmit={submit}>
             <input ref={uploadInput} aria-label="选择文档文件" hidden type="file" multiple onChange={e=>void upload(e.target.files)}/>
             <input ref={photoInput} aria-label="选择照片或图片" hidden type="file" multiple accept="image/jpeg,image/png" onChange={e=>void upload(e.target.files)}/>
             <details ref={uploadMenu} className="chat-upload-menu" onBlur={e=>{if(!e.currentTarget.contains(e.relatedTarget))e.currentTarget.open=false;}} onKeyDown={e=>{if(e.key==='Escape'){e.preventDefault();e.currentTarget.open=false;e.currentTarget.querySelector('summary')?.focus();}}}>

@@ -49,11 +49,14 @@ try {
   assert.match(document.body.textContent,/这次看病/,'Removed review route must fall back to home');
   await click('首页');
   await click('问暖暖');assert.equal(window.location.hash,'#/chat');assert.ok(document.querySelector('.composer'));assert.ok(document.querySelector('.chat-sidebar'));
+  assert.equal(document.querySelector('.nuan-topic-grid'),null,'Ordinary chat entry must not show claim-completion cards, even with a published report');
+  assert.equal(document.querySelector('.nuan-quick-actions'),null);
   await act(async()=>window.history.back());await flush();assert.equal(window.location.hash,'#/home');
   assert.match(document.body.textContent,/这次看病/);
   await click('问暖暖');await act(async()=>root.unmount());
   root=createRoot(document.getElementById('root'));await act(async()=>root.render(React.createElement(App)));await flush();
   assert.equal(window.location.hash,'#/chat');assert.ok(document.querySelector('.composer'),'Reload must retain chat route');
+  assert.equal(document.querySelector('.nuan-priority'),null,'Reload must not manufacture a claim-completion entry');
   await click('关怀指引');
   let resolveEvidence;delayedEvidence={promise:new Promise(r=>{resolveEvidence=r;})};
   await click('查看这段说明的资料依据');await click('首页');
