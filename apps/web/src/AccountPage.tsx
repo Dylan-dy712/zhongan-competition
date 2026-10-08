@@ -3,7 +3,7 @@ import {changeCareConsent,getCareConsent,listConversations,type CareConsent,type
 import {DemoIcon} from './DemoPages';
 import {encounterGroups} from './carePresentation';
 import type {Conversation} from './types';
-import {MemberDialog,MemberEditor,MemberPicker,memberDescription,relationshipLabels} from './MemberControls';
+import {MemberDialog,MemberEditor,MemberPicker,MemberList,memberDescription,relationshipLabels} from './MemberControls';
 
 export default function AccountPage({token,members,member,onSelect,onSaved,onRecords,onNew,onChanged,onLogout}:{
   token:string;members:MemberResponse[];member:MemberResponse;onSelect:(id:string)=>void;
@@ -46,8 +46,8 @@ export default function AccountPage({token,members,member,onSelect,onSaved,onRec
       <small>每位成员分别确认授权。撤回后停止后续关怀访问与处理，已保存的审计记录仍保留。</small>
     </section>
     <button className="member-logout" disabled={busy} onClick={()=>void onLogout()}>退出登录</button>
-    {mode==='switch'&&<MemberPicker members={members} title="切换查看人员" onClose={()=>setMode(undefined)} onSelect={id=>{onSelect(id);setMode(undefined);}} onAdd={()=>setMode('add')}/>}
-    {mode==='manage'&&<MemberDialog title="管理家庭成员" onClose={()=>setMode(undefined)}><h2>管理家庭成员</h2><div className="member-list">{members.map(value=><button key={value.subject_id} onClick={()=>{setEditing(value);setMode('edit');}}><strong>{value.name} · {relationshipLabels[value.relationship]}</strong><span>{memberDescription(value)} · 编辑资料</span></button>)}</div><button className="records-detail-action" onClick={()=>setMode('add')}>添加家人</button></MemberDialog>}
+    {mode==='switch'&&<MemberPicker members={members} currentId={member.subject_id} title="切换查看人员" onClose={()=>setMode(undefined)} onSelect={id=>{onSelect(id);setMode(undefined);}} onAdd={()=>setMode('add')}/>}
+    {mode==='manage'&&<MemberDialog title="管理家庭成员" onClose={()=>setMode(undefined)}><div className="member-picker-heading"><h2>管理家庭成员</h2><p>点击成员编辑资料</p></div><MemberList members={members} editing onSelect={id=>{setEditing(members.find(value=>value.subject_id===id));setMode('edit');}}/><button className="member-add" onClick={()=>setMode('add')}>添加家人</button></MemberDialog>}
     {(mode==='add'||mode==='edit')&&<MemberDialog title={mode==='add'?'添加家人':'编辑人员资料'} onClose={()=>setMode(undefined)}><MemberEditor key={mode==='add'?'new':editing?.subject_id} token={token} member={mode==='edit'?editing:undefined} onSaved={saved} onCancel={()=>setMode(undefined)}/></MemberDialog>}
   </div></main>;
 }
