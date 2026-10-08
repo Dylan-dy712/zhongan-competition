@@ -26,10 +26,10 @@ class AgentTests(unittest.TestCase):
         model.complete.return_value = answer('票据记载120元。\n\n检查记录写到不能排除肺炎。',[ref1,ref2])
         reply, events = run_agent([], '解释资料', [], tools, model=model, analysis_mode=True)
         sent = model.complete.call_args.args[0]
-        payloads = json.loads(sent[-1]['content'])['authorized_material_batches']
-        self.assertEqual(len(payloads), 2)
+        payloads = json.loads(sent[-1]['content'])['authorized_material_pages']
+        self.assertEqual(len(payloads), 1)
         self.assertIn('不能排除肺炎', str(payloads))
-        self.assertEqual(reply['prompt_version'], 'patient-analysis-narrative-v1')
+        self.assertEqual(reply['prompt_version'], 'patient-analysis-narrative-v2')
         self.assertEqual(reply['text'], '票据记载120元。\n\n检查记录写到不能排除肺炎。')
         self.assertEqual(len(events), 2)
         self.assertEqual(json.loads(tools.execute.call_args_list[1].args[1]),
@@ -43,7 +43,7 @@ class AgentTests(unittest.TestCase):
         model.complete.return_value=answer('本轮只解读已读取的部分。',[ref])
         run_agent([], '解释资料', [], tools, model=model, analysis_mode=True)
         messages=model.complete.call_args.args[0]
-        data=json.loads(messages[-2]['content'])['authorized_material_batches'][0]['evidence']
+        data=json.loads(messages[-2]['content'])['authorized_material_pages'][0]['spans']
         self.assertEqual(len(data),1)
         self.assertIn('未覆盖全部页',messages[-1]['content'])
 
@@ -66,8 +66,8 @@ class AgentTests(unittest.TestCase):
         reply,_=run_agent([], '解释资料', [], tools, model=model, analysis_mode=True)
         self.assertEqual(reply['evidence_refs'],refs[:5])
         messages=model.complete.call_args.args[0]
-        self.assertIn('evidence_refs最多20个',messages[0]['content'])
-        self.assertIn('最多20个实际来源UUID',messages[-1]['content'])
+        self.assertIn('evidence_refs只填这些短编号，最多20个',messages[0]['content'])
+        self.assertIn('最多20个材料中S1等短编号',messages[-1]['content'])
         self.assertEqual(model.complete.call_count,2)
 
     def test_analysis_with_sources_requires_citations_and_rejects_unsafe_advice(self):
@@ -75,7 +75,7 @@ class AgentTests(unittest.TestCase):
                                    ('请自行停药', [str(uuid4())], 'UNSAFE_ANALYSIS')]:
             with self.subTest(text=text):
                 model,tools=MagicMock(),MagicMock()
-                tools.execute.return_value={'status':'available','evidence':[{'text':'合成票据'}],'next_offset':None}
+                tools.execute.return_value={'status':'available','evidence':[{'text':'合成票据','evidence_id':refs[0] if refs else str(uuid4())}],'next_offset':None}
                 model.complete.return_value=answer(text,refs)
                 with self.assertRaisesRegex(ValueError,error):
                     run_agent([], '解释资料', [], tools, model=model, analysis_mode=True)
@@ -86,6 +86,30 @@ class AgentTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError,'ANALYSIS_SOURCES_UNAVAILABLE'):
             run_agent([], '解释资料', [], tools, model=model, analysis_mode=True)
         model.complete.assert_not_called()
+
+    def test_short_sources_resolve_to_only_the_actual_read_evidence(self):
+        model,tools=MagicMock(),MagicMock()
+        ref=str(uuid4())
+        tools.execute.return_value={'status':'available','next_offset':None,
+                                    'evidence':[{'evidence_id':ref,'text':'不能排除肺炎'}]}
+        model.complete.return_value=answer('不能排除不等于确诊。',['S1'])
+        reply,_=run_agent([], '解释资料', [], tools, model=model, analysis_mode=True)
+        self.assertEqual(reply['evidence_refs'],[ref])
+        self.assertEqual(reply['performance']['source_fragments'],1)
+        tools.validate_reply.assert_called_once()
+        model.complete.return_value=answer('错误来源',['S2'])
+        with self.assertRaisesRegex(ValueError,'UNKNOWN_EVIDENCE_REFERENCE'):
+            run_agent([], '解释资料', [], tools, model=model, analysis_mode=True)
+
+    def test_repeated_same_source_does_not_trigger_another_model_call(self):
+        model,tools=MagicMock(),MagicMock()
+        ref=str(uuid4())
+        tools.execute.return_value={'status':'available','next_offset':None,
+                                    'evidence':[{'evidence_id':ref,'text':'费用120元'}]}
+        model.complete.return_value=answer('票据记载120元。',['S1']*30)
+        reply,_=run_agent([], '解释资料', [], tools, model=model, analysis_mode=True)
+        self.assertEqual(reply['evidence_refs'],[ref])
+        self.assertEqual(model.complete.call_count,1)
 
     def test_analysis_model_allows_longer_reasoning_without_changing_normal_chat(self):
         with patch('services.api.app.conversation_agent.OpenAiCompatibleExtractor') as config, \

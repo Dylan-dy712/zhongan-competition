@@ -1,22 +1,25 @@
 """Bounded model/tool loop over authenticated, durable conversations."""
 
 import json
+import time
 from datetime import datetime, timezone
 from typing import Literal
 from uuid import UUID
 
 import requests
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from .conversation_repository import require_conversation, search_history
 from .contracts.core import DocumentVersionRef
 from .llm_extractor import OpenAiCompatibleExtractor
 from .repository import AccessDenied, create_analysis_run, get_analysis_run, get_evidence, get_report
 from .report_builder import _unsafe
+from .analysis_sources import pack_sources
+from .model_workloads import workload_options
 
 
 PROMPT_VERSION = 'conversation-agent-v1'
-ANALYSIS_PROMPT_VERSION = 'patient-analysis-narrative-v1'
+ANALYSIS_PROMPT_VERSION = 'patient-analysis-narrative-v2'
 ANALYSIS_INSTRUCTION = """
 本轮任务是在对话中写一份基于实际材料的文字分析，像医护人员耐心解释，温和清楚。
 先回应用户真实关切，再把这次材料中最重要的信息串成连贯的自然段，避免只拼贴原文。
@@ -24,6 +27,9 @@ ANALYSIS_INSTRUCTION = """
 多种材料则说明它们怎样对应。不要硬凑诊断、治疗、费用、康复、情绪、复诊六个章节。
 只解释本次确实读取的内容。不要求每份材料都存在，不把尚未整理出的信息说成用户没提供。
 可通俗转述材料已记载的事实和医嘱，必须保留疑似、否定、既往、住院/出院阶段和费用口径。
+原文没写不等于事情没发生；出院医嘱没列某药，不等于停药，不追问“为什么停药”。
+费用标签必须保持原文口径：个人自费不改为现金支付，个人账户不改为统筹支付。
+原文未明确同一单据的范围和项目完整性时，不相加推算总费用、比例或个人最终负担。
 医学解释只使用材料本身或已发布的报告，不增加病因、疗效判断、用药方案、复诊日期或保险赔付推断。
 可解释“不能排除”等词的字面限定，但不扩展诊断依据、常见症状或检查方案等材料未记载的医学知识。
 医嘱应说成“出院记录写到”，不包装成你新开的建议。排班名单不是治疗安排，不逐个罗列医师姓名。
@@ -33,7 +39,10 @@ ANALYSIS_INSTRUCTION = """
 采用连贯自然段，直接写短句，不使用Markdown标记、表格或固定六段模板，避免逐段起标题。
 简短材料就简短解释，多份材料可展开；只说影响理解的不确定之处，不逐项盘点所有没提供的信息。
 结尾给一个结合本次内容可以继续讨论的问题。所有材料事实附实际读取过的引用。
-JSON中的text最多6000字符，evidence_refs最多20个实际来源UUID，history_refs最多12个。
+JSON中的text最多6000字符，history_refs最多12个。
+本轮材料按文档、页码提供，每段原文有S1等短编号；evidence_refs只填这些短编号，最多20个。
+短编号会对应到真实原文来源，本轮不要输出证据UUID，正文不显示短编号。
+前面对话只用于理解用户关切，旧回答中的事实不能代替本次材料。
 选择与正文关键事实相关的来源，不为每条OCR碎片都列引用，正文不嵌入UUID。
 """
 SYSTEM = """你是暖暖，一个能持续对话的医护关怀助手。自然交流，先理解用户最关心的事。
@@ -60,6 +69,17 @@ class AgentReply(BaseModel):
     text: str = Field(min_length=1, max_length=6000)
     evidence_refs: list[UUID] = Field(default_factory=list, max_length=20)
     history_refs: list[UUID] = Field(default_factory=list, max_length=12)
+
+
+class AnalysisWireReply(AgentReply):
+    evidence_refs: list[str] = Field(default_factory=list, max_length=20)
+
+    @field_validator('evidence_refs',mode='before')
+    @classmethod
+    def unique_refs(cls,value):
+        if isinstance(value,list) and all(isinstance(ref,str) for ref in value):
+            return list(dict.fromkeys(value))
+        return value
 
 
 class ToolArgs(BaseModel):
@@ -105,6 +125,11 @@ class AgentModel:
         body = {'model': self.config.model_id, 'messages': messages, 'temperature': 0.2,
                 'response_format': {'type': 'json_object'},
                 'max_tokens': 16000 if self.analysis_mode else 2200}
+        if self.analysis_mode:
+            options=workload_options(self.config.base_url,self.config.model_id,'narrative')
+            body.update(options)
+            if options:
+                body['max_tokens']=8000
         if not self.analysis_mode:
             body.update(tools=TOOLS, tool_choice='auto' if allow_tools else 'none')
         response = requests.post(f'{self.config.base_url}/chat/completions',
@@ -241,6 +266,7 @@ class CareTools:
 
 
 def run_agent(history, question, attachments, tools, model=None, on_event=None, analysis_mode=False):
+    started = time.monotonic()
     model = model or (AgentModel(analysis_mode=True) if analysis_mode else AgentModel())
     messages = [{'role': 'system', 'content': SYSTEM +
                  (ANALYSIS_INSTRUCTION if analysis_mode else '') +
@@ -251,8 +277,9 @@ def run_agent(history, question, attachments, tools, model=None, on_event=None, 
     for turn in reversed(history):
         if turn['status'] != 'completed':
             continue
+        previous_answer = {'text': turn['answer'].get('text', '')} if analysis_mode else turn['answer']
         pair = [{'role': 'user', 'content': turn['question']},
-                {'role': 'assistant', 'content': json.dumps(turn['answer'], ensure_ascii=False, default=str)}]
+                {'role': 'assistant', 'content': json.dumps(previous_answer, ensure_ascii=False, default=str)}]
         size = sum(len(x['content']) for x in pair)
         if used + size > 18000:
             break
@@ -264,6 +291,8 @@ def run_agent(history, question, attachments, tools, model=None, on_event=None, 
     budget = 6
     repaired = False
     analysis_has_evidence = False
+    aliases = {}
+    model_seconds = 0
     if analysis_mode:
         # Read source pages before drafting: the six-section projection can omit
         # treatment facts and is not a suitable outline for a personal explanation.
@@ -291,15 +320,18 @@ def run_agent(history, question, attachments, tools, model=None, on_event=None, 
             offset = result.get('next_offset')
             if offset is None or truncated:
                 break
+        packed, aliases = pack_sources(source_batches)
         messages.append({'role': 'user', 'content': json.dumps(
-            {'authorized_material_batches': source_batches}, ensure_ascii=False, default=str)})
+            {'authorized_material_pages': packed}, ensure_ascii=False, separators=(',', ':'))})
         if offset is not None or truncated:
             messages.append({'role': 'user', 'content':
                 '材料读取尚未覆盖全部页。必须说明本轮只解读已读取的部分；不得把未读取的内容说成缺资料。'})
     for round_index in range(2 if analysis_mode else 5):
         if analysis_mode and on_event:
             on_event(events)
+        model_started = time.monotonic()
         message = model.complete(messages, allow_tools=not analysis_mode and round_index < 4 and budget > 0)
+        model_seconds += time.monotonic() - model_started
         calls = message.get('tool_calls') or []
         if calls:
             if analysis_mode or len(calls) > budget or round_index == 4:
@@ -325,14 +357,28 @@ def run_agent(history, question, attachments, tools, model=None, on_event=None, 
         if content.startswith('```'):
             content = content.split('\n', 1)[-1].rsplit('```', 1)[0].strip()
         try:
-            reply = AgentReply.model_validate_json(content)
+            if analysis_mode:
+                wire = AnalysisWireReply.model_validate_json(content)
+                refs = []
+                for ref in wire.evidence_refs:
+                    if ref in aliases:
+                        refs.append(aliases[ref])
+                    elif ref in aliases.values():
+                        refs.append(ref)  # Accept actual IDs only if present in this source packet.
+                    else:
+                        raise ValueError('UNKNOWN_EVIDENCE_REFERENCE')
+                reply = AgentReply.model_validate({**wire.model_dump(mode='json'), 'evidence_refs':list(dict.fromkeys(refs))})
+            else:
+                reply = AgentReply.model_validate_json(content)
         except ValidationError:
             if repaired or round_index == 4:
                 raise
             repaired = True
             messages.extend([
                 {'role': 'assistant', 'content': content},
-                {'role': 'user', 'content': '只修复回答格式，不添加新事实。必须是JSON对象，且仅包含text（非空字符串，最多6000字符）、evidence_refs（最多20个实际来源UUID字符串）、history_refs（最多12个历史UUID字符串）。选择支持正文关键事实的来源，不逐条列出OCR碎片；没有引用时用空数组。不要输出Markdown或其他字段。'},
+                {'role': 'user', 'content': '只修复回答格式，不添加新事实。必须是JSON对象，且仅包含text（非空字符串，最多6000字符）、evidence_refs（最多20个' +
+                 ('材料中S1等短编号' if analysis_mode else '实际来源UUID字符串') +
+                 '）、history_refs（最多12个历史UUID字符串）。选择支持正文关键事实的来源，不逐条列出OCR碎片；没有引用时用空数组。不要输出Markdown或其他字段。'},
             ])
             continue
         if analysis_mode and analysis_has_evidence and not reply.evidence_refs:
@@ -342,6 +388,11 @@ def run_agent(history, question, attachments, tools, model=None, on_event=None, 
         tools.validate_reply(reply)
         result = {**reply.model_dump(mode='json'),
                   'prompt_version': ANALYSIS_PROMPT_VERSION if analysis_mode else PROMPT_VERSION}
+        if analysis_mode:
+            result['performance'] = {'source_fragments':len(aliases), 'source_characters':size,
+                'model_input_characters':sum(len(m.get('content') or '') for m in messages),
+                'model_calls':round_index+1, 'model_seconds':round(model_seconds,3),
+                'total_seconds':round(time.monotonic()-started,3)}
         model_id = getattr(getattr(model, 'config', None), 'model_id', None)
         if isinstance(model_id, str):
             result.update(model_id=model_id, usage=model.usage)

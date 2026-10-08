@@ -8,6 +8,7 @@ from typing import Literal
 
 import requests
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from .model_workloads import workload_options
 
 
 PROMPT_VERSION = "medical-fields-and-cost-labels-v4"
@@ -92,12 +93,13 @@ class OpenAiCompatibleExtractor:
         if not self.base_url or not self.api_key or not self.model_id:
             raise RuntimeError("LLM_NOT_CONFIGURED")
 
-    def _call(self, messages, *, timeout=45):
+    def _call(self, messages, *, timeout=45, workload='review'):
         response = requests.post(
             f"{self.base_url}/chat/completions",
             headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
             json={"model": self.model_id, "messages": messages, "temperature": 0,
-                  "response_format": {"type": "json_object"}},
+                  "response_format": {"type": "json_object"},
+                  **workload_options(self.base_url,self.model_id,workload)},
             timeout=timeout,
         )
         response.raise_for_status()
@@ -110,7 +112,7 @@ class OpenAiCompatibleExtractor:
         first_payload = None
         for attempt in range(2):
             try:
-                payload, content = self._call(messages)
+                payload, content = self._call(messages,workload='extraction')
                 if attempt == 0:
                     first_payload = payload
                 try:
