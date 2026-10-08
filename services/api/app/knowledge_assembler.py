@@ -195,6 +195,10 @@ class KnowledgeAssembler:
     def entries_total(self) -> int:
         return len(self._entries)
 
+    @property
+    def all_entries(self) -> tuple[KnowledgeEntry, ...]:
+        return tuple(self._entries.values())
+
     def pack_scope(self, disease_code: DiseaseCode) -> PackScope:
         scope = self._pack_scopes.get(disease_code)
         if scope is None:

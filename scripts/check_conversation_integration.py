@@ -249,7 +249,7 @@ def main():
                 completed=client.post(base+f'/analyses/{run_id}/continue',headers=headers)
             check(completed.status_code==200,'analysis completion continues with real evidence')
             check(completed.json()['answer']['analysis_run_id']==str(run_id) and
-                  completed.json()['answer']['prompt_version']=='patient-analysis-narrative-v5',
+                  completed.json()['answer']['prompt_version']=='patient-analysis-narrative-v6',
                   'personal narrative is model-generated and bound to the exact analysis run')
             with patch('services.api.app.conversation_agent.AgentModel',side_effect=AssertionError('replay')):
                 replay=client.post(base+f'/analyses/{run_id}/continue',headers=headers)

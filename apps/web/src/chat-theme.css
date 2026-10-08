@@ -84,6 +84,9 @@
 .analysis-narrative-sources>summary>span{margin-left:6px;color:#89968c}
 .analysis-narrative-sources>div{display:flex;gap:8px;flex-wrap:wrap;padding-top:8px}
 .analysis-narrative-sources .citation{margin:0;min-height:36px}
+.knowledge-sources>div{display:block}.knowledge-sources section+section{margin-top:12px}
+.knowledge-sources strong{display:block;color:#303a34}.chat-original .knowledge-sources p{font-size:12px;margin:4px 0;line-height:1.65;overflow-wrap:anywhere}
+.knowledge-sources small{display:block;line-height:1.65}
 @media(max-width:480px){.chat-original .message-bubble.narrative-bubble{padding:17px}.chat-original .analysis-narrative-copy p{font-size:14px;line-height:1.95}}
 .chat-original .message-row.user .message-bubble{max-width:86%;background:linear-gradient(120deg,#ddfcef,#c2f6e4);border:1px solid #aeead6;border-radius:18px 5px 18px 18px;padding:12px 16px;box-shadow:none;color:var(--chat-ink)}
 .chat-original :is(.tool-activity,.history-reference,.analysis-continuation){color:var(--chat-muted);line-height:1.7}
