@@ -136,6 +136,8 @@ def main():
             with connection() as conn:
                 conn.autocommit=True
                 run=claim_run(conn)
+                conn.execute("UPDATE analysis_runs SET lease_expires_at=now()-interval '1 second' WHERE run_id=%s",
+                             (run['run_id'],))
                 conn.execute('UPDATE cases SET user_context=%s::jsonb WHERE case_id=%s',
                              (json.dumps({'concern':'后来修改的上下文不应覆盖快照'}),case_id))
                 context_snapshot=run['context_snapshot']
@@ -164,12 +166,16 @@ def main():
                     'fact_type': 'diagnosis', 'raw_value': '肺炎', 'normalized_value': '肺炎',
                     'assertion': 'present', 'evidence_quote': '肺炎'}]},
                                                   'raw_output': {}, 'usage_metadata': {}}
+                def draft_with_lease_check(*args, **kwargs):
+                    lease = conn.execute("SELECT lease_expires_at > now()+interval '4 minutes' AS renewed FROM analysis_runs WHERE run_id=%s",
+                                         (run['run_id'],)).fetchone()
+                    check(lease['renewed'], 'worker renews the lease before the longer report request')
+                    return {'status': 'completed', 'draft': draft, 'raw_output': {}, 'usage_metadata': {}}
                 with patch.dict(os.environ, {'LLM_API_KEY': 'scripted-test-no-network'}), \
                      patch('services.api.app.worker.OpenAiCompatibleExtractor', return_value=extractor), \
                      patch('services.api.app.worker.detect_semantic', return_value={
                          'status': 'completed', 'candidates': [], 'raw_output': {}, 'usage_metadata': {}}), \
-                     patch('services.api.app.worker.draft_report', return_value={
-                         'status': 'completed', 'draft': draft, 'raw_output': {}, 'usage_metadata': {}}) as report_drafter:
+                     patch('services.api.app.worker.draft_report', side_effect=draft_with_lease_check) as report_drafter:
                     process_run(conn,run,Path(storage))
                 status=conn.execute('SELECT status,error FROM analysis_runs WHERE run_id=%s',(run_id,)).fetchone()
                 check(status['status']=='completed',f"worker parses synthetic invoice ({status['status']})")

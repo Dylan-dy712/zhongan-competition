@@ -288,7 +288,7 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
     parsed_documents = []
     def advance(stage):
         # Production connection is autocommit, so polling can observe each milestone.
-        row = conn.execute("UPDATE analysis_runs SET current_stage=%s WHERE run_id=%s AND lease_token=%s AND status='running' RETURNING run_id",
+        row = conn.execute("UPDATE analysis_runs SET current_stage=%s, lease_expires_at=now()+interval '5 minutes' WHERE run_id=%s AND lease_token=%s AND status='running' RETURNING run_id",
                            (stage, run['run_id'], run['lease_token'])).fetchone()
         if not row:
             raise RuntimeError('ANALYSIS_LEASE_LOST')
@@ -698,7 +698,8 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
                    lease_token=NULL, lease_expires_at=NULL
                    WHERE run_id=%s AND lease_token=%s""",
                 (result_status, json.dumps(result),
-                 json.dumps({'code': 'REPORT_MODEL_FAILED', 'retryable': True}) if result_status == 'failed' else None,
+                 json.dumps({'code': report_model_result.get('error_code', 'REPORT_MODEL_FAILED'),
+                             'retryable': report_model_result.get('retryable', True)}) if result_status == 'failed' else None,
                  run["run_id"], run["lease_token"]),
             )
     except Exception as exc:

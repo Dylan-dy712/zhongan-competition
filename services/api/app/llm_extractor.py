@@ -92,13 +92,13 @@ class OpenAiCompatibleExtractor:
         if not self.base_url or not self.api_key or not self.model_id:
             raise RuntimeError("LLM_NOT_CONFIGURED")
 
-    def _call(self, messages):
+    def _call(self, messages, *, timeout=45):
         response = requests.post(
             f"{self.base_url}/chat/completions",
             headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
             json={"model": self.model_id, "messages": messages, "temperature": 0,
                   "response_format": {"type": "json_object"}},
-            timeout=45,
+            timeout=timeout,
         )
         response.raise_for_status()
         payload = response.json()
