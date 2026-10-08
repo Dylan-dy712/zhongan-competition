@@ -21,11 +21,11 @@ export class ApiError extends Error {
   constructor(message: string, public status: number, public traceId?: string) { super(message); }
 }
 
-async function apiFetch(url:string,options:RequestInit):Promise<Response> {
+async function apiFetch(url:string,options:RequestInit,timeoutMs?:number):Promise<Response> {
   const readOnly=!options.method || options.method==='GET';
   for(let attempt=0;;attempt++) {
     try {
-      const response=await fetch(url,{...options,signal:AbortSignal.timeout(readOnly?15000:120000)});
+      const response=await fetch(url,{...options,signal:AbortSignal.timeout(timeoutMs ?? (readOnly?15000:120000))});
       if(!readOnly || ![502,503,504].includes(response.status) || attempt===2)return response;
       await response.body?.cancel().catch(()=>{});
     } catch(e) {
@@ -69,14 +69,14 @@ export async function askAssistant(caseId: string, reportVersion: number, questi
   return response.json() as Promise<AssistantAnswer>;
 }
 
-async function chatRequest<T>(path: string, token: string, method = 'GET', data?: unknown, idempotencyKey?:string): Promise<T> {
+async function chatRequest<T>(path: string, token: string, method = 'GET', data?: unknown, idempotencyKey?:string,timeoutMs?:number): Promise<T> {
   const multipart = data instanceof FormData;
   const response = await apiFetch(`${API_BASE}${path}`, {
     method,
     headers: {Authorization: `Bearer ${token}`, ...(!multipart && data !== undefined ? {'Content-Type':'application/json'} : {}),
       ...(idempotencyKey ? {'Idempotency-Key':idempotencyKey} : {})},
     body: data === undefined ? undefined : multipart ? data : JSON.stringify(data),
-  });
+  },timeoutMs);
   if (!response.ok) {
     const detail = await response.json().catch(() => null);
     throw new ApiError(detail?.message || failureMessage(response.status), response.status, detail?.trace_id);
@@ -107,7 +107,7 @@ export const getOlderTurns = (token: string, id: string, before: string) =>
 export const sendChatMessage = (token: string, id: string, requestId: string, message: string, documentIds: string[]) =>
   chatRequest(`/v1/conversations/${id}/messages`, token, 'POST', {request_id:requestId, message, document_ids:documentIds});
 export const continueAnalysis = (token: string, id: string, runId: string) =>
-  chatRequest(`/v1/conversations/${id}/analyses/${runId}/continue`, token, 'POST');
+  chatRequest(`/v1/conversations/${id}/analyses/${runId}/continue`, token, 'POST',undefined,undefined,450000);
 export const setRecall = (token: string, id: string, enabled: boolean) =>
   chatRequest(`/v1/conversations/${id}/recall`, token, 'PATCH', {enabled});
 export const setReportContext = (token:string,id:string,enabled:boolean) =>

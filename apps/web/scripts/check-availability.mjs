@@ -11,6 +11,15 @@ dom.window.HTMLElement.prototype.scrollIntoView=function(){};
 const modules=await loadTestModules();let root;
 try {
   const {api,App}=modules;
+  const timeout=AbortSignal.timeout,timeouts=[];
+  try{
+    AbortSignal.timeout=ms=>{timeouts.push(ms);return timeout(ms);};
+    globalThis.fetch=async()=>Response.json({});
+    await api.getConversation('synthetic','synthetic');
+    await api.sendChatMessage('synthetic','synthetic','request','hello',[]);
+    await api.continueAnalysis('synthetic','synthetic','run');
+    assert.deepEqual(timeouts,[15000,120000,450000],'Narrative browser timeout covers model repair and gateway wait');
+  }finally{AbortSignal.timeout=timeout;}
   let calls=0;
   globalThis.fetch=async()=>++calls<3?new Response('upstream unavailable',{status:502}):Response.json({conversation_id:'synthetic'});
   assert.equal((await api.getConversation('synthetic','synthetic')).conversation_id,'synthetic');assert.equal(calls,3);
