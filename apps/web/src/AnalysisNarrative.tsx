@@ -22,7 +22,12 @@ export default function AnalysisNarrative({turn,onEvidence}:{turn:ChatTurn;onEvi
             <div><p className="analysis-point-lead">{block.legacyLead?<strong>{block.text}</strong>:<Emphasis text={block.text}/>}</p>
               {block.paragraphs.map((text,j)=><p key={j}><Emphasis text={text}/></p>)}</div>
           </section>
-        : <p key={i}><Emphasis text={block.text}/></p>)}
+        : block.kind==='closing'
+          ? <section className="analysis-narrative-closing" key={i}>
+              <h3>{block.text}</h3>
+              {block.paragraphs.map((text,j)=><p key={j}><Emphasis text={text}/></p>)}
+            </section>
+          : <p key={i}><Emphasis text={block.text}/></p>)}
     </div>
     {turn.answer.evidence_refs.length>0 && <details className="analysis-narrative-sources">
       <summary>这份解读的材料依据 <span>{turn.answer.evidence_refs.length}</span></summary>

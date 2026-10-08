@@ -1,4 +1,4 @@
-export type NarrativeBlock = {kind:'paragraph'|'point';text:string;paragraphs:string[];legacyLead?:boolean};
+export type NarrativeBlock = {kind:'paragraph'|'point'|'closing';text:string;paragraphs:string[];legacyLead?:boolean};
 
 // A deliberately small text format: numbered points and **emphasis** only.
 // HTML, links and arbitrary Markdown remain text and cannot create DOM nodes.
@@ -9,6 +9,10 @@ export function narrativeBlocks(text:string):NarrativeBlock[] {
   for(const chunk of chunks) {
     const lines=chunk.split('\n');
     for(const line of lines) {
+      if(line.trim()==='**接下来，可以这样做**') {
+        point={kind:'closing',text:'接下来，可以这样做',paragraphs:[]};blocks.push(point);
+        continue;
+      }
       const match=line.match(/^\s*\d{1,2}(?:[.)]\s+|[、）]\s*)(.+)$/);
       if(match) {
         point={kind:'point',text:match[1],paragraphs:[]};blocks.push(point);
@@ -22,7 +26,7 @@ export function narrativeBlocks(text:string):NarrativeBlock[] {
     }
     // Plain historic reports get numbered paragraphs without changing any words.
   }
-  if(!blocks.some(b=>b.kind==='point') && blocks.length>2) {
+  if(blocks.every(b=>b.kind==='paragraph') && blocks.length>2) {
     return blocks.map((b,i)=>{
       if(i===0 || (i===blocks.length-1 && /[？?]\s*$/.test(b.text)))return b;
       const sentence=b.text.match(/^([\s\S]{1,160}?[。！？!?])([\s\S]+)$/);
