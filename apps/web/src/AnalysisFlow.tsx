@@ -3,9 +3,23 @@ import {estimateWithinStage} from './analysisProgress';
 import type {ChatSnapshot,MaterialReport} from './types';
 import {careSectionLabels} from './carePresentation';
 import {currentNarrative} from './AnalysisNarrative';
+import mascot from '../../../output_dir/product-design/assets/reference-mascot.webp';
 import './analysis-flow.css';
 
 const steps=[['parse','识别材料'],['extract','提取信息'],['insights','核对疑点'],['guidance','整理重点'],['validate','校验来源'],['narrative','写好解读']];
+function AnalysisIcon({kind}:{kind:string}) {
+  const paths:Record<string,React.ReactNode>={
+    parse:<><path d="M6 3h8l4 4v14H6V3Z"/><path d="M14 3v5h5M9 12h6M9 16h6"/></>,
+    extract:<><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 10v4h6v-4M8 3h8"/></>,
+    insights:<><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5M8 11l2 2 4-5"/></>,
+    guidance:<><rect x="5" y="3" width="14" height="18" rx="1"/><path d="M9 7h6M9 11h6M9 15h4"/></>,
+    validate:<><path d="m12 3 8 3v6c0 4-4 7-8 9-4-2-8-5-8-9V6l8-3Z"/><path d="m8 12 3 3 5-6"/></>,
+    narrative:<><path d="M6 3h9l4 4v14H6V3Z"/><path d="M15 3v5h4M9 12h6M9 16h4"/></>,
+    bulb:<><path d="M8 17c0-2-4-3-4-7a8 8 0 0 1 16 0c0 4-4 5-4 7M8 17h8l-1 4H9l-1-4ZM12 1V0M2 3l-2-2M22 3l2-2"/></>,
+    chevron:<path d="m6 15 6-6 6 6"/>,
+  };
+  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[kind]}</svg>;
+}
 export type UploadProgress={done:number;total:number};
 export function analysisView(snapshot:ChatSnapshot|null,upload?:UploadProgress,submitting=false,error='') {
   if(error)return {kind:'failed',title:'这次分析没有完成',detail:error,percent:null,index:-1};
@@ -68,19 +82,31 @@ export default function AnalysisFlow({open,snapshot,upload,submitting,error,onCl
   },[open]);
   return <dialog ref={dialog} className="analysis-dialog" aria-labelledby={titleId} onCancel={e=>{e.preventDefault();onClose();}}>
     <button className="analysis-close" aria-label="关闭分析进度" onClick={onClose}>×</button>
-    <div className={`analysis-emblem ${view.kind}`} aria-hidden="true">{view.kind==='ready'?'✓':view.kind==='failed'?'!':'✦'}</div>
-    <span className="analysis-eyebrow">暖暖 · 陪你看清这次就医</span>
-    <h2 id={titleId}>{view.title}</h2><p className="analysis-detail" role="status">{view.detail}</p>
-    {displayed!==null && <><div className="analysis-percent"><strong>{displayed}<small>%</small></strong><span>{view.kind==='upload'?'上传进度':estimating?'预估进度':view.kind==='ready'?'分析完成':'等待开始'}</span></div>
+    <header className="analysis-hero">
+      <div className="analysis-hero-art" aria-hidden="true"><span className="analysis-orbit"/><span className="analysis-paper first"><AnalysisIcon kind="guidance"/></span><span className="analysis-paper second"><AnalysisIcon kind="parse"/></span><span className="analysis-spark">✦</span><img src={mascot} alt="" width="280" height="280"/></div>
+      <div className="analysis-hero-copy"><div className={`analysis-emblem ${view.kind}`} aria-hidden="true">{view.kind==='ready'?'✓':view.kind==='failed'?'!':'✦'}</div>
+        <span className="analysis-eyebrow">暖暖 · 陪你看清这次就医</span>
+        <h2 id={titleId}>{view.title}</h2><p className="analysis-detail" role="status">{view.detail}</p>
+      </div>
+    </header>
+    {displayed!==null && <section className="analysis-status-card" aria-label="材料分析进度与阶段">
+      <div className="analysis-percent"><strong>{displayed}<small>%</small></strong><span>{view.kind==='upload'?'上传进度':estimating?'预估进度':view.kind==='ready'?'分析完成':'等待开始'}</span></div>
       <div className={`analysis-progress-track ${view.kind==='processing' || view.kind==='upload'?'active':''}`}>
         <progress max="100" value={displayed} aria-label={view.kind==='upload'?'材料上传进度':estimating?'材料分析预估进度':'材料分析进度'} aria-valuetext={estimating?`预估 ${displayed}%，当前正在${steps[view.index][1]}`:undefined}/>
         <span className="analysis-progress-fill" style={{width:`${estimating?estimated:displayed}%`}} aria-hidden="true"/>
       </div>
-      {view.kind==='processing' && <div className="analysis-live-note"><span aria-hidden="true"/>{waitingLong?'这一阶段需要多一点时间，后台仍在处理':'暖暖正在处理，分析还在继续'}</div>}
-      {estimating && <p className="analysis-estimate-note">进度为平滑预估，具体阶段以实际分析为准</p>}</>}
-    {view.kind!=='upload' && view.kind!=='failed' && <ol className="analysis-steps">{steps.map(([key,title],i)=><li key={key} className={i<view.index?'done':i===view.index?'current':''}><span>{i<view.index?'✓':i+1}</span>{title}<small>{i<view.index?'已完成':i===view.index?'进行中':'待开始'}</small></li>)}</ol>}
+      {view.kind==='processing' && <div className="analysis-live-panel"><div className="analysis-live-note"><span aria-hidden="true"/>{waitingLong?'这一阶段需要多一点时间，后台仍在处理':'暖暖正在处理，分析还在继续'}</div>
+        {estimating && <p className="analysis-estimate-note">进度为平滑预估，具体阶段以实际分析为准</p>}</div>}
+      {view.kind!=='upload' && <ol className="analysis-steps">{steps.map(([key,title],i)=>{
+        const status=i<view.index?'done':i===view.index?'current':'pending';
+        return <li key={key} className={status} aria-current={status==='current'?'step':undefined}>
+          <span className="analysis-step-number" aria-hidden="true">{status==='done'?<svg viewBox="0 0 24 24" fill="none"><path d="m5 12 5 5 9-11" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"/></svg>:i+1}</span>
+          <div className="analysis-step-body"><span className="analysis-step-icon"><AnalysisIcon kind={key}/></span><span className="analysis-step-title">{title}</span><small>{status==='current'&&<span className="analysis-step-spinner" aria-hidden="true"/>}{status==='done'?'已完成':status==='current'?'进行中':'待开始'}</small></div>
+        </li>;
+      })}</ol>}
+    </section>}
     {view.kind==='ready'?<><div className="analysis-ready-note">已整理 {snapshot?.material_report?.document_count || 0} 份材料</div><button className="analysis-primary" onClick={onReport}>回到对话看解读 →</button></>
       :view.kind==='failed'?<button className="analysis-primary" onClick={onRetry}>重新分析材料</button>
-      :<><button className="analysis-secondary" onClick={onClose}>收起进度，稍后查看</button><p className="analysis-background-note">收起窗口后，后台会继续分析材料</p></>}
+      :<><button className="analysis-secondary" onClick={onClose}><AnalysisIcon kind="bulb"/><span>收起进度，稍后查看</span><AnalysisIcon kind="chevron"/></button><p className="analysis-background-note">收起窗口后，后台会继续分析材料</p></>}
   </dialog>;
 }
