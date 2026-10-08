@@ -16,6 +16,7 @@ from .repository import AccessDenied, create_analysis_run, get_analysis_run, get
 from .report_builder import _unsafe
 from .analysis_sources import pack_sources
 from .model_workloads import workload_options
+from .analysis_format import strict_analysis_tool, decode_analysis_tool
 
 
 PROMPT_VERSION = 'conversation-agent-v1'
@@ -128,17 +129,24 @@ class AgentModel:
         if self.analysis_mode:
             options=workload_options(self.config.base_url,self.config.model_id,'narrative')
             body.update(options)
-            if options:
+            if options.get('thinking',{}).get('type')=='disabled':
                 body['max_tokens']=8000
         if not self.analysis_mode:
             body.update(tools=TOOLS, tool_choice='auto' if allow_tools else 'none')
-        response = requests.post(f'{self.config.base_url}/chat/completions',
+        strict_format = self.analysis_mode and bool(options)
+        url = f'{self.config.base_url}/chat/completions'
+        if strict_format:
+            url='https://api.deepseek.com/beta/chat/completions'
+            body.pop('response_format',None)
+            body.update(tools=[strict_analysis_tool()],tool_choice={'type':'function','function':{'name':'deliver_analysis'}})
+        response = requests.post(url,
             headers={'Authorization': f'Bearer {self.config.api_key}', 'Content-Type': 'application/json'},
             json=body, timeout=(10, 180) if self.analysis_mode else (5, 20))
         response.raise_for_status()
         payload = response.json()
         self.usage.append(payload.get('usage', {}))
-        return payload['choices'][0]['message']
+        message=payload['choices'][0]['message']
+        return decode_analysis_tool(message) if strict_format else message
 
 
 class CareTools:
@@ -370,15 +378,19 @@ def run_agent(history, question, attachments, tools, model=None, on_event=None, 
                 reply = AgentReply.model_validate({**wire.model_dump(mode='json'), 'evidence_refs':list(dict.fromkeys(refs))})
             else:
                 reply = AgentReply.model_validate_json(content)
-        except ValidationError:
+        except ValidationError as exc:
             if repaired or round_index == 4:
                 raise
             repaired = True
+            errors = '、'.join(str(e['loc'][0]) + ':' + e['type']
+                for e in exc.errors(include_input=False)
+                if e['loc'] and e['loc'][0] in {'text','evidence_refs','history_refs'})
             messages.extend([
                 {'role': 'assistant', 'content': content},
-                {'role': 'user', 'content': '只修复回答格式，不添加新事实。必须是JSON对象，且仅包含text（非空字符串，最多6000字符）、evidence_refs（最多20个' +
+                {'role': 'user', 'content': '格式错误项：' + (errors or 'JSON结构') +
+                 '。只修复回答格式，不添加新事实。必须是JSON对象，且仅包含text（非空字符串，最多6000字符）、evidence_refs（最多20个' +
                  ('材料中S1等短编号' if analysis_mode else '实际来源UUID字符串') +
-                 '）、history_refs（最多12个历史UUID字符串）。选择支持正文关键事实的来源，不逐条列出OCR碎片；没有引用时用空数组。不要输出Markdown或其他字段。'},
+                 '）、history_refs（最多12个历史UUID字符串）。只选择支持正文关键事实的少量直接来源，绝对不要复制整个材料编号集合；没有引用时用空数组。不要输出Markdown或其他字段。'},
             ])
             continue
         if analysis_mode and analysis_has_evidence and not reply.evidence_refs:

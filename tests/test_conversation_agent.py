@@ -68,6 +68,7 @@ class AgentTests(unittest.TestCase):
         messages=model.complete.call_args.args[0]
         self.assertIn('evidence_refs只填这些短编号，最多20个',messages[0]['content'])
         self.assertIn('最多20个材料中S1等短编号',messages[-1]['content'])
+        self.assertIn('evidence_refs:too_long',messages[-1]['content'])
         self.assertEqual(model.complete.call_count,2)
 
     def test_analysis_with_sources_requires_citations_and_rejects_unsafe_advice(self):
