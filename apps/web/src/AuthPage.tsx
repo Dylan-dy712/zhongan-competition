@@ -17,7 +17,7 @@ export default function AuthPage({onAuthenticated}:{onAuthenticated:(token:strin
   const [busy,setBusy]=useState(false);
   const [error,setError]=useState('');
   const [showPassword,setShowPassword]=useState(false);
-  return <main className="auth-page"><div className="auth-card">
+  return <main className="auth-page"><div className={`auth-card${register?' auth-register':''}`}>
     <div className="auth-hero-art" aria-hidden="true"><img className="auth-mascot" src={mascot} alt="" width="1200" height="900"/></div>
     <header className="auth-hero">
     <span className="auth-brand">众安 · 暖愈智护</span>
