@@ -3,7 +3,7 @@ import {changeCareConsent,getCareConsent,listConversations,type CareConsent,type
 import {DemoIcon} from './DemoPages';
 import {encounterGroups} from './carePresentation';
 import type {Conversation} from './types';
-import {MemberDialog,MemberEditor,MemberPicker,MemberList,MemberAvatar,memberDescription,relationshipLabels} from './MemberControls';
+import {MemberDialog,MemberEditor,MemberPicker,MemberList,memberDescription,relationshipLabels} from './MemberControls';
 
 export default function AccountPage({token,members,member,onSelect,onSaved,onRecords,onNew,onChanged,onLogout}:{
   token:string;members:MemberResponse[];member:MemberResponse;onSelect:(id:string)=>void;
@@ -47,7 +47,7 @@ export default function AccountPage({token,members,member,onSelect,onSaved,onRec
     </section>
     <button className="member-logout" disabled={busy} onClick={()=>void onLogout()}>退出登录</button>
     {mode==='switch'&&<MemberPicker members={members} currentId={member.subject_id} title="切换查看人员" onClose={()=>setMode(undefined)} onSelect={id=>{onSelect(id);setMode(undefined);}} onAdd={()=>setMode('add')}/>}
-    {mode==='manage'&&<MemberDialog title="管理家庭成员" onClose={()=>setMode(undefined)}><div className="member-picker-heading"><MemberAvatar/><span className="member-kicker">把家人的健康，好好记下</span><h2>管理家庭成员</h2><p>查看或编辑家人的基础资料。</p></div><MemberList members={members} editing onSelect={id=>{setEditing(members.find(value=>value.subject_id===id));setMode('edit');}}/><button className="member-add" onClick={()=>setMode('add')}>添加家人</button></MemberDialog>}
+    {mode==='manage'&&<MemberDialog title="管理家庭成员" onClose={()=>setMode(undefined)}><div className="member-picker-heading"><h2>管理家庭成员</h2><p>点击成员编辑资料</p></div><MemberList members={members} editing onSelect={id=>{setEditing(members.find(value=>value.subject_id===id));setMode('edit');}}/><button className="member-add" onClick={()=>setMode('add')}>添加家人</button></MemberDialog>}
     {(mode==='add'||mode==='edit')&&<MemberDialog title={mode==='add'?'添加家人':'编辑人员资料'} onClose={()=>setMode(undefined)}><MemberEditor key={mode==='add'?'new':editing?.subject_id} token={token} member={mode==='edit'?editing:undefined} onSaved={saved} onCancel={()=>setMode(undefined)}/></MemberDialog>}
   </div></main>;
 }
