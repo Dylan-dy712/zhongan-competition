@@ -1,5 +1,5 @@
 import {useEffect,useRef,useState} from 'react';
-import {saveMember,type MemberInput,type MemberResponse} from './api';
+import {saveMember,changeCareConsent,getCareConsent,type CareConsent,type MemberInput,type MemberResponse} from './api';
 import './members.css';
 
 export const relationshipLabels:Record<MemberInput['relationship'],string>={self:'本人',parent:'父母',spouse:'配偶',child:'子女',other:'其他'};
@@ -51,4 +51,15 @@ export function MemberDialog({title,onClose,children}:{title:string;onClose:()=>
 
 export function MemberPicker({members,title,onSelect,onClose,onAdd,currentId}:{members:MemberResponse[];title:string;onSelect:(id:string)=>void;onClose:()=>void;onAdd?:()=>void;currentId?:string}) {
   return <MemberDialog title={title} onClose={onClose}><div className="member-picker-heading"><h2>{title}</h2><p>{currentId?'选择后查看对应人员的档案和记录':'请选择本次资料对应的人员'}</p></div><MemberList members={members} currentId={currentId} onSelect={onSelect}/>{onAdd&&<button className="member-add" onClick={onAdd}>＋ 添加家人</button>}</MemberDialog>;
+}
+
+export function MemberConsentDialog({token,member,onClose,onChanged}:{token:string;member:MemberResponse;onClose:()=>void;onChanged:(id:string)=>Promise<void>}) {
+  const [consent,setConsent]=useState<CareConsent>();
+  const [busy,setBusy]=useState(false),[error,setError]=useState(''),[retry,setRetry]=useState(0);
+  useEffect(()=>{let active=true;setConsent(undefined);setError('');getCareConsent(token,member.subject_id).then(value=>{if(active)setConsent(value);}).catch(e=>{if(active)setError(e.message);});return()=>{active=false;};},[token,member.subject_id,retry]);
+  return <MemberDialog title="确认资料用途" onClose={onClose}><div className="member-picker-heading"><h2>确认 {member.name} 的资料用途</h2><p>仅用于整理主动提供的合成资料、生成单次关怀与保存相关对话。长期记忆、资源匹配与评测不在此授权中。</p></div>
+    {!consent&&!error&&<p role="status">正在读取授权状态…</p>}
+    {error&&<p className="auth-error" role="alert">{error}</p>}
+    {consent?<button className="member-primary member-consent-confirm" disabled={busy} onClick={async()=>{setBusy(true);setError('');try{if(consent.status!=='active')await changeCareConsent(token,true,consent.version,member.subject_id);await onChanged(member.subject_id);onClose();}catch(e){setError(e instanceof Error?e.message:'授权更新失败，请重试。');setRetry(n=>n+1);}finally{setBusy(false);}}}>{busy?'正在确认…':'确认并继续'}</button>:error&&<button className="member-add" onClick={()=>setRetry(n=>n+1)}>重新加载</button>}
+  </MemberDialog>;
 }
