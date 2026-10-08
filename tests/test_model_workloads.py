@@ -20,9 +20,14 @@ class ModelWorkloadTests(unittest.TestCase):
             config.return_value.base_url='https://api.deepseek.com'
             config.return_value.model_id='deepseek-flash'
             post.return_value.json.return_value={'choices':[{'message':{'content':'{}'}}]}
-            AgentModel(analysis_mode=True).complete([])
+            narrative=AgentModel(analysis_mode=True)
+            narrative.complete([])
             self.assertEqual(post.call_args.kwargs['json']['thinking'],{'type':'disabled'})
             self.assertEqual(post.call_args.kwargs['json']['max_tokens'],8000)
+            narrative.complete([])
+            self.assertEqual(post.call_args.kwargs['json']['thinking'],{'type':'enabled'})
+            self.assertEqual(post.call_args.kwargs['json']['reasoning_effort'],'low')
+            self.assertEqual(post.call_args.kwargs['json']['max_tokens'],16000)
             AgentModel().complete([])
             self.assertNotIn('thinking',post.call_args.kwargs['json'])
 

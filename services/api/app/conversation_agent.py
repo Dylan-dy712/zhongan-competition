@@ -126,9 +126,10 @@ class AgentModel:
                 'response_format': {'type': 'json_object'},
                 'max_tokens': 16000 if self.analysis_mode else 2200}
         if self.analysis_mode:
-            options=workload_options(self.config.base_url,self.config.model_id,'narrative')
+            options=workload_options(self.config.base_url,self.config.model_id,
+                                     'narrative_repair' if self.usage else 'narrative')
             body.update(options)
-            if options:
+            if options.get('thinking',{}).get('type')=='disabled':
                 body['max_tokens']=8000
         if not self.analysis_mode:
             body.update(tools=TOOLS, tool_choice='auto' if allow_tools else 'none')
@@ -370,15 +371,19 @@ def run_agent(history, question, attachments, tools, model=None, on_event=None, 
                 reply = AgentReply.model_validate({**wire.model_dump(mode='json'), 'evidence_refs':list(dict.fromkeys(refs))})
             else:
                 reply = AgentReply.model_validate_json(content)
-        except ValidationError:
+        except ValidationError as exc:
             if repaired or round_index == 4:
                 raise
             repaired = True
+            errors = '、'.join(str(e['loc'][0]) + ':' + e['type']
+                for e in exc.errors(include_input=False)
+                if e['loc'] and e['loc'][0] in {'text','evidence_refs','history_refs'})
             messages.extend([
                 {'role': 'assistant', 'content': content},
-                {'role': 'user', 'content': '只修复回答格式，不添加新事实。必须是JSON对象，且仅包含text（非空字符串，最多6000字符）、evidence_refs（最多20个' +
+                {'role': 'user', 'content': '格式错误项：' + (errors or 'JSON结构') +
+                 '。只修复回答格式，不添加新事实。必须是JSON对象，且仅包含text（非空字符串，最多6000字符）、evidence_refs（最多20个' +
                  ('材料中S1等短编号' if analysis_mode else '实际来源UUID字符串') +
-                 '）、history_refs（最多12个历史UUID字符串）。选择支持正文关键事实的来源，不逐条列出OCR碎片；没有引用时用空数组。不要输出Markdown或其他字段。'},
+                 '）、history_refs（最多12个历史UUID字符串）。只选择支持正文关键事实的少量直接来源，绝对不要复制整个材料编号集合；没有引用时用空数组。不要输出Markdown或其他字段。'},
             ])
             continue
         if analysis_mode and analysis_has_evidence and not reply.evidence_refs:

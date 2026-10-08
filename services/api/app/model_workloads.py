@@ -9,6 +9,6 @@ def workload_options(base_url, model_id, workload):
         return {}
     if workload in {'extraction','narrative'}:
         return {'thinking':{'type':'disabled'}}
-    if workload == 'review':
+    if workload in {'review','narrative_repair'}:
         return {'thinking':{'type':'enabled'},'reasoning_effort':'low'}
     return {}
