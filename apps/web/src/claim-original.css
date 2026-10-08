@@ -117,3 +117,47 @@
 .claim-panel{overflow:hidden}.claim-react{height:100%;min-height:0;display:flex;flex-direction:column}.claim-react>.claim-shell{flex:1;min-height:0}.claim-react .claim-footer{flex-wrap:wrap}.claim-react .claim-footer .claim-consent{flex-basis:100%}.claim-react .claim-error{margin:0;padding:10px 20px}.claim-react button:disabled{opacity:.5;cursor:default}
 
 .claim-react>footer.claim-shell{height:auto;flex:none;flex-direction:row}.claim-react>.claim-shell>.claim-shell{min-height:0;flex:1}
+
+/* Keep the claim flow readable on desktop without changing the mobile form. */
+@media (min-width: 761px) {
+  .claim-panel {
+    background: #edf5f1;
+  }
+
+  .claim-react {
+    width: calc(100% - 48px);
+    max-width: 960px;
+    margin-inline: auto;
+    border-inline: 1px solid #dce8e1;
+  }
+
+  .claim-react > .claim-text {
+    align-self: flex-start;
+    margin-left: 24px;
+  }
+
+  .claim-react .claim-header {
+    padding-inline: 28px;
+  }
+
+  .claim-react .claim-steps {
+    width: 100%;
+    max-width: 720px;
+    margin-inline: auto;
+  }
+
+  .claim-react .claim-main {
+    padding-inline: 28px;
+    scrollbar-width: thin;
+    scrollbar-color: #b8d4c5 transparent;
+  }
+
+  .claim-react > footer.claim-footer {
+    padding-inline: 28px;
+  }
+
+  .claim-react .claim-footer .claim-primary {
+    flex: 0 1 280px;
+    margin-left: auto;
+  }
+}
