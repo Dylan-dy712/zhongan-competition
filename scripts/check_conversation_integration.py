@@ -240,13 +240,17 @@ def main():
                       'follow-up agent can read the same checked material report and cite its evidence')
             evidence_ref=[]
             def grounded_reply(messages):
-                data=json.loads(next(m['content'] for m in reversed(messages) if m['role']=='tool'))
+                data=json.loads(next(m['content'] for m in reversed(messages)
+                                     if 'authorized_material_batches' in (m.get('content') or '')))['authorized_material_batches'][0]
                 evidence_ref.append(str(data['evidence'][0]['evidence_id']))
                 return {'role':'assistant','content':json.dumps({'text':'票据记载总费用120元。','evidence_refs':evidence_ref,'history_refs':[]})}
-            model=ScriptedModel([tool('read_materials'),grounded_reply])
+            model=ScriptedModel([grounded_reply])
             with patch('services.api.app.conversation_agent.AgentModel',return_value=model):
                 completed=client.post(base+f'/analyses/{run_id}/continue',headers=headers)
             check(completed.status_code==200,'analysis completion continues with real evidence')
+            check(completed.json()['answer']['analysis_run_id']==str(run_id) and
+                  completed.json()['answer']['prompt_version']=='patient-analysis-narrative-v1',
+                  'personal narrative is model-generated and bound to the exact analysis run')
             with patch('services.api.app.conversation_agent.AgentModel',side_effect=AssertionError('replay')):
                 replay=client.post(base+f'/analyses/{run_id}/continue',headers=headers)
             check(replay.json()['turn_id']==completed.json()['turn_id'],'automatic continuation is idempotent')

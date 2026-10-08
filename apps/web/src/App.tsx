@@ -3,7 +3,8 @@ import {ApiError, continueAnalysis, createConversation, getConversation, getEvid
   listConversations, listSubjects, sendChatMessage, uploadChatDocument,
   listDeliveries, recordDeliveryReceipt, submitCareFeedback} from './api';
 import {startChatAnalysis} from './api';
-import AnalysisFlow,{analysisView,MaterialReportContent,type UploadProgress} from './AnalysisFlow';
+import AnalysisFlow,{analysisView,type UploadProgress} from './AnalysisFlow';
+import AnalysisNarrative,{currentNarrative} from './AnalysisNarrative';
 import type {ChatSnapshot, ChatSubject, ChatTurn, Conversation, Evidence, ToolEvent, DeliveryNotice, FeedbackType,ReportSection} from './types';
 import {CareReport,EvidencePanel,brand} from './CarePages';
 import {DemoHome,DemoRecords,DemoIcon} from './DemoPages';
@@ -182,6 +183,12 @@ export default function App() {
   },[snapshot?.analysis.run_id,snapshot?.analysis.status,snapshot?.conversation.conversation_id]);
   useEffect(()=>{++evidenceRequest.current;setHistoryOpen(false);setEvidence(null);if(panel!=='chat')setClaimGuideConversation('');},[panel]);
   useEffect(()=>{
+    if(panel==='report' && snapshot && !publishedCare(snapshot.report))setPanel('chat');
+  },[panel,snapshot,setPanel]);
+  useEffect(()=>{
+    if(snapshot?.material_report?.status==='available')setAnalysisOpen(false);
+  },[snapshot?.material_report?.status,snapshot?.analysis.run_id]);
+  useEffect(()=>{
     const media=window.matchMedia?.('(max-width:760px)');
     if(!media)return;
     const update=()=>{setMobileHistory(media.matches);setHistoryOpen(false);};
@@ -279,6 +286,7 @@ export default function App() {
         if(stopped || epoch.current!==generation) return;
         const run=state.analysis;
         const shouldContinue=run.run_id && ['completed','waiting_review'].includes(run.status)
+          && !currentNarrative(state.turns,run.run_id)
           && state.turns.some(t=>t.status==='completed' && t.tool_events.some(e=>e.tool==='start_analysis' && e.run_id===run.run_id));
         const key=`${id}:${run.run_id}`;
         if(shouldContinue && !busyRef.current && !uploadingRef.current && !state.turns.some(t=>t.status==='running') && !resumed.current.has(key)) {
@@ -381,11 +389,16 @@ export default function App() {
     catch(e){setError(errorText(e));}
   };
   const turns=[...older,...(snapshot?.turns || [])].filter((t,i,all)=>all.findIndex(x=>x.turn_id===t.turn_id)===i);
+  const narrative=currentNarrative(turns,snapshot?.analysis.run_id);
   const showClaimGuide=!!snapshot && claimGuideConversation===snapshot.conversation.conversation_id;
   const working=busy || uploading || loadingConversation || !!snapshot?.turns.some(t=>t.status==='running');
   const submit=(e:FormEvent)=>{e.preventDefault();void send();};
-  const openReport=(section?:ReportSection['section_type'])=>{setAnalysisOpen(false);setReportFocus(section);setPanel('report');};
-  const askMaterial=(question:string)=>{setAnalysisOpen(false);setPanel('chat');setInput(question);requestAnimationFrame(()=>document.querySelector<HTMLTextAreaElement>('.composer textarea')?.focus());};
+  const openNarrative=()=>{setAnalysisOpen(false);setPanel('chat');requestAnimationFrame(()=>{
+    const target=narrative?document.getElementById(`turn-${narrative.turn_id}`):bottom.current;
+    target?.scrollIntoView({behavior:'smooth',block:'start'});});};
+  const openReport=(section?:ReportSection['section_type'])=>{
+    if(!snapshot || !publishedCare(snapshot.report)){openNarrative();return;}
+    setAnalysisOpen(false);setReportFocus(section);setPanel('report');};
   const material=snapshot?.material_report;
   const progressView=analysisView(snapshot,uploadProgress,analysisSubmitting,analysisError);
   const historyPanel=<aside className="chat-sidebar" aria-label="历史对话列表">
@@ -405,7 +418,7 @@ export default function App() {
       {connected && panel==='chat' && <div className="chat-page-actions">
         {mobileHistory && <button ref={historyTrigger} className="history-trigger" aria-haspopup="dialog" aria-controls="history-dialog" aria-expanded={historyOpen} onClick={()=>setHistoryOpen(true)}><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><path d="M4 8a8 8 0 1 1-1 7M4 3v5h5"/><path d="M12 7v5l3 2"/></svg>历史对话</button>}
         <div className="nuan-header-identity"><strong>暖暖</strong><span>你的就医关怀助手</span></div>
-        {snapshot && <button className="chat-guide-entry" onClick={()=>openReport()}>关怀指引</button>}
+        {snapshot && (publishedCare(snapshot.report) || narrative) && <button className="chat-guide-entry" onClick={()=>narrative?openNarrative():openReport()}>{narrative?'材料解读':'关怀指引'}</button>}
       </div>}
       {delivery && snapshot?.report.report_id===delivery.report_id && <div className="analysis-status care-notice" role="status">{delivery.message}
         {delivery.receipt_state==='read' ? <span>已查看</span> : <button onClick={()=>openReport()}>查看指引</button>}</div>}
@@ -434,7 +447,6 @@ export default function App() {
           <button disabled={busy || (!subjects.length && !caseInput)} onClick={()=>void newChat()}>{busy?'正在打开…':'开始新的对话'}</button>
           {!subjects.length && !caseInput && <small>请先到“我的”确认关怀资料授权，再开始对话。</small>}</div></main>
       : panel==='report' ? <main className="chat-report"><h1>本次关怀指引</h1>
-          {material?.status==='available' && <><h2>材料分析报告</h2><MaterialReportContent report={material} onEvidence={id=>void showEvidence(id)} onAsk={askMaterial}/></>}
           {publishedCare(snapshot.report) ? <><p className="care-report-version">第 {snapshot.report.report_version} 版 · 已审核发布</p>
             <CareReport report={snapshot.report} initialSection={reportFocus} onEvidence={id=>void showEvidence(id)}/>
             {snapshot.report.report_id && <div className="report-feedback"><p>这份指引对你有帮助吗？</p>
@@ -443,22 +455,21 @@ export default function App() {
               <button disabled={feedbackBusy} onClick={()=>void feedback('inaccurate')}>内容需要核实</button>
               <button disabled={feedbackBusy} onClick={()=>void feedback('needs_help')}>我需要帮助</button>
               {feedbackNotice && <p role="status">{feedbackNotice}</p>}</div>}</>
-          : material?.status==='available'?<p className="material-report-notice">正式关怀指引中的专业结论和行动建议仍在复核；上方材料报告可直接阅读和追问。</p>
-          : <div className="empty-report"><p>{material?.status==='failed'?'报告生成失败，材料已保存。请回到对话重新分析。':snapshot.report.status==='not_generated'?'还没有报告。你可以在对话中上传材料，让暖暖帮你分析。':'正在准备可阅读的材料报告。'}</p>
+          : <div className="empty-report"><p>暖暖会在对话里结合材料为你解释。</p>
             <button onClick={()=>setPanel('chat')}>回到对话</button></div>}</main>
       : <><main className="chat-scroll inline-report-thread">{showClaimGuide ? <OriginalChatGuide snapshot={snapshot} onEvidence={id=>void showEvidence(id)}/> : <OriginalChatWelcome/>}
-        {(snapshot.analysis.run_id || analysisSubmitting || uploadProgress || analysisError) && <button className="analysis-card" onClick={()=>material?.status==='available'?openReport():setAnalysisOpen(true)}><span className="analysis-card-icon" aria-hidden="true">{material?.status==='available'?'▤':'✦'}</span><span className="analysis-card-copy"><strong>{progressView.title}</strong><small>{material?.status==='available'?'查看报告 · 核对依据 · 继续追问':`${progressView.detail}${progressView.percent!==null?` · ${progressView.percent}%`:''}`}</small></span><span className="analysis-card-arrow" aria-hidden="true">›</span></button>}
+        {(snapshot.analysis.run_id || analysisSubmitting || uploadProgress || analysisError) && !narrative && <button className="analysis-card" onClick={()=>material?.status==='available'?openNarrative():setAnalysisOpen(true)}><span className="analysis-card-icon" aria-hidden="true">✦</span><span className="analysis-card-copy"><strong>{progressView.title}</strong><small>{material?.status==='available'?'解读会直接出现在下面，可以接着问':`${progressView.detail}${progressView.percent!==null?` · ${progressView.percent}%`:''}`}</small></span><span className="analysis-card-arrow" aria-hidden="true">›</span></button>}
         {hasOlder && turns.length>0 && <button className="load-history" onClick={()=>void loadOlder()}>查看更早的聊天</button>}
         <div className="nuan-chat-heading"><span><DemoIcon name="chat"/>和暖暖聊聊</span><small>有疑问，接着问</small></div>
         <div className="messages">{turns.length===0 && <div className="message-row assistant"><div className="avatar">✦</div><div className="message-bubble"><div className="nuan-reply-label"><DemoIcon name="leaf"/>暖暖</div><p>你好，我是暖暖。你可以告诉我现在最关心什么，也可以直接上传病历或发票，我会结合材料帮你梳理。</p></div></div>}
           {turns.map(t=><div className="chat-turn" key={t.turn_id} id={`turn-${t.turn_id}`}>
-            {t.input_kind==='analysis_ready' ? <p className="analysis-continuation">材料分析结束 · 暖暖继续为你解释</p> : <div className="message-row user"><div className="message-bubble"><p>{t.question}</p>
+            {t.input_kind==='analysis_ready' ? <p className="analysis-continuation">材料已整理 · 暖暖为你解读</p> : <div className="message-row user"><div className="message-bubble"><p>{t.question}</p>
             {t.attachments.map(a=><span className="attachment" key={a.document_id}>▤ {a.name}</span>)}</div></div>}
-            <div className="message-row assistant"><span className="nuan-avatar" aria-hidden="true">✦</span><div className="message-bubble"><div className="nuan-reply-label"><DemoIcon name="leaf"/>暖暖</div><ToolActivity events={t.tool_events}/>
-              {t.answer ? <><p>{t.answer.text}</p><div className="citation-group">{t.answer.evidence_refs.map(id=><button className="citation" key={id} onClick={()=>void showEvidence(id)}>查看原始依据</button>)}</div>
+            <div className="message-row assistant"><span className="nuan-avatar" aria-hidden="true">✦</span><div className={`message-bubble ${t.input_kind==='analysis_ready'?'narrative-bubble':''}`}><div className="nuan-reply-label"><DemoIcon name="leaf"/>暖暖{t.input_kind==='analysis_ready' && <span>· 材料解读</span>}</div>{t.input_kind!=='analysis_ready' && <ToolActivity events={t.tool_events}/>}
+              {t.answer ? <>{t.input_kind==='analysis_ready'?<AnalysisNarrative turn={t} onEvidence={id=>void showEvidence(id)}/>:<><p>{t.answer.text}</p><div className="citation-group">{t.answer.evidence_refs.map(id=><button className="citation" key={id} onClick={()=>void showEvidence(id)}>查看原始依据</button>)}</div></>}
                 {t.answer.history_refs.length>0 && <small className="history-reference">参考了 {t.answer.history_refs.length} 条你允许回忆的历史记录</small>}</>
                 : t.status==='failed' ? <><p>这次回答没有完成，你的消息已保存。</p><button disabled={working} onClick={()=>void send(t)}>重试这条消息</button></>
-                : <p role="status">正在结合对话处理你的请求…</p>}
+                : <p role="status">{t.input_kind==='analysis_ready'?'材料已经整理好，暖暖正在结合你的资料写解读…':'正在结合对话处理你的请求…'}</p>}
             </div></div></div>)}
         </div><div ref={bottom}/></main>
         <footer className="chat-footer">
@@ -479,7 +490,7 @@ export default function App() {
           </form>
         </footer></>}
       </PageBoundary>
-      {connected && snapshot && <AnalysisFlow open={analysisOpen && ['chat','report'].includes(panel)} snapshot={analysisSubmitting || uploadProgress?null:snapshot} upload={uploadProgress} submitting={analysisSubmitting} error={analysisError} onClose={()=>setAnalysisOpen(false)} onReport={()=>openReport()} onRetry={()=>void startMaterialAnalysis()}/>}
+      {connected && snapshot && <AnalysisFlow open={analysisOpen && ['chat','report'].includes(panel)} snapshot={analysisSubmitting || uploadProgress?null:snapshot} upload={uploadProgress} submitting={analysisSubmitting} error={analysisError} onClose={()=>setAnalysisOpen(false)} onReport={openNarrative} onRetry={()=>void startMaterialAnalysis()}/>}
       {connected && panel!=='claim' && <nav className="care-navigation" aria-label="关怀页面"><button aria-current={panel==='home'?'page':undefined} onClick={()=>setPanel('home')}><DemoIcon name="leaf"/>首页</button>
         <button aria-current={panel==='chat'?'page':undefined} onClick={()=>setPanel('chat')}><DemoIcon name="chat"/>问暖暖</button>
         <button aria-current={panel==='records'?'page':undefined} onClick={()=>setPanel('records')}><DemoIcon name="file"/>就医记录</button>

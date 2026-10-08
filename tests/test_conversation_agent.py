@@ -1,9 +1,9 @@
 import json
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
-from services.api.app.conversation_agent import AgentReply, CareTools, run_agent
+from services.api.app.conversation_agent import AgentReply, AgentModel, CareTools, run_agent
 from services.api.app.repository import AccessDenied
 
 
@@ -17,6 +17,76 @@ def answer(text='你好', refs=None):
 
 
 class AgentTests(unittest.TestCase):
+    def test_analysis_reads_all_source_pages_before_writing_free_text(self):
+        model, tools = MagicMock(), MagicMock()
+        ref1, ref2 = str(uuid4()), str(uuid4())
+        tools.execute.side_effect = [
+            {'status':'available','evidence':[{'evidence_id':ref1,'text':'医疗总费用120元'}],'next_offset':8},
+            {'status':'available','evidence':[{'evidence_id':ref2,'text':'不能排除肺炎'}],'next_offset':None}]
+        model.complete.return_value = answer('票据记载120元。\n\n检查记录写到不能排除肺炎。',[ref1,ref2])
+        reply, events = run_agent([], '解释资料', [], tools, model=model, analysis_mode=True)
+        sent = model.complete.call_args.args[0]
+        payloads = json.loads(sent[-1]['content'])['authorized_material_batches']
+        self.assertEqual(len(payloads), 2)
+        self.assertIn('不能排除肺炎', str(payloads))
+        self.assertEqual(reply['prompt_version'], 'patient-analysis-narrative-v1')
+        self.assertEqual(reply['text'], '票据记载120元。\n\n检查记录写到不能排除肺炎。')
+        self.assertEqual(len(events), 2)
+        self.assertEqual(json.loads(tools.execute.call_args_list[1].args[1]),
+                         {'offset':8,'page_size':200,'balanced':True})
+
+    def test_analysis_keeps_text_budget_even_when_one_batch_is_large(self):
+        model,tools=MagicMock(),MagicMock()
+        ref=str(uuid4())
+        tools.execute.return_value={'status':'available','next_offset':None,'evidence':[
+            {'evidence_id':ref,'text':'合成来源'}, {'evidence_id':str(uuid4()),'text':'长'*28000}]}
+        model.complete.return_value=answer('本轮只解读已读取的部分。',[ref])
+        run_agent([], '解释资料', [], tools, model=model, analysis_mode=True)
+        messages=model.complete.call_args.args[0]
+        data=json.loads(messages[-2]['content'])['authorized_material_batches'][0]['evidence']
+        self.assertEqual(len(data),1)
+        self.assertIn('未覆盖全部页',messages[-1]['content'])
+
+    def test_analysis_partial_read_is_explicit_and_bounded(self):
+        model, tools = MagicMock(), MagicMock()
+        ref=str(uuid4())
+        tools.execute.return_value={'status':'available','evidence':[{'text':'synthetic','evidence_id':ref}], 'next_offset':8}
+        model.complete.return_value=answer('本轮只解读已读取的部分。',[ref])
+        run_agent([], '解释资料', [], tools, model=model, analysis_mode=True)
+        self.assertEqual(tools.execute.call_count, 6)
+        self.assertFalse(model.complete.call_args.kwargs['allow_tools'])
+        self.assertIn('不得把未读取的内容说成缺资料', str(model.complete.call_args.args[0]))
+
+    def test_analysis_with_sources_requires_citations_and_rejects_unsafe_advice(self):
+        for text, refs, error in [('未引用的分析', [], 'UNSOURCED_ANALYSIS'),
+                                   ('请自行停药', [str(uuid4())], 'UNSAFE_ANALYSIS')]:
+            with self.subTest(text=text):
+                model,tools=MagicMock(),MagicMock()
+                tools.execute.return_value={'status':'available','evidence':[{'text':'合成票据'}],'next_offset':None}
+                model.complete.return_value=answer(text,refs)
+                with self.assertRaisesRegex(ValueError,error):
+                    run_agent([], '解释资料', [], tools, model=model, analysis_mode=True)
+
+    def test_analysis_does_not_read_unavailable_sources(self):
+        model,tools=MagicMock(),MagicMock()
+        tools.execute.return_value={'status':'failed'}
+        with self.assertRaisesRegex(RuntimeError,'ANALYSIS_SOURCES_UNAVAILABLE'):
+            run_agent([], '解释资料', [], tools, model=model, analysis_mode=True)
+        model.complete.assert_not_called()
+
+    def test_analysis_model_allows_longer_reasoning_without_changing_normal_chat(self):
+        with patch('services.api.app.conversation_agent.OpenAiCompatibleExtractor') as config, \
+             patch('services.api.app.conversation_agent.requests.post') as post:
+            config.return_value.base_url='https://example.invalid'
+            post.return_value.json.return_value={'choices':[{'message':answer()}]}
+            AgentModel(analysis_mode=True).complete([])
+            self.assertEqual(post.call_args.kwargs['timeout'],(10,180))
+            self.assertEqual(post.call_args.kwargs['json']['max_tokens'],16000)
+            self.assertNotIn('tools',post.call_args.kwargs['json'])
+            AgentModel().complete([])
+            self.assertEqual(post.call_args.kwargs['timeout'],(5,20))
+            self.assertEqual(post.call_args.kwargs['json']['max_tokens'],2200)
+
     def test_can_chat_without_report_and_receives_previous_turn(self):
         model, tools = MagicMock(), MagicMock()
         model.complete.return_value = answer('你刚才说担心费用，我们可以先核对票据。')
