@@ -7,7 +7,7 @@ def workload_options(base_url, model_id, workload):
         return {}
     if model_id != 'deepseek-flash':
         return {}
-    if workload in {'extraction','narrative'}:
+    if workload in {'extraction','narrative','fidelity'}:
         return {'thinking':{'type':'disabled'}}
     if workload == 'review':
         return {'thinking':{'type':'enabled'},'reasoning_effort':'low'}

@@ -1,4 +1,9 @@
 import type {ChatTurn} from './types';
+import {narrativeBlocks,emphasisParts} from './narrativeFormatting';
+
+function Emphasis({text}:{text:string}) {
+  return <>{emphasisParts(text).map((part,i)=>part.strong?<strong key={i}>{part.text}</strong>:part.text)}</>;
+}
 
 export function currentNarrative(turns:ChatTurn[],runId?:string) {
   return runId ? [...turns].reverse().find(t=>t.input_kind==='analysis_ready'
@@ -7,9 +12,17 @@ export function currentNarrative(turns:ChatTurn[],runId?:string) {
 
 export default function AnalysisNarrative({turn,onEvidence}:{turn:ChatTurn;onEvidence:(id:string)=>void}) {
   if(!turn.answer)return null;
+  const blocks=narrativeBlocks(turn.answer.text);
+  let number=0;
   return <article className="analysis-narrative" aria-label="暖暖的材料解读">
     <div className="analysis-narrative-copy">
-      {turn.answer.text.split(/\n\s*\n/).filter(p=>p.trim()).map((p,i)=><p key={i}>{p}</p>)}
+      {blocks.map((block,i)=>block.kind==='point'
+        ? <section className="analysis-narrative-point" key={i}>
+            <span className="analysis-point-number" aria-label={`第 ${++number} 点`}>{number}</span>
+            <div><p className="analysis-point-lead"><Emphasis text={block.text}/></p>
+              {block.paragraphs.map((text,j)=><p key={j}><Emphasis text={text}/></p>)}</div>
+          </section>
+        : <p key={i}><Emphasis text={block.text}/></p>)}
     </div>
     {turn.answer.evidence_refs.length>0 && <details className="analysis-narrative-sources">
       <summary>这份解读的材料依据 <span>{turn.answer.evidence_refs.length}</span></summary>

@@ -17,10 +17,11 @@ from .report_builder import _unsafe
 from .analysis_sources import pack_sources
 from .model_workloads import workload_options
 from .analysis_format import strict_analysis_tool, decode_analysis_tool
+from .analysis_review import review_analysis
 
 
 PROMPT_VERSION = 'conversation-agent-v1'
-ANALYSIS_PROMPT_VERSION = 'patient-analysis-narrative-v2'
+ANALYSIS_PROMPT_VERSION = 'patient-analysis-narrative-v3'
 ANALYSIS_INSTRUCTION = """
 本轮任务是在对话中写一份基于实际材料的文字分析，像医护人员耐心解释，温和清楚。
 先回应用户真实关切，再把这次材料中最重要的信息串成连贯的自然段，避免只拼贴原文。
@@ -30,14 +31,22 @@ ANALYSIS_INSTRUCTION = """
 可通俗转述材料已记载的事实和医嘱，必须保留疑似、否定、既往、住院/出院阶段和费用口径。
 原文没写不等于事情没发生；出院医嘱没列某药，不等于停药，不追问“为什么停药”。
 费用标签必须保持原文口径：个人自费不改为现金支付，个人账户不改为统筹支付。
-原文未明确同一单据的范围和项目完整性时，不相加推算总费用、比例或个人最终负担。
+费用解读只转述原文标签与明确对应的金额，不相加、不验算合计、不算比例、不推断个人最终负担。
+原文没有明确正常/异常或参考范围时，不根据检验数字自行判断；“暂未回报异常”等难断句表述保留原句，不改成“尚未出结果”或“结果正常”。
+合计只转述所在单据，不声称每份清单都有相同总额；跨列金额与标签对应不清时，不硬配项目，说明需要核对原票据。
+多份材料通常控制在500到800字，最多5个重点，每点解释2到4句；重要原文医嘱可适度展开。不逐项抄化验数值、收费明细，不重复总结。
 医学解释只使用材料本身或已发布的报告，不增加病因、疗效判断、用药方案、复诊日期或保险赔付推断。
 可解释“不能排除”等词的字面限定，但不扩展诊断依据、常见症状或检查方案等材料未记载的医学知识。
 医嘱应说成“出院记录写到”，不包装成你新开的建议。排班名单不是治疗安排，不逐个罗列医师姓名。
 缺信息或有矛盾时在相关段落说明，一次说清，不反复列出“几项待核实”或系统审核状态。
 不要猜患者年龄、身份、情绪或家庭关系；可以邀请用户说出最关心的问题，不替用户表达担忧。
 不展示自动核验、Schema、工具名等实现细节；不声称未经发布的专业结论已审核。
-采用连贯自然段，直接写短句，不使用Markdown标记、表格或固定六段模板，避免逐段起标题。
+采用简短概述、编号重点和短解释，方便手机扫读；主题和点数由实际材料决定，不凑固定六段。
+每个重点以“1. **贴合材料的短标题**”单独起行，下面用1到2个短段落解释；编号之间空一行。
+短材料1到2个重点，多份材料通常3到5个重点；先写最重要的信息，避免长篇复述和重复提醒。
+只用**加粗**标记每点少量关键事实、金额和完整限定；不使用HTML、链接、表格或其他Markdown。
+强调时必须把“疑似、未见、不能排除、既往、住院期间”等限定一起加粗，不能只突出疾病或药名。
+标题也不得把疑似写成确诊、既往写成本次、票据金额写成最终个人负担。
 简短材料就简短解释，多份材料可展开；只说影响理解的不确定之处，不逐项盘点所有没提供的信息。
 结尾给一个结合本次内容可以继续讨论的问题。所有材料事实附实际读取过的引用。
 JSON中的text最多6000字符，history_refs最多12个。
@@ -147,6 +156,12 @@ class AgentModel:
         self.usage.append(payload.get('usage', {}))
         message=payload['choices'][0]['message']
         return decode_analysis_tool(message) if strict_format else message
+
+
+    def review_analysis(self, packed, text):
+        verdict,usage=review_analysis(self.config,packed,text)
+        self.usage.extend(usage.get('request_usages',[usage]))
+        return verdict
 
 
 class CareTools:
@@ -301,6 +316,8 @@ def run_agent(history, question, attachments, tools, model=None, on_event=None, 
     analysis_has_evidence = False
     aliases = {}
     model_seconds = 0
+    review_calls = 0
+    review_seconds = 0
     if analysis_mode:
         # Read source pages before drafting: the six-section projection can omit
         # treatment facts and is not a suitable outline for a personal explanation.
@@ -390,20 +407,36 @@ def run_agent(history, question, attachments, tools, model=None, on_event=None, 
                 {'role': 'user', 'content': '格式错误项：' + (errors or 'JSON结构') +
                  '。只修复回答格式，不添加新事实。必须是JSON对象，且仅包含text（非空字符串，最多6000字符）、evidence_refs（最多20个' +
                  ('材料中S1等短编号' if analysis_mode else '实际来源UUID字符串') +
-                 '）、history_refs（最多12个历史UUID字符串）。只选择支持正文关键事实的少量直接来源，绝对不要复制整个材料编号集合；没有引用时用空数组。不要输出Markdown或其他字段。'},
+                 '）、history_refs（最多12个历史UUID字符串）。只选择支持正文关键事实的少量直接来源，绝对不要复制整个材料编号集合；没有引用时用空数组。text可保留编号与**加粗**，不要输出其他字段。'},
             ])
             continue
         if analysis_mode and analysis_has_evidence and not reply.evidence_refs:
             raise ValueError('UNSOURCED_ANALYSIS')
-        if analysis_mode and _unsafe(reply.text):
+        if analysis_mode and _unsafe(reply.text.replace("**", "")):
             raise ValueError('UNSAFE_ANALYSIS')
         tools.validate_reply(reply)
+        # Scripted models must explicitly implement review to exercise this stage.
+        # Every real AgentModel has it; no accepted draft is delivered unchecked.
+        reviewer=getattr(type(model),'review_analysis',None)
+        if analysis_mode and reviewer is not None:
+            review_started=time.monotonic()
+            if on_event:on_event(events)  # Renew the lease before the review request.
+            verdict=model.review_analysis(packed,reply.text)
+            review_calls+=1
+            review_seconds+=time.monotonic()-review_started
+            if not verdict.accepted:
+                if round_index>=1:raise ValueError('ANALYSIS_FIDELITY_REJECTED')
+                messages.extend([{'role':'assistant','content':content},
+                    {'role':'user','content':('费用有错时，删掉有问题的次要明细；只保留能直接核对的原文总额，不再列起付线、乙类费用等容易错配的项目。不要把错误数字换成新的推断。' if any(issue.category=='payment' for issue in verdict.issues) else '')+'原文复核未通过。仅修正这些有依据的具体问题，其他正确表述保持简短，不新增项目或解释。重新输出完整解读；原文才是依据，复核意见不是新增事实：'+
+                     json.dumps([issue.model_dump() for issue in verdict.issues],ensure_ascii=False)}])
+                continue
         result = {**reply.model_dump(mode='json'),
                   'prompt_version': ANALYSIS_PROMPT_VERSION if analysis_mode else PROMPT_VERSION}
         if analysis_mode:
             result['performance'] = {'source_fragments':len(aliases), 'source_characters':size,
                 'model_input_characters':sum(len(m.get('content') or '') for m in messages),
-                'model_calls':round_index+1, 'model_seconds':round(model_seconds,3),
+                'model_calls':len(model.usage) if isinstance(getattr(model,'usage',None),list) else round_index+1+review_calls, 'model_seconds':round(model_seconds+review_seconds,3),
+                'review_calls':review_calls, 'review_seconds':round(review_seconds,3),
                 'total_seconds':round(time.monotonic()-started,3)}
         model_id = getattr(getattr(model, 'config', None), 'model_id', None)
         if isinstance(model_id, str):
