@@ -25,7 +25,7 @@ export function actionTime(action:CareAction) {
   return new Date(action.due_at).toLocaleString('zh-CN',{month:'long',day:'numeric',hour:'2-digit',minute:'2-digit',timeZoneName:'short'});
 }
 export function careStatus(snapshot:ChatSnapshot) {
-  if(snapshot.material_report?.status==='available')return {title:'材料分析报告已准备好',text:'查看已核对内容和材料依据，待核实项已单独标注，可以继续追问。'};
+  if(snapshot.material_report?.status==='available')return {title:'材料已整理，暖暖在对话里为你解读',text:'结合你实际上传的材料，一件一件说清楚。'};
   if(snapshot.material_report?.status==='failed')return {title:'报告生成暂时没有完成',text:'材料已保存，回到对话可以重新分析。'};
   if(publishedCare(snapshot.report))return {title:'这次关怀，已经准备好',text:'先看最关心的一件事，也可以展开资料依据。'};
   if(snapshot.analysis.status==='failed')return {title:'材料分析暂时没有完成',text:'回到对话查看提示，补充材料或重试。'};

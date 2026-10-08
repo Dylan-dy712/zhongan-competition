@@ -29,7 +29,12 @@ globalThis.fetch=async(url,options={})=>{
   turns=[{turn_id:'turn-ui',request_id:body.request_id,question:body.message,input_kind:'user',status:'completed',answer:{text:'材料已收到',evidence_refs:[],history_refs:[]},attachments:[],tool_events:[{tool:'start_analysis',run_id:run,status:'queued'}]}];
   return Response.json({turn_id:'turn-ui'});
  }
- if(path.endsWith('/continue'))return Response.json({turn_id:'continue-ui'});
+ if(path.endsWith('/continue')){
+  turns=[...turns.filter(t=>t.input_kind!=='analysis_ready'),{turn_id:'continue-ui',input_kind:'analysis_ready',status:'completed',question:'解释材料',attachments:[],tool_events:[],
+   answer:{text:'我先帮你把这张票据理清楚。材料记载医疗总费用：120元。\n\n这张票据没有说明保险赔付金额，我们先把它与票据上的费用区分开。你最想先核对哪一项？',evidence_refs:['source-ui'],history_refs:[],analysis_run_id:run}}];
+  return Response.json({turn_id:'continue-ui'});
+ }
+ if(path==='/v1/evidence/source-ui')return Response.json({evidence_id:'source-ui',document_version:1,page_index:0,text_span:{text:'医疗总费用：120元'}});
  if(path.endsWith('/messages'))return Response.json({turn_id:'follow-ui'});
  if(path==='/v1/conversations/analysis-ui')return Response.json(state());
  throw Error('Unexpected fixture request '+path);
@@ -55,18 +60,27 @@ try{
   assert.match(document.querySelector('.chat-workspace > dialog.analysis-dialog').textContent,/预估进度/);
  }
  await click('收起进度，稍后查看');assert.equal(document.querySelector('.chat-workspace > dialog.analysis-dialog').open,false);
- phase='ready';await flush();assert.match(document.querySelector('.analysis-card').textContent,/报告已生成/);
- await act(async()=>document.querySelector('.analysis-card').click());await flush();
- assert.equal(window.location.hash,'#/report');assert.match(document.body.textContent,/医疗总费用：120元/);
- assert.match(document.body.textContent,/需要核实/);assert.equal(document.querySelector('.empty-report'),null,'Pending clinical report must not hide checked material report');
- await click('继续问这部分 →');assert.equal(window.location.hash,'#/chat');
- assert.match(document.querySelector('textarea').value,/费用/);
+ phase='ready';await flush();await flush();
+ assert.equal(window.location.hash,'#/chat','Analysis stays in the conversation');
+ assert.match(document.body.textContent,/医疗总费用：120元/);
+ assert.ok(document.querySelector('.analysis-narrative'),'AI free text is the report');
+ assert.equal(document.querySelectorAll('.analysis-narrative-copy p').length,2,'Paragraphs follow the model text, not six fixed sections');
+ assert.equal(document.querySelector('.material-report-content'),null);
+ assert.doesNotMatch(document.body.textContent,/几项解释|当前没有通过自动核对|治疗经过资料待补充/);
+ const sources=document.querySelector('.analysis-narrative-sources');assert.equal(sources.open,false);
+ await act(async()=>sources.querySelector('summary').click());assert.equal(sources.open,true);
+ await click('依据 1 ↗');assert.ok(document.querySelector('dialog.evidence-overlay'));
+ await click('关闭');assert.equal(document.querySelector('dialog.evidence-overlay'),null);
+ await act(async()=>{window.location.hash='/report';});await flush();
+ assert.equal(window.location.hash,'#/chat','Legacy material report route returns to the conversational analysis');
+ await click('材料解读');assert.equal(window.location.hash,'#/chat');
+ turns=turns.filter(t=>t.input_kind!=='analysis_ready');
  phase='failed';await flush();await act(async()=>document.querySelector('.analysis-card').click());await flush();
  assert.match(document.querySelector('.chat-workspace > dialog.analysis-dialog').textContent,/生成没有完成/);
  await click('重新分析材料');assert.equal(submissions.length,2);
  assert.notEqual(submissions[0].request_id,submissions[1].request_id,'A new analysis uses a fresh submission identity');
  phase='ready';await flush();assert.equal(document.querySelector('.chat-workspace > dialog.analysis-dialog progress').value,100);
- await click('查看材料分析报告 →');assert.equal(window.location.hash,'#/report');
- console.log('PASS: real upload acknowledgments, deterministic submission, persisted stage percentages, dismiss/reopen, checked report beside pending clinical content, follow-up, failure retry and completion. Synthetic fixtures only.');
+ assert.equal(window.location.hash,'#/chat');assert.ok(document.querySelector('.analysis-narrative'));
+ console.log('PASS: uploads, real stages, conversational AI report, adaptive paragraphs, collapsed source links, legacy route redirect, failure retry and completion. Synthetic fixtures only.');
 }finally{await act(async()=>root.unmount());await modules.close();dom.window.close();globalThis.setTimeout=realTimeout;}
 

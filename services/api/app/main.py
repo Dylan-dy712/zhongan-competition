@@ -738,7 +738,7 @@ def submit_chat_analysis(conversation_id: UUID, body: ChatMessage,
         raise HTTPException(422, '请先上传材料，再开始分析。') from None
 
 
-def process_chat_message(conversation_id, body, actor_id, conn, input_kind='user'):
+def process_chat_message(conversation_id, body, actor_id, conn, input_kind='user', analysis_run_id=None):
     question = body.message.strip()
     if not question:
         raise HTTPException(422, '消息不能为空')
@@ -747,6 +747,10 @@ def process_chat_message(conversation_id, body, actor_id, conn, input_kind='user
     conn.commit()
     if turn['status'] == 'completed':
         return {'turn_id': turn['turn_id'], 'answer': turn['answer'], 'tool_events': turn['tool_events']}
+    if input_kind == 'analysis_ready':
+        conn.execute("UPDATE conversation_turns SET lease_expires_at=now()+interval '5 minutes' WHERE turn_id=%s AND lease_token=%s",
+                     (turn['turn_id'], turn['lease_token']))
+        conn.commit()
     history = [t for t in chats.get_turns(conn, actor_id, conversation_id) if t['turn_id'] != turn['turn_id']]
     tools = CareTools(conn, actor_id, conversation_id,turn['turn_id'])
     events = []
@@ -754,17 +758,39 @@ def process_chat_message(conversation_id, body, actor_id, conn, input_kind='user
     def progress(current_events):
         events[:] = current_events
         chats.require_conversation(conn, actor_id, conversation_id)
-        conn.execute('''UPDATE conversation_turns SET tool_events=%s::jsonb
+        conn.execute('''UPDATE conversation_turns SET tool_events=%s::jsonb,
+            lease_expires_at=now()+interval '5 minutes'
             WHERE turn_id=%s AND lease_token=%s AND status='running' ''',
             (json.dumps(events), turn['turn_id'], turn['lease_token']))
         conn.commit()
 
     try:
-        answer, events = run_agent(history, question, turn['attachments'], tools, on_event=progress)
+        answer, events = run_agent(history, question, turn['attachments'], tools, on_event=progress,
+                                  analysis_mode=input_kind == 'analysis_ready')
+        if analysis_run_id is not None:
+            # Recheck the actual current case and run after slow model generation.
+            current = chats.require_conversation(conn, actor_id, conversation_id)
+            latest = conn.execute('SELECT run_id FROM analysis_runs WHERE case_id=%s ORDER BY created_at DESC,run_id DESC LIMIT 1',
+                                  (current['case_id'],)).fetchone()
+            if not latest or latest['run_id'] != analysis_run_id:
+                raise ValueError('ANALYSIS_SUPERSEDED')
+            documents = conn.execute('SELECT document_id,document_version,source_hash FROM documents WHERE case_id=%s ORDER BY document_id',
+                                     (current['case_id'],)).fetchall()
+            actual = [{**d, 'document_id': str(d['document_id'])} for d in documents]
+            # Even an upload that has not queued its new analysis invalidates this draft.
+            frozen = conn.execute('SELECT document_versions FROM analysis_runs WHERE run_id=%s',
+                                  (analysis_run_id,)).fetchone()['document_versions']
+            if actual != sorted(frozen, key=lambda d: d['document_id']):
+                raise ValueError('ANALYSIS_MATERIALS_CHANGED')
+            answer['analysis_run_id'] = str(analysis_run_id)
         chats.finish_turn(conn, actor_id, conversation_id, turn, answer=answer, events=events)
         conn.commit()
         return {'turn_id': turn['turn_id'], 'answer': answer, 'tool_events': events}
     except (RuntimeError, ValueError, KeyError, TypeError, requests.RequestException) as exc:
+        if isinstance(exc, ValueError) and str(exc) in {'ANALYSIS_SUPERSEDED', 'ANALYSIS_MATERIALS_CHANGED'}:
+            chats.finish_turn(conn, actor_id, conversation_id, turn, events=events, error='ANALYSIS_SUPERSEDED')
+            conn.commit()
+            raise HTTPException(409, '材料已更新，新的分析完成后会重新解读。') from None
         # Log only safe classifications, never provider bodies, prompts or credentials.
         import logging
         provider_response = getattr(exc, 'response', None)
@@ -793,7 +819,7 @@ def continue_analysis(conversation_id: UUID, run_id: UUID,
         ORDER BY created_at DESC,run_id DESC LIMIT 1''', (run.case_id,)).fetchone()
     if latest['run_id'] != run_id:
         raise HTTPException(409, '已有更新的分析任务')
-    request_id = uuid5(NAMESPACE_URL, f'zhongan:analysis-continuation:{conversation_id}:{run_id}')
+    request_id = uuid5(NAMESPACE_URL, f'zhongan:analysis-narrative-v1:{conversation_id}:{run_id}')
     return process_chat_message(conversation_id, ChatMessage(request_id=request_id,
-        message='材料分析已结束，请结合我刚才关注的问题，读取本次材料和可用报告继续解释；待复核内容请明确说明。'),
-        actor_id=actor_id, conn=conn, input_kind='analysis_ready')
+        message='请结合本次实际材料和我关注的问题，写一份温和清楚、连贯自然的文字分析，直接在对话里解释；内容重点由材料决定，有不确定的地方就说明。'),
+        actor_id=actor_id, conn=conn, input_kind='analysis_ready', analysis_run_id=run_id)

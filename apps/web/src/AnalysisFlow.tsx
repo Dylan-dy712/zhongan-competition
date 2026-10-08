@@ -10,7 +10,7 @@ export function analysisView(snapshot:ChatSnapshot|null,upload?:UploadProgress,s
   if(error)return {kind:'failed',title:'这次分析没有完成',detail:error,percent:null,index:-1};
   if(upload)return {kind:'upload',title:'正在上传材料',detail:`已上传 ${upload.done} / ${upload.total} 份`,percent:Math.floor(upload.done/upload.total*100),index:-1};
   const material=snapshot?.material_report;
-  if(material?.status==='available')return {kind:'ready',title:'你的材料分析报告已生成',detail:'先看结果，有疑问可以接着问暖暖',percent:100,index:5};
+  if(material?.status==='available')return {kind:'ready',title:'材料已整理，暖暖继续为你解读',detail:'文字解读会直接出现在对话中，有疑问可以接着问',percent:100,index:5};
   if(material?.status==='failed' || snapshot?.analysis.status==='failed')return {kind:'failed',title:'报告生成没有完成',detail:'材料已保存，可以重新分析。',percent:null,index:-1};
   if(snapshot?.analysis.status==='cancelled')return {kind:'failed',title:'这次分析已取消',detail:'材料已保存，可以重新分析。',percent:null,index:-1};
   const status=snapshot?.analysis.status;
@@ -77,7 +77,7 @@ export default function AnalysisFlow({open,snapshot,upload,submitting,error,onCl
       {view.kind==='processing' && <div className="analysis-live-note"><span aria-hidden="true"/>{waitingLong?'这一阶段需要多一点时间，后台仍在处理':'暖暖正在处理，分析还在继续'}</div>}
       {estimating && <p className="analysis-estimate-note">进度为平滑预估，具体阶段以实际分析为准</p>}</>}
     {view.kind!=='upload' && view.kind!=='failed' && <ol className="analysis-steps">{steps.map(([key,title],i)=><li key={key} className={i<view.index?'done':i===view.index?'current':''}><span>{i<view.index?'✓':i+1}</span>{title}<small>{i<view.index?'已完成':i===view.index?'进行中':'待开始'}</small></li>)}</ol>}
-    {view.kind==='ready'?<><div className="analysis-ready-note">已整理 {snapshot?.material_report?.document_count || 0} 份材料{(snapshot?.material_report?.pending_count || 0)>0 && ' · 待核实内容已单独标注'}</div><button className="analysis-primary" onClick={onReport}>查看材料分析报告 →</button></>
+    {view.kind==='ready'?<><div className="analysis-ready-note">已整理 {snapshot?.material_report?.document_count || 0} 份材料</div><button className="analysis-primary" onClick={onReport}>回到对话看解读 →</button></>
       :view.kind==='failed'?<button className="analysis-primary" onClick={onRetry}>重新分析材料</button>
       :<><button className="analysis-secondary" onClick={onClose}>收起进度，稍后查看</button><p className="analysis-background-note">收起窗口后，后台会继续分析材料</p></>}
   </dialog>;
