@@ -6,6 +6,7 @@ import mascot from '../../../output_dir/product-design/assets/reference-mascot.w
 import scene from '../../../output_dir/product-design/assets/reference-scene.webp';
 import chatArt from '../../../output_dir/product-design/assets/reference-chat.webp';
 import guide from '../../../output_dir/product-design/assets/reference-guide.webp';
+import summary from '../../../output_dir/product-design/assets/reference-summary.webp';
 import cost from '../../../output_dir/product-design/assets/reference-cost.webp';
 import './demo-original.css';
 
@@ -20,7 +21,7 @@ export function DemoHome({snapshot,onChat,onReport,onClaim}:{snapshot?:ChatSnaps
  const status=snapshot?careStatus(snapshot):{title:'从这次就医开始',text:'先整理病历和费用材料，再一起核对。'};
  return <main className="demo-pages"><div className="home replica-home"><div className="replica-top"><img className="replica-scene" src={scene} alt=""/><header className="brand"><img src={brand} alt="暖愈智护"/></header><div className="replica-hero"><h1>看病之后，<br/><em>安心一点</em></h1><p>暖暖陪你看懂资料，记好安排。</p></div><img className="replica-mascot" src={mascot} alt=""/><img className="replica-chat" src={chatArt} alt=""/></div>
  <section className="replica-guide"><img className="replica-guide-art" src={guide} alt=""/><div className="replica-guide-label"><DemoIcon name="leaf"/>康复指引</div><h2>下一步，一起理清楚</h2><p>{status.title}</p><button className="replica-appointment" onClick={()=>ready?onReport('next_visit_advice'):onChat()}><span><DemoIcon name="leaf"/></span><span><strong>{action?.action_text||status.text}</strong><small>{action? actionTime(action):'结合本次材料，慢慢核对'}</small></span><DemoIcon name="arrow"/></button><button className="replica-primary" onClick={()=>ready?onReport():snapshot?onChat():onClaim()}>{ready?'查看本次关怀':snapshot?'问问暖暖':'准备理赔材料'}<DemoIcon name="arrow"/></button></section>
- <section className="home-claim-section" aria-labelledby="home-claim-title"><h2 className="replica-section-title" id="home-claim-title">理赔材料</h2><button className="home-claim-entry" aria-label="提交理赔材料" onClick={onClaim}><span className="home-claim-copy"><strong>提交理赔材料</strong><span className="home-claim-description">把病历、发票和费用清单放在一起</span><span className="home-claim-tags"><span>病历资料</span><span>费用票据</span></span><span className="home-claim-action">开始提交<DemoIcon name="arrow"/></span></span><img src={cost} alt=""/></button><p className="home-claim-note">先选择本人或家人，再填写信息、上传材料。</p></section></div></main>;
+ <section className="home-claim-section" aria-labelledby="home-claim-title"><h2 className="replica-section-title" id="home-claim-title">提交理赔材料</h2><div className="replica-secondary"><button aria-label="提交病历资料" onClick={onClaim}><img src={summary} alt=""/><strong>病历资料</strong><p>诊断证明与治疗记录</p></button><button aria-label="提交费用票据" onClick={onClaim}><img src={cost} alt=""/><strong>费用票据</strong><p>发票与医疗费用清单</p></button></div><button className="demo-claim-link" aria-label="提交理赔材料" onClick={onClaim}>开始提交理赔材料<DemoIcon name="arrow"/></button></section></div></main>;
 }
 
 export function DemoRecords({conversations,currentCase,busy,onOpen,onNew,onAccount,personName,selected,onSelect}:{conversations:Conversation[];currentCase?:string;busy:boolean;onOpen:(id:string)=>void;onNew:()=>void;onAccount:()=>void;personName:string;selected?:string;onSelect:(caseId?:string)=>void}) {
