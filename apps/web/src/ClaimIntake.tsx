@@ -1,5 +1,6 @@
 import {useEffect,useLayoutEffect,useRef,useState} from 'react';
-import {createConversation,startChatAnalysis,uploadChatDocument,getConversation} from './api';
+import {createConversation,startChatAnalysis,uploadChatDocument,getConversation,continueAnalysis} from './api';
+import {currentNarrative} from './AnalysisNarrative';
 import AnalysisFlow,{type UploadProgress} from './AnalysisFlow';
 import type {ChatSnapshot} from './types';
 import {claimTemplate,initialClaimForm,validateClaimInfo,type ClaimFile,type ClaimForm} from './claimTemplate';
@@ -37,10 +38,35 @@ export default function ClaimIntake({token,subject,visible,onOpen,onAuthorize,on
   const [locked,setLocked]=useState(false);
   const mounted=useRef(true);
   const running=useRef(false);
+  const continuations=useRef(new Set<string>());
+  const openedReports=useRef(new Set<string>());
+  const onOpenRef=useRef(onOpen);onOpenRef.current=onOpen;
   useEffect(()=>{
     if(!visible || (!busy && !finished) || !pending.current)return;
     let stopped=false,timer:ReturnType<typeof setTimeout>;
-    const tick=async()=>{try{const state=await getConversation(token,pending.current!.id);if(!stopped)setSnapshot(state);}catch{/* Submission owns errors; polling can recover. */}if(!stopped)timer=setTimeout(tick,2000);};
+    const tick=async()=>{
+      try{
+        const id=pending.current!.id;
+        let state=await getConversation(token,id);
+        if(stopped)return;
+        setSnapshot(state);
+        const run=state.analysis.run_id;
+        if(run && state.material_report?.status==='available' && !currentNarrative(state.turns,run) && !continuations.current.has(run)){
+          continuations.current.add(run);
+          try{
+            await continueAnalysis(token,id,run);
+            state=await getConversation(token,id);
+            if(stopped)return;
+            setSnapshot(state);
+          }catch(e){if(!stopped)setError(e instanceof Error?e.message:'解读暂时没能完成，可以重试。');}
+        }
+        if(!stopped && run && currentNarrative(state.turns,run) && !openedReports.current.has(run)){
+          openedReports.current.add(run);setProgressOpen(false);
+          await onOpenRef.current(id,true);
+        }
+      }catch{/* Polling can recover without replacing submission errors. */}
+      if(!stopped)timer=setTimeout(tick,2000);
+    };
     void tick();return()=>{stopped=true;clearTimeout(timer);};
   },[visible,busy,finished,token]);
   useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;};},[]);
@@ -82,7 +108,7 @@ export default function ClaimIntake({token,subject,visible,onOpen,onAuthorize,on
     setError('');setStep(step+1);shell.current?.querySelector('.claim-main')?.scrollTo?.(0,0);
   };
   return <main className="claim-react"><button className="claim-text" onClick={onExit}>返回首页</button>
-    <AnalysisFlow open={visible && progressOpen} snapshot={submission || progress?null:snapshot} upload={progress} submitting={submission} error={error} onClose={()=>setProgressOpen(false)} onReport={()=>{setProgressOpen(false);void onOpen(pending.current!.id,true).catch(e=>setError(e instanceof Error?e.message:'打开失败'));}} onRetry={()=>{if(finished){setProgressOpen(false);void onOpen(pending.current!.id).catch(e=>setError(e instanceof Error?e.message:'打开失败'));}else void submit();}}/>
+    <AnalysisFlow open={visible && progressOpen} snapshot={submission || progress?null:snapshot} upload={progress} submitting={submission} error={error} onClose={()=>setProgressOpen(false)} onReport={()=>{setProgressOpen(false);void onOpen(pending.current!.id,true).catch(e=>setError(e instanceof Error?e.message:'打开失败'));}} onRetry={()=>{if(finished && snapshot?.material_report?.status==='available' && snapshot.analysis.run_id){continuations.current.delete(snapshot.analysis.run_id);setError('');}else if(finished){setProgressOpen(false);void onOpen(pending.current!.id).catch(e=>setError(e instanceof Error?e.message:'打开失败'));}else void submit();}}/>
     <div className="claim-shell" ref={shell} onInput={e=>{
       const input=e.target as HTMLInputElement;const key=input.dataset.claimField as keyof ClaimForm;
       if(key && key in form.current){form.current[key]=input.value;}

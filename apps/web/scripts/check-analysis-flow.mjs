@@ -14,7 +14,8 @@ dom.window.HTMLDialogElement.prototype.close=function(){this.open=false;};
 const realTimeout=globalThis.setTimeout;
 globalThis.setTimeout=(fn,ms,...args)=>realTimeout(fn,ms>=1500?20:ms,...args);
 const conversation={conversation_id:'analysis-ui',case_id:'case-ui',title:'合成分析流程',recall_enabled:false,updated_at:'2026-10-08T00:00:00Z'};
-let phase='initial',run='run-1',uploads=0,submissions=[],turns=[],resolveSecond;
+let phase='initial',run='run-1',uploads=0,submissions=[],turns=[],resolveSecond,resolveNarrative;
+let delayNarrative=false,failNarrative=false,continuations=0;
 const section={section_type:'cost_explanation',pending_count:1,items:[{text:'医疗总费用：120元',kind:'checked',evidence_refs:['source-ui']}]};
 const state=()=>({conversation,turns,analysis:{status:phase==='initial'?'not_started':phase==='ready'?'waiting_review':phase==='failed'?'failed':phase==='queued'?'queued':'running',run_id:phase==='initial'?undefined:run,stage:phase==='ready'?'validate':phase},
   report:{status:'not_released'},material_report:{status:phase==='ready'?'available':phase==='failed'?'failed':phase,run_id:run,report_id:'material-ui',document_count:2,source_report_version:1,pending_count:1,notice:'合成自动核对提示',sections:[section]}});
@@ -30,6 +31,9 @@ globalThis.fetch=async(url,options={})=>{
   return Response.json({turn_id:'turn-ui'});
  }
  if(path.endsWith('/continue')){
+  continuations++;
+  if(delayNarrative)await new Promise(r=>resolveNarrative=r);
+  if(failNarrative){failNarrative=false;return Response.json({detail:'合成解读失败'},{status:503});}
   turns=[...turns.filter(t=>t.input_kind!=='analysis_ready'),{turn_id:'continue-ui',input_kind:'analysis_ready',status:'completed',question:'解释材料',attachments:[],tool_events:[],
    answer:{text:'我先帮你把这张票据理清楚。材料记载医疗总费用：120元。\n\n这张票据没有说明保险赔付金额，我们先把它与票据上的费用区分开。你最想先核对哪一项？',evidence_refs:['source-ui'],history_refs:[],analysis_run_id:run}}];
   return Response.json({turn_id:'continue-ui'});
@@ -60,7 +64,16 @@ try{
   assert.match(document.querySelector('.chat-workspace > dialog.analysis-dialog').textContent,/预估进度/);
  }
  await click('收起进度，稍后查看');assert.equal(document.querySelector('.chat-workspace > dialog.analysis-dialog').open,false);
- phase='ready';await flush();await flush();
+ delayNarrative=true;phase='ready';await flush();await flush();
+ await act(async()=>document.querySelector('.analysis-card').click());await flush();
+ const waiting=document.querySelector('.chat-workspace > dialog.analysis-dialog');
+ assert.equal(waiting.open,true,'Material readiness cannot dismiss progress before the text arrives');
+ assert.ok(waiting.querySelector('progress').value>=95 && waiting.querySelector('progress').value<100,'Narrative generation remains below 100%');
+ assert.match(waiting.textContent,/写好解读|把情况讲清楚/);
+ assert.equal(document.querySelector('.analysis-narrative'),null);
+ delayNarrative=false;await act(async()=>resolveNarrative());await flush();await flush();
+ assert.equal(waiting.querySelector('progress').value,100,'100% requires the actual completed narrative');
+ assert.equal(waiting.open,false,'Report arrival closes progress and immediately shows the text');
  assert.equal(window.location.hash,'#/chat','Analysis stays in the conversation');
  assert.match(document.body.textContent,/医疗总费用：120元/);
  assert.ok(document.querySelector('.analysis-narrative'),'AI free text is the report');
@@ -79,7 +92,13 @@ try{
  assert.match(document.querySelector('.chat-workspace > dialog.analysis-dialog').textContent,/生成没有完成/);
  await click('重新分析材料');assert.equal(submissions.length,2);
  assert.notEqual(submissions[0].request_id,submissions[1].request_id,'A new analysis uses a fresh submission identity');
- phase='ready';await flush();assert.equal(document.querySelector('.chat-workspace > dialog.analysis-dialog progress').value,100);
+ failNarrative=true;phase='ready';await flush();await flush();
+ assert.match(document.querySelector('.chat-workspace > dialog.analysis-dialog').textContent,/解读暂时没能完成/);
+ const beforeRetry=continuations;
+ await click('重新分析材料');await flush();
+ assert.equal(submissions.length,2,'Retrying the narrative does not restart material analysis');
+ assert.equal(continuations,beforeRetry+1,'Narrative failure can be retried explicitly');
+ assert.equal(document.querySelector('.chat-workspace > dialog.analysis-dialog progress').value,100);
  assert.equal(window.location.hash,'#/chat');assert.ok(document.querySelector('.analysis-narrative'));
  console.log('PASS: uploads, real stages, conversational AI report, adaptive paragraphs, collapsed source links, legacy route redirect, failure retry and completion. Synthetic fixtures only.');
 }finally{await act(async()=>root.unmount());await modules.close();dom.window.close();globalThis.setTimeout=realTimeout;}

@@ -11,7 +11,7 @@ dom.window.HTMLDialogElement.prototype.showModal=function(){this.open=true;};dom
 const {createRoot}=await import('react-dom/client');
 const modules=await loadTestModules();
 const calls=[];let consent={version:0,status:'not_granted',notice_version:'account-care-v1',purpose:'case_guidance'};
-let conversation=null,uploadCount=0,failUpload=true;
+let conversation=null,uploadCount=0,failUpload=true,claimReady=false,claimTurns=[],resolveClaimNarrative;
 globalThis.fetch=async(url,options={})=>{
   const path=new URL(url,'http://localhost').pathname;
   const body=typeof options.body==='string'?JSON.parse(options.body):options.body;
@@ -33,7 +33,12 @@ globalThis.fetch=async(url,options={})=>{
     return Response.json({document_id:'doc-'+uploadCount,source_ref:'synthetic'});
   }
   if(path.endsWith('/messages') || path.endsWith('/analyses'))return Response.json({status:'completed'});
-  if(path.includes('/v1/conversations/'))return Response.json({conversation,turns:[],analysis:{status:'not_started'},report:{status:'not_generated'}});
+  if(path.endsWith('/continue')){
+    await new Promise(r=>resolveClaimNarrative=r);
+    claimTurns=[{turn_id:'claim-narrative',input_kind:'analysis_ready',status:'completed',question:'合成测试',attachments:[],tool_events:[],answer:{text:'我看过你上传的资料了，咱们先把这次费用理清楚。',evidence_refs:[],history_refs:[],analysis_run_id:'claim-run'}}];
+    return Response.json({turn_id:'claim-narrative'});
+  }
+  if(path.includes('/v1/conversations/'))return Response.json({conversation,turns:claimTurns,analysis:{status:claimReady?'waiting_review':'not_started',run_id:claimReady?'claim-run':undefined},report:{status:'not_generated'},material_report:claimReady?{status:'available',run_id:'claim-run',sections:[]}:undefined});
   if(path.endsWith('/deliveries'))return Response.json([]);
   throw Error('Unexpected test request '+path);
 };
@@ -87,7 +92,15 @@ try{
   const creations=calls.filter(c=>c.path==='/v1/conversations' && c.body);
   assert.equal(creations.length,2);assert.equal(creations[0].body.conversation_id,creations[1].body.conversation_id);
   assert.equal(creations[0].body.recall_enabled,false);
-  await click('查看专属关怀');assert.equal(window.location.hash,'#/chat');
+  claimReady=true;await act(async()=>{await new Promise(r=>setTimeout(r,2100));});await flush();
+  assert.ok(resolveClaimNarrative,'Claim intake starts the actual text generation before completing progress');
+  const claimProgress=document.querySelector('.claim-react dialog.analysis-dialog');
+  assert.equal(claimProgress.open,true);
+  assert.ok(claimProgress.querySelector('progress').value>=95 && claimProgress.querySelector('progress').value<100);
+  assert.equal(window.location.hash,'#/claim');
+  await act(async()=>resolveClaimNarrative());await flush();await flush();
+  assert.equal(window.location.hash,'#/chat','Claim report opens automatically once its text is ready');
+  assert.ok(document.querySelector('.analysis-narrative'));
   assert.ok(document.querySelector('#chat-topic-action'),'Claim completion must show care cards');
   assert.ok(document.querySelector('#chat-topic-summary'));assert.ok(document.querySelector('#chat-topic-cost'));
   assert.ok(document.querySelector('.nuan-quick-actions'),'Claim cards must have working shortcuts');
