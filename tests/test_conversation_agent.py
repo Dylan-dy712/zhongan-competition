@@ -57,6 +57,19 @@ class AgentTests(unittest.TestCase):
         self.assertFalse(model.complete.call_args.kwargs['allow_tools'])
         self.assertIn('不得把未读取的内容说成缺资料', str(model.complete.call_args.args[0]))
 
+    def test_analysis_repairs_excess_citations_with_the_actual_schema_budget(self):
+        refs=[str(uuid4()) for _ in range(21)]
+        model,tools=MagicMock(),MagicMock()
+        tools.execute.return_value={'status':'available','next_offset':None,
+                                    'evidence':[{'evidence_id':ref,'text':'合成材料'} for ref in refs]}
+        model.complete.side_effect=[answer('材料解读',refs),answer('材料解读',refs[:5])]
+        reply,_=run_agent([], '解释资料', [], tools, model=model, analysis_mode=True)
+        self.assertEqual(reply['evidence_refs'],refs[:5])
+        messages=model.complete.call_args.args[0]
+        self.assertIn('evidence_refs最多20个',messages[0]['content'])
+        self.assertIn('最多20个实际来源UUID',messages[-1]['content'])
+        self.assertEqual(model.complete.call_count,2)
+
     def test_analysis_with_sources_requires_citations_and_rejects_unsafe_advice(self):
         for text, refs, error in [('未引用的分析', [], 'UNSOURCED_ANALYSIS'),
                                    ('请自行停药', [str(uuid4())], 'UNSAFE_ANALYSIS')]:
