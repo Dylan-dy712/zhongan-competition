@@ -25,7 +25,7 @@ class ModelWorkloadTests(unittest.TestCase):
              patch('services.api.app.conversation_agent.requests.post') as post:
             config.return_value.base_url='https://api.deepseek.com'
             config.return_value.model_id='deepseek-flash'
-            args={'text':'材料解读',**{f'source_{i}':'S1' if i==1 else '' for i in range(1,21)}}
+            args={**{f'knowledge_{i}':'' for i in range(1,5)},'text':'材料解读',**{f'source_{i}':'S1' if i==1 else '' for i in range(1,21)}}
             post.return_value.json.return_value={'choices':[{'message':{'tool_calls':[{
                 'function':{'name':'deliver_analysis','arguments':json.dumps(args)}}]}}]}
             narrative=AgentModel(analysis_mode=True)
@@ -43,16 +43,17 @@ class ModelWorkloadTests(unittest.TestCase):
 
     def test_strict_format_limits_metadata_slots_and_keeps_free_text(self):
         schema=strict_analysis_tool()['function']['parameters']
-        self.assertEqual(len(schema['properties']),21)
+        self.assertEqual(len(schema['properties']),25)
         self.assertEqual(set(schema['required']),set(schema['properties']))
         self.assertFalse(schema['additionalProperties'])
-        args={'text':'材料A的自由段落。\n\n材料B的自由段落。',
+        args={**{f'knowledge_{i}':'TY-COST-01' if i==1 else '' for i in range(1,5)},'text':'材料A的自由段落。\n\n材料B的自由段落。',
               **{f'source_{i}':'S37' if i==2 else '' for i in range(1,21)}}
         reply=decode_analysis_tool({'tool_calls':[{'function':{
             'name':'deliver_analysis','arguments':json.dumps(args)}}]})
         data=json.loads(reply['content'])
         self.assertEqual(data['text'],args['text'])
         self.assertEqual(data['evidence_refs'],['S37'])
+        self.assertEqual(data['knowledge_refs'],['TY-COST-01'])
         args['source_21']='S99'
         with self.assertRaisesRegex(RuntimeError,'ANALYSIS_RESPONSE_FORMAT'):
             decode_analysis_tool({'tool_calls':[{'function':{

@@ -29,6 +29,7 @@ INSTRUCTION="""你是患者材料解读的独立原文复核员。只核对提�
 不能排除/疑似不能成为确诊；既往不能成为本次；住院用药不能推断为出院继续或停药。
 费用须保持票据口径，不推算缺范围的合计，不混淆个人自费、个人账户、现金、统筹及商业保险。
 解读可以通俗转述原文明示事实、医嘱以及限定词的字面含义，不能添加病因、疗效、用药建议、保险赔付或诊疗建议。
+source_kind为general_knowledge的来源是用户授权的专业参考知识，可支持明确标为一般知识的解释，不能证明用户的诊断、适应证或新治疗方案。
 不要因缺少普通常识解释而拒绝；不能把模型补充的知识当作专业性。要看重要医嘱或重要疑似/否定限定有无被省略。
 重点及加粗必须保留完整限定；例如“不能排除**肺炎**”会误导，应突出“**不能排除肺炎**”。
 只拒绝能用原文和拟交付文本直接对照证明的事实错误，不用“可能让读者误以为”等假设性理由拒绝。
@@ -46,10 +47,11 @@ def review_analysis(config,packed,text):
     # This is source comparison, not diagnostic reasoning. Keep every original word
     # while removing citation identifiers that the reviewer does not need.
     originals=[{'document':page['document'],'page':page['page'],
+                **({'source_kind':page['source_kind']} if page.get('source_kind') else {}),
                 'text':'\n'.join(span[1] for span in page['spans'])} for page in packed]
     messages=[{'role':'system','content':INSTRUCTION},
               {'role':'user','content':json.dumps({'original_material_pages':originals,'draft':text},ensure_ascii=False,separators=(',',':'))}]
-    literal_issues=literal_scope_issues(packed,text)
+    literal_issues=literal_scope_issues([page for page in packed if page.get('source_kind')!='general_knowledge'],text)
     compact=lambda value:re.sub(r'[\s，,；;：:（）()“”\"。*]','',value)
     draft=compact(text)
     material=[compact(page['text']) for page in originals]

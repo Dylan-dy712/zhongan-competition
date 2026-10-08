@@ -10,7 +10,7 @@ from .contracts.core import Report
 from .llm_extractor import OpenAiCompatibleExtractor
 from .care_voice import CARE_VOICE
 
-PROMPT_VERSION = "care-assistant-v2"
+PROMPT_VERSION = "care-assistant-v3"
 
 
 class Citation(BaseModel):

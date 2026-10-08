@@ -1,7 +1,8 @@
 import type {ChatTurn} from './types';
 import {narrativeBlocks,emphasisParts} from './narrativeFormatting';
+import KnowledgeSources from './KnowledgeSources';
 
-function Emphasis({text}:{text:string}) {
+export function Emphasis({text}:{text:string}) {
   return <>{emphasisParts(text).map((part,i)=>part.strong?<strong key={i}>{part.text}</strong>:part.text)}</>;
 }
 
@@ -33,5 +34,6 @@ export default function AnalysisNarrative({turn,onEvidence}:{turn:ChatTurn;onEvi
       <summary>这份解读的材料依据 <span>{turn.answer.evidence_refs.length}</span></summary>
       <div>{turn.answer.evidence_refs.map((id,i)=><button className="citation" key={id} onClick={()=>onEvidence(id)}>依据 {i+1} ↗</button>)}</div>
     </details>}
+    <KnowledgeSources sources={turn.answer.knowledge_sources}/>
   </article>;
 }
