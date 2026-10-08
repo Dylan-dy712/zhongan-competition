@@ -84,15 +84,18 @@ try{
   await click('确认资料用途授权');await click('确认并授权关怀');assert.match(document.body.textContent,/已授权/);
   await click('首页');await click('提交理赔材料');await click('年龄未填写');await click('下一步，上传材料');assert.match(document.body.textContent,/请填写病历上的诊断/);await click('填入示例信息');await click('下一步，上传材料');
   await click('下一步，核对申请');assert.match(document.body.textContent,/请补充/);
+  assert.equal(document.querySelectorAll('.claim-material').length,2,'Only record and invoice categories are required');
   const fileInput=document.querySelector('input[type="file"]');
-  Object.defineProperty(fileInput,'files',{value:[new File(['synthetic-one'],'one.pdf',{type:'application/pdf'}),new File(['synthetic-two'],'two.pdf',{type:'application/pdf'})],configurable:true});
-  await act(async()=>fileInput.dispatchEvent(new dom.window.Event('change',{bubbles:true})));for(const title of ['医疗费用发票','费用明细清单','医保结算单']){await click('添加'+title);document.querySelector('dialog').close();Object.defineProperty(fileInput,'files',{value:[new File(['synthetic'],'synthetic-'+title+'.pdf',{type:'application/pdf'})],configurable:true});await act(async()=>fileInput.dispatchEvent(new dom.window.Event('change',{bubbles:true})));}
+  Object.defineProperty(fileInput,'files',{value:Array.from({length:26},(_,index)=>new File(['synthetic'],'record-'+index+'.pdf',{type:'application/pdf'})),configurable:true});
+  await act(async()=>fileInput.dispatchEvent(new dom.window.Event('change',{bubbles:true})));for(const title of ['发票相关资料']){await click('添加'+title);document.querySelector('dialog').close();Object.defineProperty(fileInput,'files',{value:[new File(['synthetic'],'synthetic-'+title+'.pdf',{type:'application/pdf'})],configurable:true});await act(async()=>fileInput.dispatchEvent(new dom.window.Event('change',{bubbles:true})));}
   await click('下一步，核对申请');
   const confirmation=[...document.querySelectorAll('input[type="checkbox"]')].find(visible);await act(async()=>confirmation.click());
   await click('确认并开始关怀');assert.match(document.body.textContent,/合成上传中断/);
   await click('返回首页');await click('我的');await click('首页');await click('提交理赔材料');await click('年龄未填写');
   await click('重试整理');assert.match(document.body.textContent,/资料已进入你的关怀空间/);
-  assert.equal(uploadCount,6,'Retry must not reupload first file');
+  assert.equal(uploadCount,28,'All 27 files upload; retry must not reupload first file');
+  assert.equal(calls.find(c=>c.path.endsWith('/analyses')).body.document_ids.length,27);
+
   const creations=calls.filter(c=>c.path==='/v1/conversations' && c.body);
   assert.equal(creations.length,2);assert.equal(creations[0].body.conversation_id,creations[1].body.conversation_id);
   assert.equal(creations[0].body.recall_enabled,false);

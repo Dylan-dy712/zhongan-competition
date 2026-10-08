@@ -133,7 +133,7 @@ class NewConversation(Contract):
 class ChatMessage(Contract):
     request_id: UUID
     message: str = Field(min_length=1, max_length=4000)
-    document_ids: list[UUID] = Field(default_factory=list, max_length=20)
+    document_ids: list[UUID] = Field(default_factory=list)
 
 
 class RecallSetting(Contract):

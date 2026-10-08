@@ -93,7 +93,7 @@ export default function ClaimIntake({token,subject,visible,onOpen,onAuthorize,on
       }
       setProgress(undefined);setSubmission(true);
       await startChatAnalysis(token,attempt.id,attempt.requestId,
-        `请帮我整理本次就医资料，解释费用与需要补充的材料。用户填写的信息：${JSON.stringify(form.current)}；材料分类：${JSON.stringify(files.map(f=>({name:f.name,category:f.category})))}。这些是个人补充信息，请以材料原文核对，不代表已确认事实。`,[...attempt.uploaded.values()]);
+        `请帮我整理本次就医资料，解释费用与需要补充的材料。用户填写的信息：${JSON.stringify(form.current)}；材料分类：${JSON.stringify(activeGroups.map(group=>({category:group.title,count:entries.filter(entry=>entry.category===group.id).length})))}。这些是个人补充信息，请以材料原文核对，不代表已确认事实。`,[...attempt.uploaded.values()]);
       if(mounted.current)setFinished(true);
     }catch(e){if(mounted.current)setError(e instanceof Error?e.message:'材料整理失败，请重试。');}
     finally{running.current=false;if(mounted.current){setBusy(false);setProgress(undefined);setSubmission(false);}}
@@ -136,7 +136,7 @@ export default function ClaimIntake({token,subject,visible,onOpen,onAuthorize,on
     </footer>
     <input ref={picker} hidden aria-label="添加就医材料" type="file" multiple accept=".pdf,.jpg,.jpeg,.png" onChange={e=>{
       const added=Array.from(e.target.files||[]);e.target.value='';
-      if(files.length+added.length>20||added.some(f=>!f.size||f.size>10*1024*1024||!/\.(pdf|jpe?g|png)$/i.test(f.name))){setError('请选择有效 PDF 或图片，每份不超过 10 MB，总数最多 20 份。');return;}
+      if(added.some(f=>!f.size||f.size>10*1024*1024||!/\.(pdf|jpe?g|png)$/i.test(f.name))){setError('请选择有效 PDF 或图片，每份不超过 10 MB。');return;}
       setFiles([...files,...added.map(file=>({id:uuid(),name:file.name,size:file.size,category:category.current,sample:false,url:/\.(jpe?g|png)$/i.test(file.name)?URL.createObjectURL(file):null,file}))]);setError('');setConfirmed(false);
     }}/>
     <dialog ref={source} className="claim-upload-dialog" aria-label="选择材料来源"><div className="claim-preview-head"><strong>添加理赔材料</strong><button onClick={()=>source.current?.close()} aria-label="关闭材料来源">×</button></div>

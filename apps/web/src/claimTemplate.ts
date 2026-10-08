@@ -8,13 +8,8 @@ const paths:Record<string,string>={leaf:'M20 3C8 2 2 8 5 15s15 7 15-12ZM4 21 15 
 function icon(name:string,size=21){return `<svg aria-hidden="true" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="${paths[name]||paths.file}"/></svg>`}
 export function claimTemplate(form:ClaimForm,selected:ClaimFile[],step:number,finished=false){
   const groups = () => [
-    {id:'record',title:form.kind==='住院医疗'?'病历与出院小结':'门急诊病历',hint:form.kind==='住院医疗'?'住院病历、出院小结及诊断证明，包含姓名、就诊日期和医院信息。':'门急诊病历及诊断证明，包含姓名、就诊日期和医院信息。',required:true},
-    {id:'invoice',title:'医疗费用发票',hint:'上传清晰完整的医疗收费票据或电子发票，保留票据号码与金额。',required:true},
-    {id:'detail',title:'费用明细清单',hint:'包含药品、检查、治疗等项目与金额，拍清全部页。',required:true},
-    ...(form.social==='是'?[{id:'social',title:'医保结算单',hint:'已通过医保结算时提供，用于核对基金支付与个人承担金额。',required:true}]:[]),
-    ...(form.other==='是'?[{id:'other',title:'其他渠道赔付证明',hint:'提供其他保险公司或单位的赔付、分割单据。',required:true}]:[]),
-    ...(form.cause==='意外'?[{id:'accident',title:'意外事故证明',hint:'按事故情况提供相应证明；具体以保险公司要求为准。',required:false}]:[]),
-    {id:'extra',title:'检查、手术与用药资料',hint:'与本次治疗相关的检查报告、手术记录、处方及用药明细，按实际情况补充。',required:false},
+    {id:'record',title:'病历相关资料',hint:'病历、诊断证明、出院小结、检查报告、手术记录及处方等，按本次就医情况上传。',required:true},
+    {id:'invoice',title:'发票相关资料',hint:'医疗收费票据或电子发票，可一并上传费用明细及结算资料。',required:true},
   ];
   const action = (label:string, name:string, cls = 'claim-primary') => `<button type="button" class="${cls}" data-claim-action="${name}">${label}</button>`;
   const activeFiles = () => selected.filter(f=>groups().some(g=>g.id===f.category));
@@ -41,7 +36,7 @@ export function claimTemplate(form:ClaimForm,selected:ClaimFile[],step:number,fi
     return `<div class="claim-intro claim-intro-illustrated"><span class="claim-eyebrow">${escape(form.kind)} · ${escape(form.cause)}</span><h1>准备本次理赔材料</h1><p>分好类，少遗漏，核对起来更轻松。</p><img src="${documentArt}" alt="" class="claim-intro-mascot"></div>
       <section class="claim-case"><span class="claim-case-icon">${icon('file',24)}</span><div><strong>${escape(form.kind)} · ${escape(form.diagnosis)}</strong><small>小安 · ${escape(form.start)}${form.kind==='住院医疗'?' 至 '+escape(form.end):''}</small></div></section>
       <div class="claim-material-progress"><div><strong>材料准备进度</strong><span>必需类别 ${ready} / ${required.length}</span></div><progress value="${ready}" max="${required.length}" aria-label="必需材料类别准备进度"></progress><small>已选择 ${activeFiles().length} 份材料 · 按下方类别补充</small></div><div class="claim-section-heading"><h2>材料清单</h2><span class="claim-section-note">按类别整理</span></div>
-      <p class="claim-help">支持 PDF / JPG / PNG，每份不超过 10 MB，最多 20 份。</p>
+      <p class="claim-help">支持 PDF / JPG / PNG，每份不超过 10 MB，上传数量不限，可多次添加。</p>
       ${groups().map((group,index) => `<section class="claim-material"><div class="claim-material-heading"><span class="claim-material-number">${String(index+1).padStart(2,"0")}</span><h3>${group.title}</h3><span class="${group.required?'claim-required':'claim-optional'}">${selected.some(f=>f.category===group.id)?'已添加':group.required?'必需':'选填'}</span></div><p>${group.hint}</p>
         ${fileTiles(selected.filter(f=>f.category===group.id),group)}</section>`).join('')}
       <p class="claim-field-note">本清单用于演示，实际材料要求以对应保险产品为准；请妥善保留原始单据，审核时可能需补充。</p>

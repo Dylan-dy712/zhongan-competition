@@ -1,13 +1,20 @@
 import tempfile
 import unittest
 from pathlib import Path
+from uuid import uuid4
 
 from fastapi import HTTPException
 
-from services.api.app.main import validate_file_signature
+from services.api.app.main import ChatMessage, validate_file_signature
 
 
 class DocumentPolicyTests(unittest.TestCase):
+    def test_analysis_accepts_more_than_twenty_documents(self):
+        ids = [uuid4() for _ in range(100)]
+        body = ChatMessage(request_id=uuid4(), message='Synthetic material analysis', document_ids=ids)
+        self.assertEqual(body.document_ids, ids)
+        self.assertNotIn('maxItems', ChatMessage.model_json_schema()['properties']['document_ids'])
+
     def check(self, content: bytes, media_type: str):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "fixture"
