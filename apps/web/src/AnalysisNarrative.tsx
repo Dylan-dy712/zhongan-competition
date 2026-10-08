@@ -19,7 +19,7 @@ export default function AnalysisNarrative({turn,onEvidence}:{turn:ChatTurn;onEvi
       {blocks.map((block,i)=>block.kind==='point'
         ? <section className="analysis-narrative-point" key={i}>
             <span className="analysis-point-number" aria-label={`第 ${++number} 点`}>{number}</span>
-            <div><p className="analysis-point-lead"><Emphasis text={block.text}/></p>
+            <div><p className="analysis-point-lead">{block.legacyLead?<strong>{block.text}</strong>:<Emphasis text={block.text}/>}</p>
               {block.paragraphs.map((text,j)=><p key={j}><Emphasis text={text}/></p>)}</div>
           </section>
         : <p key={i}><Emphasis text={block.text}/></p>)}
