@@ -98,7 +98,7 @@ export default function ClaimIntake({token,subject,visible,onOpen,onAuthorize,on
     if(step===1){const missing=template.groups.filter(g=>g.required&&!files.some(f=>f.category===g.id));if(missing.length){setError('请补充：'+missing.map(g=>g.title).join('、'));return;}}
     setError('');setStep(step+1);shell.current?.querySelector('.claim-main')?.scrollTo?.(0,0);
   };
-  return <main className="claim-react"><button className="claim-text" onClick={onExit}>返回首页</button>
+  return <main className="claim-react">
     <AnalysisFlow open={visible && progressOpen} snapshot={null} submitting={submission} error={error} onClose={()=>setProgressOpen(false)} onReport={()=>void viewReport()} onRetry={()=>void viewReport()}/>
     {progress && <p className="claim-text" role="status">正在上传材料：{progress.done} / {progress.total} 份</p>}
     <div className="claim-shell" ref={shell} onInput={e=>{
@@ -109,8 +109,9 @@ export default function ClaimIntake({token,subject,visible,onOpen,onAuthorize,on
       if(key && key in form.current){form.current[key]=input.value;onDirty?.(true);setConfirmed(false);if(input.tagName==='SELECT')redraw(n=>n+1);}
     }} onClick={e=>{
       const button=(e.target as HTMLElement).closest<HTMLButtonElement>('button');if(!button||button.disabled)return;
-      if(locked && !finished)return;
       const action=button.dataset.claimAction;
+      if(action==='exit'){onExit();return;}
+      if(locked && !finished)return;
       if(action==='example'){form.current={...initialClaimForm(),diagnosis:'肺炎（虚构示例）',start:'2026-09-20',end:'2026-09-25',total:'1200.00',social:'是'};redraw(n=>n+1);setError('');}
       else if(action?.startsWith('step-')){setStep(Number(action.slice(5)));setError('');setConfirmed(false);}
       else if(action?.startsWith('pick-')){category.current=action.slice(5);setSourceCategory(template.groups.find(g=>g.id===category.current)?.title||'理赔材料');source.current?.showModal();}
