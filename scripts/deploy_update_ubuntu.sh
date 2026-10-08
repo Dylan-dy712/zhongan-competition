@@ -36,14 +36,33 @@ sudo tar -czf "$backup_dir/config.tar.gz" -C / \
     etc/nginx/sites-available/zhongan-api
 sudo chown ubuntu:ubuntu "$backup_dir/config.tar.gz"
 chmod 600 "$backup_dir"/*.tar.gz
+backend_changed=0
+# UI releases keep the API/worker running. Compare all runtime code, schemas,
+# knowledge and service definitions; uncertainty takes the full backup path.
+for relative in services contracts/knowledge docs/medical/knowledge; do
+    if ! diff -qr --exclude=__pycache__ "$release_dir/$relative" "$app_dir/$relative" >/dev/null; then
+        backend_changed=1
+    fi
+done
+for unit in zhongan-api zhongan-worker; do
+    if ! cmp -s "$release_dir/deploy/$unit.service" "/etc/systemd/system/$unit.service"; then
+        backend_changed=1
+    fi
+done
+printf 'BACKEND_CHANGED=%s\n' "$backend_changed"
 stopped=0
+changed=0
 rollback() {
     local result=$?
     trap - ERR
     set +e
-    if [[ "$stopped" == 1 ]]; then
+    if [[ "$changed" == 1 || "$stopped" == 1 ]]; then
         # Restore code/config without destroying newer files or rolling back data.
-        tar -xzf "$backup_dir/app.tar.gz" -C "$app_dir"
+        if [[ "$stopped" == 1 ]]; then
+            tar -xzf "$backup_dir/app.tar.gz" -C "$app_dir"
+        else
+            tar -xzf "$backup_dir/app.tar.gz" -C "$app_dir" ./scripts ./REVISION
+        fi
         sudo tar -xzf "$backup_dir/web.tar.gz" -C "$web_dir"
         if [[ "$mobile_switched" == 1 ]]; then
             if [[ -n "$previous_mobile" ]]; then
@@ -55,15 +74,18 @@ rollback() {
         fi
         sudo tar -xzf "$backup_dir/config.tar.gz" -C /
         sudo systemctl daemon-reload
-        sudo systemctl restart zhongan-api zhongan-worker
+        if [[ "$stopped" == 1 ]]; then
+            sudo systemctl restart zhongan-api zhongan-worker
+        fi
         sudo nginx -t && sudo systemctl reload nginx
     fi
     printf 'DEPLOY_FAILED backup=%s exit=%s\n' "$backup_dir" "$result" >&2
     exit "$result"
 }
 trap rollback ERR
-sudo systemctl stop zhongan-api zhongan-worker
+if [[ "$backend_changed" == 1 ]]; then
 stopped=1
+sudo systemctl stop zhongan-api zhongan-worker
 set -a
 . /home/ubuntu/.config/zhongan/database.env
 set +a
@@ -72,17 +94,25 @@ database_name="$($app_dir/.venv/bin/python -c 'import os,psycopg; c=psycopg.conn
 sudo -u postgres pg_dump --format=custom --dbname="$database_name" > "$backup_dir/database.dump"
 test -s "$backup_dir/database.dump"
 pg_restore --list "$backup_dir/database.dump" > "$backup_dir/database-manifest.txt"
-cp -a "$release_dir/services" "$app_dir/"
+fi
+changed=1
 install -d -m 755 "$app_dir/scripts" "$app_dir/contracts" "$app_dir/docs/medical"
 cp -a "$release_dir/scripts/." "$app_dir/scripts/"
-cp -a "$release_dir/contracts/knowledge" "$app_dir/contracts/"
-cp -a "$release_dir/docs/medical/knowledge" "$app_dir/docs/medical/"
+if [[ "$backend_changed" == 1 ]]; then
+    cp -a "$release_dir/services" "$app_dir/"
+    cp -a "$release_dir/contracts/knowledge" "$app_dir/contracts/"
+    cp -a "$release_dir/docs/medical/knowledge" "$app_dir/docs/medical/"
+fi
 cp "$release_dir/REVISION" "$app_dir/REVISION"
 cd "$app_dir"
-"$app_dir/.venv/bin/python" -m scripts.migrate_database
+if [[ "$backend_changed" == 1 ]]; then
+    "$app_dir/.venv/bin/python" -m scripts.migrate_database
+fi
 "$app_dir/.venv/bin/python" -m pip check
-sudo install -m 644 "$release_dir/deploy/zhongan-api.service" /etc/systemd/system/zhongan-api.service
-sudo install -m 644 "$release_dir/deploy/zhongan-worker.service" /etc/systemd/system/zhongan-worker.service
+if [[ "$backend_changed" == 1 ]]; then
+    sudo install -m 644 "$release_dir/deploy/zhongan-api.service" /etc/systemd/system/zhongan-api.service
+    sudo install -m 644 "$release_dir/deploy/zhongan-worker.service" /etc/systemd/system/zhongan-worker.service
+fi
 sudo install -m 644 "$release_dir/deploy/nginx-zhongan-api.conf" /etc/nginx/sites-available/zhongan-api
 # Keep old hashed assets available to already-open browser sessions.
 sudo cp -a "$release_dir/apps/web/dist/." "$web_dir/"
@@ -101,7 +131,9 @@ sudo find "$web_dir" -type d -exec chmod 755 {} +
 sudo find "$web_dir" -type f -exec chmod 644 {} +
 sudo nginx -t
 sudo systemctl daemon-reload
-sudo systemctl restart zhongan-api zhongan-worker
+if [[ "$backend_changed" == 1 ]]; then
+    sudo systemctl restart zhongan-api zhongan-worker
+fi
 for attempt in {1..20}; do
     if curl -fsS http://127.0.0.1:8000/health > /dev/null; then break; fi
     [[ "$attempt" -lt 20 ]]

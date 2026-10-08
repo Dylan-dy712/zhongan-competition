@@ -136,7 +136,10 @@ export default function App() {
       const chosen = items.find(x=>x.conversation_id===last) || items[0];
       if(chosen) await openConversation(chosen.conversation_id,auth,readCarePanel(window.location.hash));
       else if(failLoud || readCarePanel(window.location.hash)==='home') setPanel('claim');
-    } catch(e) {if(epoch.current===generation){setError(errorText(e));setConnected(false);sessionStorage.removeItem('zhongan_chat_token');sessionStorage.removeItem('zhongan_account_name');}if(failLoud)throw e;}
+    } catch(e) {if(epoch.current===generation){setError(errorText(e));setConnected(false);
+      if(e instanceof ApiError && [401,403].includes(e.status)){sessionStorage.removeItem('zhongan_chat_token');sessionStorage.removeItem('zhongan_account_name');setToken('');}
+      else {sessionStorage.setItem('zhongan_chat_token',auth);setToken(auth);}
+    }if(failLoud)throw e;}
     finally {connecting.current=false;setBusy(false);}
   },[openConversation,setPanel]);
 
@@ -327,7 +330,7 @@ export default function App() {
       {connected && <div className="claim-panel" hidden={panel!=='claim'}><ClaimIntake key={token} token={token} subject={subject} onExit={()=>setPanel('home')} onAuthorize={()=>setPanel('account')} onOpen={async id=>{
           const generation=epoch.current;const items=await listConversations(token);
           if(epoch.current!==generation)return;setConversations(items);await openConversation(id,token,'chat');}}/></div>}
-      {!connected ? <AuthPage onAuthenticated={auth=>connect(auth,true)}/>
+      {!connected ? token ? <main className="start-screen" role="status"><h1>{busy?'正在连接服务…':'服务暂时不可用'}</h1><p>登录状态已保留，恢复连接后可继续。</p><button className="care-primary" disabled={busy} onClick={()=>void connect(token)}>{busy?'正在连接…':'重新连接'}</button></main> : <AuthPage onAuthenticated={auth=>connect(auth,true)}/>
       : panel==='claim' ? null
       : panel==='account' ? <AccountPage token={token} onLogout={signOut} onChanged={async()=>{
           const generation=++epoch.current;active.current='';setSnapshot(null);setEvidence(null);setOlder([]);setAttachments([]);setInput('');setDelivery(null);

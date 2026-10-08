@@ -8,7 +8,8 @@
     "test:navigation": "node scripts/check-navigation.mjs",
     "test:auth": "node scripts/check-auth-flow.mjs",
     "build": "tsc --noEmit && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:availability": "node scripts/check-availability.mjs"
   },
   "dependencies": {
     "@types/react": "19.3.0",
