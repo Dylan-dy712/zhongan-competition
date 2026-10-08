@@ -28,9 +28,16 @@ def require_conversation(conn, actor_id, conversation_id):
     return row
 
 
-def list_conversations(conn, actor_id):
-    return conn.execute("SELECT v.*" + AUTHORIZED + " ORDER BY v.updated_at DESC LIMIT 100",
-                        (actor_id,)).fetchall()
+def list_conversations(conn, actor_id, subject_id=None):
+    if subject_id is not None:
+        access = conn.execute('SELECT 1 FROM actor_subject_access WHERE actor_id=%s AND subject_id=%s AND can_read_case=true',
+                              (actor_id,subject_id)).fetchone()
+        if not access:
+            raise AccessDenied()
+    return conn.execute("SELECT v.*,c.subject_id" + AUTHORIZED +
+                        " AND (%s::uuid IS NULL OR c.subject_id=%s) ORDER BY v.updated_at DESC,v.conversation_id" +
+                        (" LIMIT 100" if subject_id is None else ""),
+                        (actor_id,subject_id,subject_id)).fetchall()
 
 
 def available_subjects(conn, actor_id):
@@ -66,8 +73,9 @@ def create_conversation(conn, actor_id, conversation_id, case_id=None, subject_i
                 consent_id=selected['consent_id'], source_ref='conversation-upload', external_case_ref=None,
                 user_context=None, data_origin=DataOrigin.synthetic, idempotency_key=f'chat:{conversation_id}')
             case_id = case.case_id
-        return conn.execute("""INSERT INTO conversations(conversation_id,actor_id,case_id,recall_enabled)
+        conn.execute("""INSERT INTO conversations(conversation_id,actor_id,case_id,recall_enabled)
             VALUES (%s,%s,%s,%s) RETURNING *""", (conversation_id, actor_id, case_id, recall_enabled)).fetchone()
+        return require_conversation(conn, actor_id, conversation_id)
 
 
 def get_turns(conn, actor_id, conversation_id, before=None):

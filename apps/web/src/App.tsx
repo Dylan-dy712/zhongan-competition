@@ -1,6 +1,6 @@
 import {useCallback, useEffect, useRef, useState, type FormEvent} from 'react';
 import {ApiError, continueAnalysis, createConversation, getConversation, getEvidence, getOlderTurns,
-  listConversations, listSubjects, sendChatMessage, uploadChatDocument,
+  listConversations, listSubjects, listMembers, sendChatMessage, uploadChatDocument,
   listDeliveries, recordDeliveryReceipt, submitCareFeedback} from './api';
 import {startChatAnalysis} from './api';
 import AnalysisFlow,{analysisView,type UploadProgress} from './AnalysisFlow';
@@ -8,13 +8,16 @@ import AnalysisNarrative,{currentNarrative,Emphasis} from './AnalysisNarrative';
 import KnowledgeSources from './KnowledgeSources';
 import type {ChatSnapshot, ChatSubject, ChatTurn, Conversation, Evidence, ToolEvent, DeliveryNotice, FeedbackType,ReportSection} from './types';
 import {CareReport,EvidencePanel,brand} from './CarePages';
-import {DemoHome,DemoRecords,DemoIcon} from './DemoPages';
+import {DemoHome,DemoIcon} from './DemoPages';
 import {publishedCare,type CarePanel} from './carePresentation';
 import {readCarePanel,useCareNavigation} from './careNavigation';
 import {PageBoundary} from './PageBoundary';
 import AuthPage from './AuthPage';
 import ClaimIntake from './ClaimIntake';
 import AccountPage from './AccountPage';
+import {MemberEditor,MemberPicker} from './MemberControls';
+import PersonalRecords from './PersonalRecords';
+import type {MemberResponse} from './api';
 import {revokeSession} from './api';
 import OriginalChatGuide,{OriginalChatWelcome} from './OriginalChatGuide';
 import {prepareChatFiles} from './chatFiles';
@@ -58,6 +61,22 @@ export default function App() {
   const [conversations,setConversations] = useState<Conversation[]>([]);
   const [subjects,setSubjects] = useState<ChatSubject[]>([]);
   const [subject,setSubject] = useState('');
+  const [claimSubject,setClaimSubject]=useState('');
+  const [claimDirty,setClaimDirty]=useState(false);
+  const [members,setMembers]=useState<MemberResponse[]>([]);
+  const [viewSubject,setViewSubject]=useState('');
+  const [recordCase,setRecordCase]=useState<string>();
+  const [memberPicker,setMemberPicker]=useState<'chat'|'claim'>();
+  const memberEpoch=useRef(0);
+  const memberCacheKey=useRef('');
+  const viewMember=members.find(member=>member.subject_id===viewSubject)||members[0];
+  const selfMember=members.find(member=>member.relationship==='self');
+  const needsProfile=!!selfMember&&!selfMember.profile_completed;
+  const selectViewMember=(id:string)=>{if(!members.some(member=>member.subject_id===id))return;
+    setViewSubject(id);setRecordCase(undefined);if(memberCacheKey.current)localStorage.setItem(memberCacheKey.current,id);};
+  const memberSaved=async(value:MemberResponse)=>{setMembers(items=>items.some(item=>item.subject_id===value.subject_id)?items.map(item=>item.subject_id===value.subject_id?value:item):[...items,value]);
+    setViewSubject(value.subject_id);setRecordCase(undefined);if(memberCacheKey.current)localStorage.setItem(memberCacheKey.current,value.subject_id);
+    if(value.relationship==='self'&&!selfMember?.profile_completed)setPanel('home');};
   const [caseInput,setCaseInput] = useState('');
   const [snapshot,setSnapshot] = useState<ChatSnapshot|null>(null);
   // Care cards belong to the claim-completion entry, not to ordinary chat visits.
@@ -159,14 +178,17 @@ export default function App() {
     const generation=++epoch.current;
     setBusy(true); setError('');
     try {
-      const [items,allowed] = await Promise.all([listConversations(auth),listSubjects(auth)]);
+      const [items,allowed,people] = await Promise.all([listConversations(auth),listSubjects(auth),listMembers(auth)]);
       if(epoch.current!==generation)return;
       sessionStorage.setItem('zhongan_chat_token',auth); setToken(auth); setConnected(true);
-      setConversations(items); setSubjects(allowed); setSubject(allowed[0]?.subject_id || '');
+      setConversations(items); setSubjects(allowed); setSubject('');setMembers(people);
+      memberCacheKey.current=`zhongan_view_member:${people.find(person=>person.relationship==='self')?.subject_id||''}`;
+      const remembered=localStorage.getItem(memberCacheKey.current);
+      setViewSubject(people.some(person=>person.subject_id===remembered)?remembered!:people[0]?.subject_id||'');
       const last = localStorage.getItem('zhongan_last_conversation');
       const chosen = items.find(x=>x.conversation_id===last) || items[0];
       if(chosen) await openConversation(chosen.conversation_id,auth,readCarePanel(window.location.hash));
-      else if(failLoud || readCarePanel(window.location.hash)==='home') setPanel('claim');
+      else if(failLoud)setPanel('home');
     } catch(e) {if(epoch.current===generation){setError(errorText(e));setConnected(false);
       if(e instanceof ApiError && [401,403].includes(e.status)){sessionStorage.removeItem('zhongan_chat_token');sessionStorage.removeItem('zhongan_account_name');setToken('');}
       else {sessionStorage.setItem('zhongan_chat_token',auth);setToken(auth);}
@@ -271,7 +293,8 @@ export default function App() {
     finally {if(epoch.current===generation){busyRef.current=false;setBusy(false);}}
   };
 
-  const prepareNewChat = () => {
+  const prepareNewChat = (personId:string) => {
+    setSubject(personId);
     ++epoch.current;active.current='';olderExhausted.current=false;
     busyRef.current=false;setBusy(false);setUploading(false);setLoadingConversation(false);
     setDelivery(null);setFeedbackNotice('');setHasOlder(false);setReportFocus(undefined);setCaseInput('');
@@ -279,6 +302,32 @@ export default function App() {
     setHistoryOpen(false);pendingSend.current=null;
     setClaimGuideConversation('');
     setPanel('chat');
+  };
+
+  const requestBusiness=(destination:'chat'|'claim',personId?:string)=>{
+    if(busyRef.current||uploadingRef.current||analysisSubmitting)return;
+    if(destination==='claim'&&panel==='claim')return;
+    if(personId){
+      if(destination==='chat')prepareNewChat(personId);
+      else {
+        if(claimSubject&&claimSubject!==personId&&claimDirty&&!window.confirm('切换就医人员将清除尚未提交的表单和材料，是否继续？'))return;
+        if(claimSubject!==personId)setClaimDirty(false);setClaimSubject(personId);setPanel('claim');
+      }
+    }
+    else setMemberPicker(destination);
+  };
+  const chooseBusinessMember=(id:string)=>{
+    const destination=memberPicker;setMemberPicker(undefined);if(destination)requestBusiness(destination,id);
+  };
+  const refreshAccess=async(changedSubject:string)=>{
+    const generation=++memberEpoch.current;
+    const [items,allowed]=await Promise.all([listConversations(token),listSubjects(token)]);
+    if(memberEpoch.current!==generation)return;
+    setConversations(items);setSubjects(allowed);
+    if(snapshot?.conversation.subject_id===changedSubject&&active.current===snapshot.conversation.conversation_id&&!items.some(item=>item.conversation_id===snapshot.conversation.conversation_id)){
+      ++epoch.current;active.current='';setSnapshot(null);setEvidence(null);setOlder([]);setAttachments([]);setInput('');setDelivery(null);
+      pendingSend.current=null;careKeys.current.clear();localStorage.removeItem('zhongan_last_conversation');
+    }
   };
 
   const completeNarrative=useCallback(async(id:string,generation:number,runId:string)=>{
@@ -392,6 +441,9 @@ export default function App() {
     setToken('');setConnected(false);setConversations([]);setSnapshot(null);
     setOlder([]);setAttachments([]);setEvidence(null);setError('');setHistoryOpen(false);pendingSend.current=null;
     setSubjects([]);setSubject('');setCaseInput('');setInput('');localStorage.removeItem('zhongan_last_conversation');
+    ++memberEpoch.current;setClaimSubject('');setClaimDirty(false);setMembers([]);setViewSubject('');setMemberPicker(undefined);setRecordCase(undefined);
+    if(memberCacheKey.current)localStorage.removeItem(memberCacheKey.current);memberCacheKey.current='';
+    uploadingRef.current=false;analysisRequest.current=null;setAnalysisOpen(false);setAnalysisSubmitting(false);setUploadProgress(undefined);setAnalysisError('');
     setDelivery(null);setFeedbackNotice('');careKeys.current.clear();
     busyRef.current=false;setBusy(false);setUploading(false);setLoadingConversation(false);setPanel('home');
   };
@@ -414,7 +466,7 @@ export default function App() {
   const progressView=analysisView(snapshot,uploadProgress,analysisSubmitting,analysisError);
   const historyPanel=<aside className="chat-sidebar" aria-label="历史对话列表">
       <div className="history-panel-head"><div className="brand"><img src={brand} alt="暖愈智护"/></div><button className="history-close" autoFocus={mobileHistory} aria-label="关闭历史对话" onClick={()=>setHistoryOpen(false)}>×</button></div>
-      <button className="new-chat" disabled={working} onClick={prepareNewChat}>＋ 新的关怀对话</button>
+      <button className="new-chat" disabled={working} onClick={()=>requestBusiness('chat')}>＋ 新的关怀对话</button>
       <div className="history-list"><p>以前的对话</p>{conversations.length===0 && <p>还没有历史对话</p>}{conversations.map(c=><button disabled={working} key={c.conversation_id}
         className={active.current===c.conversation_id?'selected':''} onClick={()=>void openConversation(c.conversation_id,token,'chat')}>
         <strong>{c.title}</strong><small>{new Date(c.updated_at).toLocaleDateString('zh-CN')}</small></button>)}</div>
@@ -431,32 +483,31 @@ export default function App() {
         <div className="nuan-header-identity"><strong>暖暖</strong><span>你的就医关怀助手</span></div>
         {snapshot && (publishedCare(snapshot.report) || narrative) && <button className="chat-guide-entry" onClick={()=>narrative?openNarrative():openReport()}>{narrative?'材料解读':'关怀指引'}</button>}
       </div>}
+      {connected && !needsProfile && ['chat','report'].includes(panel) && snapshot && <div className="member-identity">当前对话所属：{members.find(member=>member.subject_id===snapshot.conversation.subject_id)?.name||'当前人员'}</div>}
       {delivery && snapshot?.report.report_id===delivery.report_id && <div className="analysis-status care-notice" role="status">{delivery.message}
         {delivery.receipt_state==='read' ? <span>已查看</span> : <button onClick={()=>openReport()}>查看指引</button>}</div>}
       {error && <div role="alert" className="chat-error persistent-error">{error}<button aria-label="关闭提示" onClick={()=>setError('')}>×</button></div>}
       <PageBoundary resetKey={`${panel}:${snapshot?.conversation.conversation_id || ''}`}>
-      {connected && <div className="claim-panel" hidden={panel!=='claim'}><ClaimIntake key={token} token={token} subject={subject} visible={panel==='claim'} onExit={()=>setPanel('home')} onAuthorize={()=>setPanel('account')} onOpen={async (id,report=false)=>{
+      {connected && !needsProfile && claimSubject && <div className="claim-panel" hidden={panel!=='claim'}><div className="member-business-bar"><span>就医资料所属：{members.find(member=>member.subject_id===claimSubject)?.name||'当前人员'}</span></div><ClaimIntake key={`${token}:${claimSubject}`} token={token} onDirty={setClaimDirty} subject={subjects.some(item=>item.subject_id===claimSubject)?claimSubject:''} visible={panel==='claim'} onExit={()=>setPanel('home')} onAuthorize={()=>{selectViewMember(claimSubject);setPanel('account');}} onOpen={async (id,report=false)=>{
           const generation=epoch.current;const items=await listConversations(token);
           if(epoch.current!==generation)return;setConversations(items);await openConversation(id,token,'chat',true);if(report)openReport();}}/></div>}
       {!connected ? token ? <main className="start-screen" role="status"><h1>{busy?'正在连接服务…':'服务暂时不可用'}</h1><p>登录状态已保留，恢复连接后可继续。</p><button className="care-primary" disabled={busy} onClick={()=>void connect(token)}>{busy?'正在连接…':'重新连接'}</button></main> : <AuthPage onAuthenticated={auth=>connect(auth,true)}/>
-      : panel==='claim' ? null
-      : panel==='account' ? <AccountPage token={token} onLogout={signOut} onChanged={async()=>{
-          const generation=++epoch.current;active.current='';setSnapshot(null);setEvidence(null);setOlder([]);setAttachments([]);setInput('');setDelivery(null);
-          pendingSend.current=null;localStorage.removeItem('zhongan_last_conversation');
-          const [items,allowed]=await Promise.all([listConversations(token),listSubjects(token)]);
-          if(epoch.current!==generation)return;
-          setConversations(items);setSubjects(allowed);setSubject(allowed[0]?.subject_id || '');}}/>
+      : needsProfile && selfMember ? <main className="member-onboarding"><MemberEditor token={token} member={selfMember} onboarding onSaved={memberSaved}/></main>
+      : panel==='claim' ? claimSubject ? null : <main className="original-chat-start"><h1>选择就医资料所属人员</h1><button className="member-primary" onClick={()=>requestBusiness('claim')}>选择人员</button></main>
+      : panel==='account' && viewMember ? <AccountPage key={viewMember.subject_id} token={token} members={members} member={viewMember}
+          onSelect={selectViewMember} onSaved={memberSaved} onRecords={caseId=>{setRecordCase(caseId);setPanel('records');}}
+          onNew={()=>requestBusiness('claim',viewMember.subject_id)} onChanged={refreshAccess} onLogout={signOut}/>
       : loadingConversation ? <main className="start-screen" role="status"><h1>正在打开就医记录…</h1></main>
-      : panel==='records' ? <DemoRecords conversations={conversations} currentCase={snapshot?.conversation.case_id} busy={working}
-          onOpen={id=>void openConversation(id)} onNew={()=>setPanel('claim')} onAccount={()=>setPanel('account')}/>
-      : panel==='home' ? <DemoHome snapshot={snapshot} onChat={()=>setPanel('chat')} onReport={openReport} onClaim={()=>setPanel('claim')}/>
+      : panel==='records' && viewMember ? <PersonalRecords key={viewMember.subject_id} token={token} member={viewMember} selected={recordCase} onSelect={setRecordCase}
+          currentCase={snapshot?.conversation.case_id} busy={working} onOpen={id=>void openConversation(id,token,'chat')}
+          onNew={()=>requestBusiness('claim',viewMember.subject_id)} onAccount={()=>setPanel('account')}/>
+      : panel==='home' ? <DemoHome snapshot={snapshot} onChat={()=>snapshot?setPanel('chat'):requestBusiness('chat')} onReport={openReport} onClaim={()=>requestBusiness('claim')}/>
       : !snapshot ? <main className="original-chat-start"><OriginalChatWelcome/><div className="nuan-message"><span className="nuan-avatar" aria-hidden="true">✦</span><div className="nuan-message-body"><p>你好，我是暖暖。你现在有什么想说的，我愿意听。想聊聊身体上的不舒服、心里的牵挂，或一起看看材料，都可以按你的节奏来。</p></div></div>
-        <button className="claim-entry-link" onClick={()=>setPanel('claim')}>整理理赔资料，开启专属关怀</button>
-        <div className="connect-form">{subjects.length>1 && <label>关怀对象<select value={subject} onChange={e=>setSubject(e.target.value)}>
-          {Array.from(new Map(subjects.map(s=>[s.subject_id,s])).values()).map((s,i)=><option key={s.subject_id} value={s.subject_id}>已授权对象 {i+1} · {s.subject_id.slice(0,8)}</option>)}</select></label>}
-          <details><summary>接续已有案件（可选）</summary><input aria-label="已有案件ID" placeholder="已有案件 ID，不需要报告版本" value={caseInput} onChange={e=>setCaseInput(e.target.value)}/></details>
-          <button disabled={busy || (!subjects.length && !caseInput)} onClick={()=>void newChat()}>{busy?'正在打开…':'开始新的对话'}</button>
-          {!subjects.length && !caseInput && <small>请先到“我的”确认关怀资料授权，再开始对话。</small>}</div></main>
+        <button className="claim-entry-link" onClick={()=>requestBusiness('claim')}>整理理赔资料，开启专属关怀</button>
+        <div className="connect-form"><label>关怀对象<select value={subject} onChange={e=>setSubject(e.target.value)}><option value="">请选择人员</option>
+          {members.map(member=><option key={member.subject_id} value={member.subject_id}>{member.name}{subjects.some(item=>item.subject_id===member.subject_id)?'':'（待授权）'}</option>)}</select></label>
+          <button disabled={busy || !subjects.some(item=>item.subject_id===subject)} onClick={()=>void newChat()}>{busy?'正在打开…':'开始新的对话'}</button>
+          {subject&&!subjects.some(item=>item.subject_id===subject)&&<><small>请先确认该人员的关怀资料授权。</small><button onClick={()=>{selectViewMember(subject);setPanel('account');}}>前往授权</button></>}</div></main>
       : panel==='report' ? <main className="chat-report"><h1>本次关怀指引</h1>
           {publishedCare(snapshot.report) ? <><p className="care-report-version">第 {snapshot.report.report_version} 版 · 已审核发布</p>
             <CareReport report={snapshot.report} initialSection={reportFocus} onEvidence={id=>void showEvidence(id)}/>
@@ -503,12 +554,12 @@ export default function App() {
         </footer></>}
       </PageBoundary>
       {connected && snapshot && <AnalysisFlow open={analysisOpen && ['chat','report'].includes(panel)} snapshot={analysisSubmitting || uploadProgress?null:snapshot} upload={uploadProgress} submitting={analysisSubmitting} error={analysisError} onClose={()=>setAnalysisOpen(false)} onReport={openNarrative} onRetry={()=>{if(material?.status==='available' && snapshot.analysis.run_id)void completeNarrative(active.current,epoch.current,snapshot.analysis.run_id);else void startMaterialAnalysis();}}/>}
-      {connected && panel!=='claim' && <nav className="care-navigation" aria-label="关怀页面"><button aria-current={panel==='home'?'page':undefined} onClick={()=>setPanel('home')}><DemoIcon name="leaf"/>首页</button>
-        <button aria-current={panel==='chat'?'page':undefined} onClick={()=>setPanel('chat')}><DemoIcon name="chat"/>问暖暖</button>
-        <button aria-current={panel==='records'?'page':undefined} onClick={()=>setPanel('records')}><DemoIcon name="file"/>就医记录</button>
-        <button aria-current={panel==='account'?'page':undefined} onClick={()=>setPanel('account')}><DemoIcon name="user"/>我的</button>
+      {connected && !needsProfile && panel!=='claim' && <nav className="care-navigation" aria-label="关怀页面"><button aria-current={panel==='home'?'page':undefined} onClick={()=>setPanel('home')}><DemoIcon name="leaf"/>首页</button>
+        <button aria-current={panel==='chat'?'page':undefined} onClick={()=>snapshot?setPanel('chat'):requestBusiness('chat')}><DemoIcon name="chat"/>问暖暖</button>
+        <button aria-current={['account','records'].includes(panel)?'page':undefined} onClick={()=>setPanel('account')}><DemoIcon name="user"/>我的</button>
         </nav>}
     </section>
+    {connected && !needsProfile && memberPicker && <MemberPicker members={members} title={memberPicker==='claim'?'选择就医资料所属人员':'选择对话所属人员'} onSelect={chooseBusinessMember} onClose={()=>setMemberPicker(undefined)}/>}
     {evidence && <EvidencePanel evidence={evidence} onClose={()=>setEvidence(null)}/>}
   </div>;
 }

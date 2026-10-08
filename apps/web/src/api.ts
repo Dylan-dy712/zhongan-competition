@@ -1,7 +1,8 @@
 import type { AssistantAnswer, Evidence, Report, Conversation, ChatSnapshot, ChatSubject, ChatTurn,
   DeliveryNotice, DeliveryReceipt, FeedbackType, FeedbackResult,
   RecommendationResponse } from "./types";
-import type {SessionResponse,ConsentResponse} from './api/generated/accounts';
+import type {SessionResponse,ConsentResponse,MemberInput,MemberResponse} from './api/generated/accounts';
+export type {MemberInput,MemberResponse} from './api/generated/accounts';
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
 
@@ -83,7 +84,10 @@ async function chatRequest<T>(path: string, token: string, method = 'GET', data?
   }
   return response.json() as Promise<T>;
 }
-export const listConversations = (token: string) => chatRequest<Conversation[]>('/v1/conversations', token);
+export const listConversations = (token: string,subjectId?:string) => chatRequest<Conversation[]>(`/v1/conversations${subjectId?`?subject_id=${encodeURIComponent(subjectId)}`:''}`, token);
+export const listMembers=(token:string)=>chatRequest<MemberResponse[]>('/v1/me/members',token);
+export const saveMember=(token:string,body:MemberInput,subjectId?:string)=>chatRequest<MemberResponse>(
+  `/v1/me/members${subjectId?`/${encodeURIComponent(subjectId)}`:''}`,token,subjectId?'PATCH':'POST',body);
 export const listDeliveries = (token:string,caseId:string) =>
   chatRequest<DeliveryNotice[]>(`/v1/cases/${caseId}/deliveries`,token);
 export const recordDeliveryReceipt = (token:string,id:string,state:'presented'|'read',version:number,key:string) =>
@@ -97,9 +101,9 @@ export const createConversation = (token: string, conversationId: string, subjec
   chatRequest<Conversation>('/v1/conversations', token, 'POST', {conversation_id:conversationId, subject_id:subjectId || null, case_id:caseId || null,recall_enabled:false});
 
 export type CareConsent=ConsentResponse;
-export const getCareConsent=(token:string)=>chatRequest<CareConsent>('/v1/me/consents',token);
-export const changeCareConsent=(token:string,confirmation:boolean,expected_version:number)=>
-  chatRequest<CareConsent>('/v1/me/consents',token,'POST',{confirmation,expected_version},
+export const getCareConsent=(token:string,subjectId?:string)=>chatRequest<CareConsent>(`/v1/me/consents${subjectId?`?subject_id=${encodeURIComponent(subjectId)}`:''}`,token);
+export const changeCareConsent=(token:string,confirmation:boolean,expected_version:number,subjectId?:string)=>
+  chatRequest<CareConsent>(`/v1/me/consents${subjectId?`?subject_id=${encodeURIComponent(subjectId)}`:''}`,token,'POST',{confirmation,expected_version},
     Array.from(crypto.getRandomValues(new Uint8Array(16)),b=>b.toString(16).padStart(2,'0')).join(''));
 export const getConversation = (token: string, id: string) => chatRequest<ChatSnapshot>(`/v1/conversations/${id}`, token);
 export const getOlderTurns = (token: string, id: string, before: string) =>

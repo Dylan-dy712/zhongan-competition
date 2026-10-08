@@ -23,3 +23,17 @@ export type ProfileResponse = {
   schema_version?: "account-v1";
   user: AccountUser | null;
 };
+export type MemberInput = {
+  name: string;
+  relationship: "self" | "parent" | "spouse" | "child" | "other";
+  gender?: "male" | "female" | "unspecified";
+  birth_date?: string | null;
+};
+export type MemberResponse = {
+  name: string;
+  relationship: "self" | "parent" | "spouse" | "child" | "other";
+  gender?: "male" | "female" | "unspecified";
+  birth_date?: string | null;
+  subject_id: string;
+  profile_completed: boolean;
+};

@@ -1,7 +1,7 @@
 """Generate account JSON Schema and frontend types from executable Pydantic contracts."""
 import json
 from pathlib import Path
-from services.api.app.accounts import SessionResponse, ConsentResponse, ProfileResponse
+from services.api.app.accounts import SessionResponse, ConsentResponse, ProfileResponse, MemberInput, MemberResponse
 
 
 def ts_type(schema):
@@ -15,7 +15,7 @@ def ts_type(schema):
 def main():
     root=Path(__file__).resolve().parents[1]
     definitions={};schemas={}
-    for model in (SessionResponse,ConsentResponse,ProfileResponse):
+    for model in (SessionResponse,ConsentResponse,ProfileResponse,MemberInput,MemberResponse):
         schema=model.model_json_schema();schemas[model.__name__]=schema
         definitions.update(schema.get('$defs',{}));definitions[model.__name__]=schema
     target=root/'contracts/accounts.schema.json'

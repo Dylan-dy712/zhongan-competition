@@ -10,6 +10,7 @@ dom.window.HTMLElement.prototype.scrollIntoView=function(){};
 dom.window.HTMLDialogElement.prototype.showModal=function(){this.open=true;};dom.window.HTMLDialogElement.prototype.close=function(){this.open=false;};
 const {createRoot}=await import('react-dom/client');
 const modules=await loadTestModules();
+let member={subject_id:'synthetic-subject',name:'合成用户',relationship:'self',gender:'unspecified',birth_date:null,profile_completed:false};
 const calls=[];let consent={version:0,status:'not_granted',notice_version:'account-care-v1',purpose:'case_guidance'};
 let conversation=null,uploadCount=0,failUpload=true,claimReady=false,claimTurns=[],resolveClaimNarrative;
 globalThis.fetch=async(url,options={})=>{
@@ -22,9 +23,11 @@ globalThis.fetch=async(url,options={})=>{
     if(body)consent={...consent,version:consent.version+1,status:body.confirmation?'active':'revoked'};
     return Response.json(consent);
   }
+  if(path==='/v1/me/members')return Response.json([member]);
+  if(path==='/v1/me/members/synthetic-subject'){member={...member,...body,profile_completed:true};return Response.json(member);}
   if(path==='/v1/chat/subjects')return Response.json(consent.status==='active'?[{subject_id:'synthetic-subject',consent_id:'synthetic-consent'}]:[]);
   if(path==='/v1/conversations'){
-    if(body){conversation={conversation_id:body.conversation_id,case_id:'synthetic-case',title:'合成资料',recall_enabled:body.recall_enabled,updated_at:new Date().toISOString()};return Response.json(conversation);}
+    if(body){conversation={conversation_id:body.conversation_id,subject_id:body.subject_id,case_id:'synthetic-case',title:'合成资料',recall_enabled:body.recall_enabled,updated_at:new Date().toISOString()};return Response.json(conversation);}
     return Response.json(conversation?[conversation]:[]);
   }
   if(path.endsWith('/documents')){
@@ -64,9 +67,10 @@ try{
   await act(async()=>{Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype,'value').set.call(passwords[1],'1');passwords[1].dispatchEvent(new dom.window.Event('input',{bubbles:true}));});
   await submit();assert.equal(calls.find(c=>c.path==='/v1/auth/register').body.care_consent,false);
   assert.equal(sessionStorage.getItem('zhongan_chat_token'),'synthetic-token');
-  assert.equal(window.location.hash,'#/claim');
+  assert.match(document.body.textContent,/完善本人资料/);assert.equal(document.querySelector('.care-navigation'),null);
+  await click('保存并进入首页');assert.equal(window.location.hash,'#/home');
+  await click('整理理赔资料，开启专属关怀');await click('年龄未填写');
   assert.match(document.body.textContent,/申请医疗理赔/);
-  assert.equal(document.querySelector('.care-navigation'),null);
   const scroller=document.querySelector('.claim-main');scroller.scrollTop=240;
   const diagnosisControl=document.querySelector('[data-claim-field="diagnosis"]');
   await input('[data-claim-field="diagnosis"]','保留填写内容');
@@ -78,7 +82,7 @@ try{
   await input('[data-claim-field="diagnosis"]','');
 
   await click('确认资料用途授权');await click('确认并授权关怀');assert.match(document.body.textContent,/已授权/);
-  await click('首页');await click('整理理赔资料，开启专属关怀');await click('下一步，上传材料');assert.match(document.body.textContent,/请填写病历上的诊断/);await click('填入示例信息');await click('下一步，上传材料');
+  await click('首页');await click('整理理赔资料，开启专属关怀');await click('年龄未填写');await click('下一步，上传材料');assert.match(document.body.textContent,/请填写病历上的诊断/);await click('填入示例信息');await click('下一步，上传材料');
   await click('下一步，核对申请');assert.match(document.body.textContent,/请补充/);
   const fileInput=document.querySelector('input[type="file"]');
   Object.defineProperty(fileInput,'files',{value:[new File(['synthetic-one'],'one.pdf',{type:'application/pdf'}),new File(['synthetic-two'],'two.pdf',{type:'application/pdf'})],configurable:true});
@@ -86,7 +90,7 @@ try{
   await click('下一步，核对申请');
   const confirmation=[...document.querySelectorAll('input[type="checkbox"]')].find(visible);await act(async()=>confirmation.click());
   await click('确认并开始关怀');assert.match(document.body.textContent,/合成上传中断/);
-  await click('返回首页');await click('我的');await click('首页');await click('整理理赔资料，开启专属关怀');
+  await click('返回首页');await click('我的');await click('首页');await click('整理理赔资料，开启专属关怀');await click('年龄未填写');
   await click('重试整理');assert.match(document.body.textContent,/资料已进入你的关怀空间/);
   assert.equal(uploadCount,6,'Retry must not reupload first file');
   const creations=calls.filter(c=>c.path==='/v1/conversations' && c.body);
@@ -107,7 +111,7 @@ try{
   await click('首页');await click('问暖暖');
   assert.equal(document.querySelector('#chat-topic-action'),null,'Ordinary chat visits must not retain claim-entry cards');
   assert.equal(document.querySelector('.nuan-quick-actions'),null,'No shortcuts to absent cards');
-  await click('新的关怀对话');await click('开始新的对话');
+  await click('新的关怀对话');await click('年龄未填写');await click('开始新的对话');
   assert.ok(document.querySelector('.composer'),'Ordinary new chat must still support messages');
   assert.equal(document.querySelector('.nuan-conversation-caption'),null);
   assert.equal(document.querySelector('.nuan-topic-grid'),null,'Ordinary new chat must not show claim cards');
