@@ -25,15 +25,15 @@ class ModelWorkloadTests(unittest.TestCase):
             post.return_value.json.return_value={'choices':[{'message':{'tool_calls':[{
                 'function':{'name':'deliver_analysis','arguments':json.dumps(args)}}]}}]}
             narrative=AgentModel(analysis_mode=True)
-            narrative.complete([])
+            narrative.complete([{'role':'assistant','content':'先前的快速输出'}])
             self.assertEqual(post.call_args.kwargs['json']['thinking'],{'type':'disabled'})
             self.assertEqual(post.call_args.kwargs['json']['max_tokens'],8000)
             self.assertEqual(post.call_args.args[0],'https://api.deepseek.com/beta/chat/completions')
             self.assertTrue(post.call_args.kwargs['json']['tools'][0]['function']['strict'])
             narrative.complete([])
-            self.assertEqual(post.call_args.kwargs['json']['thinking'],{'type':'enabled'})
-            self.assertEqual(post.call_args.kwargs['json']['reasoning_effort'],'low')
-            self.assertEqual(post.call_args.kwargs['json']['max_tokens'],16000)
+            self.assertEqual(post.call_args.kwargs['json']['thinking'],{'type':'disabled'})
+            self.assertTrue(post.call_args.kwargs['json']['tools'][0]['function']['strict'])
+            self.assertEqual(post.call_args.kwargs['json']['max_tokens'],8000)
             AgentModel().complete([])
             self.assertNotIn('thinking',post.call_args.kwargs['json'])
 

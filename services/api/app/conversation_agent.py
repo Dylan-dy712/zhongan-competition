@@ -127,8 +127,7 @@ class AgentModel:
                 'response_format': {'type': 'json_object'},
                 'max_tokens': 16000 if self.analysis_mode else 2200}
         if self.analysis_mode:
-            options=workload_options(self.config.base_url,self.config.model_id,
-                                     'narrative_repair' if self.usage else 'narrative')
+            options=workload_options(self.config.base_url,self.config.model_id,'narrative')
             body.update(options)
             if options.get('thinking',{}).get('type')=='disabled':
                 body['max_tokens']=8000
