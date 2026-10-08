@@ -17,7 +17,8 @@
 .auth-input>svg{width:20px;height:22px;flex:none;color:#83d4ba}
 .auth-card .auth-input input{width:100%;min-width:0;box-sizing:border-box;border:0;border-radius:0;padding:11px 0;background:transparent;font:inherit;font-size:16px;color:#123e36;outline:none}
 .auth-input input::placeholder{color:#b3bfc2}
-.auth-input:focus-within{border-color:#12b48c;box-shadow:0 0 0 3px #00a97e18}
+.auth-input:focus-within{border-color:#b5ccc4;box-shadow:none}
+.auth-page .auth-card .auth-input input:focus,.auth-page .auth-card .auth-input input:focus-visible{outline:none;box-shadow:none}
 .auth-password-toggle{display:grid;place-items:center;border:0;padding:10px;background:transparent;color:#99a9ad;cursor:pointer;flex:none;border-radius:8px}
 .auth-password-toggle svg{width:20px;height:20px}
 .auth-card .auth-consent{display:flex;align-items:flex-start;gap:9px;font-size:12px;line-height:1.7;color:#718984}
