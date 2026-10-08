@@ -241,20 +241,20 @@ def main():
             evidence_ref=[]
             def grounded_reply(messages):
                 data=json.loads(next(m['content'] for m in reversed(messages)
-                                     if 'authorized_material_batches' in (m.get('content') or '')))['authorized_material_batches'][0]
-                evidence_ref.append(str(data['evidence'][0]['evidence_id']))
+                                     if 'authorized_material_pages' in (m.get('content') or '')))['authorized_material_pages'][0]
+                evidence_ref.append(data['spans'][0][0])
                 return {'role':'assistant','content':json.dumps({'text':'票据记载总费用120元。','evidence_refs':evidence_ref,'history_refs':[]})}
             model=ScriptedModel([grounded_reply])
             with patch('services.api.app.conversation_agent.AgentModel',return_value=model):
                 completed=client.post(base+f'/analyses/{run_id}/continue',headers=headers)
             check(completed.status_code==200,'analysis completion continues with real evidence')
             check(completed.json()['answer']['analysis_run_id']==str(run_id) and
-                  completed.json()['answer']['prompt_version']=='patient-analysis-narrative-v1',
+                  completed.json()['answer']['prompt_version']=='patient-analysis-narrative-v2',
                   'personal narrative is model-generated and bound to the exact analysis run')
             with patch('services.api.app.conversation_agent.AgentModel',side_effect=AssertionError('replay')):
                 replay=client.post(base+f'/analyses/{run_id}/continue',headers=headers)
             check(replay.json()['turn_id']==completed.json()['turn_id'],'automatic continuation is idempotent')
-            check(client.get('/v1/evidence/'+evidence_ref[0],headers=headers).status_code==200,'chat citation resolves to actual evidence')
+            check(client.get('/v1/evidence/'+completed.json()['answer']['evidence_refs'][0],headers=headers).status_code==200,'compact source alias resolves to actual accessible evidence')
 
             with connection() as conn:
                 tools=CareTools(conn,actor,conversation_id)

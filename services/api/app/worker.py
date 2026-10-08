@@ -7,6 +7,7 @@ import os
 import re
 import signal
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from pathlib import Path
 from uuid import uuid4
@@ -284,7 +285,57 @@ def route_document(document: dict, path: Path, pipeline_version: str, ocr: Tence
     raise RuntimeError("PARSER_NOT_IMPLEMENTED")
 
 
+def analyze_models(material, knowledge_entries, user_context, source_refs, fact_inputs,
+                   encounter_dates, advance, knowledge_excluded=False):
+    """Overlap independent network calls; SQL and release checks stay on the caller."""
+    started = time.monotonic()
+    timings = {}
+    def measured(name, call, *args, **kwargs):
+        before = time.monotonic()
+        try:
+            return call(*args, **kwargs)
+        finally:
+            timings[name] = round(time.monotonic()-before, 3)
+
+    fields = {"status":"not_configured","raw_output":None,"repaired_output":None,
+              "candidates":{"candidates":[]},"personnel":[],"usage_metadata":{},
+              "error_code":"LLM_NOT_CONFIGURED"}
+    insights = {"status":"not_configured","candidates":[],"raw_output":None,
+                "usage_metadata":{},"error_code":"LLM_NOT_CONFIGURED"}
+    report = {"status":"not_configured","draft":{"sections":[],"actions":[]},"raw_output":None,
+              "repaired_output":None,"usage_metadata":{},"error_code":"LLM_NOT_CONFIGURED"}
+    provider, model_id = os.environ.get("LLM_PROVIDER","openai_compatible"), os.environ.get("LLM_MODEL_ID","unconfigured")
+    configured = bool(material and os.environ.get("LLM_API_KEY"))
+    with ThreadPoolExecutor(max_workers=2, thread_name_prefix='analysis-model') as pool:
+        fields_future = insights_future = None
+        if configured:
+            extractor = OpenAiCompatibleExtractor()
+            provider, model_id = extractor.provider, extractor.model_id
+            fields_future = pool.submit(measured, 'extract_seconds', extractor.extract, material)
+        advance('insights')
+        if configured and not knowledge_excluded:
+            knowledge = [{"entry_id":e.entry_id,"title":e.title,"content":e.content[:500],
+                          "anchoring":e.anchoring} for e in knowledge_entries[:80]]
+            insights_future = pool.submit(measured, 'insight_seconds', detect_semantic, material, knowledge)
+        if fields_future:
+            fields = validate_evidence_quotes(fields_future.result(), material)
+        advance('guidance')
+        if configured and not knowledge_excluded:
+            reviewable = [{"entry_id":e.entry_id,"title":e.title,"content":e.content[:500],
+                           "status":e.status.value,"ai_verified":e.ai_verified,
+                           "ai_verification_source":e.ai_verification_source} for e in knowledge_entries[:80]]
+            report = measured('guidance_seconds', draft_report, material, reviewable, user_context,
+                user_sources=source_refs, structured_costs=report_cost_context(fact_inputs,fields['candidates'].get('cost_lines',[])),
+                personnel=fields.get('personnel',[]), normalized_dates=encounter_dates)
+        if insights_future:
+            insights = insights_future.result()
+    performance = {'model_schedule':'parallel','model_seconds':timings,
+                   'model_wall_seconds':round(time.monotonic()-started,3)}
+    return fields, insights, report, provider, model_id, performance
+
+
 def process_run(conn, run: dict, storage_root: Path) -> None:
+    run_started = time.monotonic()
     parsed_documents = []
     def advance(stage):
         # Production connection is autocommit, so polling can observe each milestone.
@@ -323,17 +374,6 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
             row["encounter_key"] = encounter_keys[(row["document_id"], row["document_version"],
                                                    row["page_index"])]
         encounter_dates = collect_encounter_dates(fact_inputs)
-        model_result = {"status": "not_configured", "raw_output": None,
-                        "repaired_output": None, "candidates": {"candidates": []},
-                        "personnel": [],
-                        "usage_metadata": {}, "error_code": "LLM_NOT_CONFIGURED"}
-        model_provider = os.environ.get("LLM_PROVIDER", "openai_compatible")
-        model_id = os.environ.get("LLM_MODEL_ID", "unconfigured")
-        if material and os.environ.get("LLM_API_KEY"):
-            extractor = OpenAiCompatibleExtractor()
-            model_provider, model_id = extractor.provider, extractor.model_id
-            model_result = validate_evidence_quotes(extractor.extract(material), material)
-
         knowledge_entries = []
         knowledge_version = None
         knowledge_excluded = False
@@ -348,37 +388,18 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
                 ).allowed
             except PackExcludedError:
                 knowledge_excluded = True
-        advance('insights')
-        insight_model_result = {"status": "not_configured", "candidates": [],
-                                "raw_output": None, "usage_metadata": {},
-                                "error_code": "LLM_NOT_CONFIGURED"}
-        if material and os.environ.get("LLM_API_KEY") and not knowledge_excluded:
-            prompt_knowledge = [{"entry_id": e.entry_id, "title": e.title,
-                                 "content": e.content[:500], "anchoring": e.anchoring}
-                                for e in knowledge_entries[:80]]
-            insight_model_result = detect_semantic(material, prompt_knowledge)
         case_meta = conn.execute(
             """SELECT c.user_context,c.consent_id,co.version AS consent_version
                FROM cases c JOIN consents co ON co.consent_id=c.consent_id WHERE c.case_id=%s""",
             (run["case_id"],),
         ).fetchone()
-        advance('guidance')
-        report_model_result = {"status": "not_configured", "draft": {"sections": [], "actions": []},
-                               "raw_output": None, "repaired_output": None,
-                               "usage_metadata": {}, "error_code": "LLM_NOT_CONFIGURED"}
-        if material and os.environ.get("LLM_API_KEY") and not knowledge_excluded:
-            reviewable = [{"entry_id": e.entry_id, "title": e.title,
-                           "content": e.content[:500], "status": e.status.value,
-                           "ai_verified": e.ai_verified,
-                           "ai_verification_source": e.ai_verification_source}
-                          for e in knowledge_entries[:80]]
-            report_model_result = draft_report(material, reviewable,
-                                                run['context_snapshot']['case_user_context'] if run.get('context_snapshot') else
-                                                (case_meta["user_context"] if case_meta else None),
-                                                user_sources=source_refs,structured_costs=report_cost_context(fact_inputs,
-                                                    model_result['candidates'].get('cost_lines',[])),
-                                                personnel=model_result.get("personnel", []),
-                                                normalized_dates=encounter_dates)
+        parse_seconds = time.monotonic()-run_started
+        model_result, insight_model_result, report_model_result, model_provider, model_id, performance = analyze_models(
+            material, knowledge_entries,
+            run['context_snapshot']['case_user_context'] if run.get('context_snapshot') else
+            (case_meta["user_context"] if case_meta else None),
+            source_refs, fact_inputs, encounter_dates, advance, knowledge_excluded)
+        performance['parse_prepare_seconds'] = round(parse_seconds,3)
 
         advance('validate')
         evidence_ids = [str(row['evidence_id']) for row in fact_inputs]
@@ -660,7 +681,8 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
                  json.dumps(report_model_result.get("usage_metadata", {})),
                  report_model_result.get("error_code")),
             )
-            result = {"parse": {
+            performance['elapsed_seconds'] = round(time.monotonic()-run_started,3)
+            result = {"performance":performance,"parse": {
                 "status": "waiting_review" if waiting_review else "completed",
                 "routing_version": ROUTING_VERSION, "pages": routing,
                 "document_count": len(parsed_documents), "evidence_ids": evidence_ids,

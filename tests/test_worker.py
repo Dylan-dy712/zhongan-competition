@@ -1,6 +1,9 @@
 import unittest
+import os
+import threading
+from unittest.mock import MagicMock, patch
 
-from services.api.app.worker import assign_encounter_keys, looks_like_title, text_chunks
+from services.api.app.worker import analyze_models, assign_encounter_keys, looks_like_title, text_chunks
 from services.api.app.tencent_ocr import normalize_bbox
 
 
@@ -15,6 +18,44 @@ class Detection:
 
 
 class WorkerTests(unittest.TestCase):
+    def test_independent_models_overlap_but_report_awaits_validated_fields(self):
+        insight_started,report_started=threading.Event(),threading.Event()
+        caller=threading.get_ident()
+        extractor=MagicMock(provider='synthetic',model_id='synthetic')
+        def fields(_):
+            self.assertTrue(insight_started.wait(2),'Insight must start before extraction returns')
+            return {'status':'completed','candidates':{'candidates':[]},'personnel':[]}
+        def insights(*_):
+            insight_started.set()
+            self.assertTrue(report_started.wait(2),'Report must not wait for independent insights')
+            return {'status':'completed','candidates':[]}
+        def report(*args,**kwargs):
+            self.assertEqual(threading.get_ident(),caller)
+            self.assertEqual(kwargs['personnel'],[])
+            report_started.set()
+            return {'status':'completed','draft':{'sections':[],'actions':[]}}
+        def advance(stage):
+            self.assertEqual(threading.get_ident(),caller,'SQL progress must stay on caller thread')
+        extractor.extract.side_effect=fields
+        with patch.dict(os.environ,{'LLM_API_KEY':'synthetic-no-network'}), \
+             patch('services.api.app.worker.OpenAiCompatibleExtractor',return_value=extractor), \
+             patch('services.api.app.worker.detect_semantic',side_effect=insights), \
+             patch('services.api.app.worker.draft_report',side_effect=report):
+            result=analyze_models('合成材料',[],{}, {},[],{},advance)
+        self.assertEqual([r['status'] for r in result[:3]],['completed']*3)
+        self.assertEqual(result[-1]['model_schedule'],'parallel')
+
+    def test_excluded_knowledge_does_not_start_insight_or_report_models(self):
+        extractor=MagicMock(provider='synthetic',model_id='synthetic')
+        extractor.extract.return_value={'status':'completed','candidates':{'candidates':[]}}
+        with patch.dict(os.environ,{'LLM_API_KEY':'synthetic-no-network'}), \
+             patch('services.api.app.worker.OpenAiCompatibleExtractor',return_value=extractor), \
+             patch('services.api.app.worker.detect_semantic') as insights, \
+             patch('services.api.app.worker.draft_report') as report:
+            result=analyze_models('合成材料',[],None,{},[],{},lambda stage:None,True)
+        insights.assert_not_called();report.assert_not_called()
+        self.assertEqual(result[1]['status'],'not_configured')
+
     def test_chunks_use_python_unicode_code_point_offsets(self):
         text = "肺炎🙂复诊"
         chunks = list(text_chunks(text, limit=3))
