@@ -62,6 +62,7 @@ jobs:
       - run: npm run test:availability --prefix apps/web
       - run: node apps/web/scripts/check-analysis-flow.mjs
       - run: node --experimental-strip-types apps/web/scripts/check-analysis-estimate.mjs
+      - run: node --experimental-strip-types scripts/check_narrative_formatting.mjs
       - run: node --experimental-strip-types scripts/check_care_presentation.mjs
       - run: node scripts/check_records_page.cjs
       - run: node scripts/check_encounter_context.cjs

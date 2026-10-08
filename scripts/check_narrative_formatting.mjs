@@ -1,0 +1,14 @@
+import assert from 'node:assert/strict';
+import {narrativeBlocks,emphasisParts} from '../apps/web/src/narrativeFormatting.ts';
+const report='先看两个重点。\n\n1. **不能排除感染**\n这是疑似判断。\n\n保留限定。\n\n2. **票据金额120元**\n不等于最终负担。';
+const blocks=narrativeBlocks(report);
+assert.equal(blocks.filter(b=>b.kind==='point').length,2);
+assert.deepEqual(blocks[1].paragraphs,['这是疑似判断。','保留限定。']);
+assert.equal(emphasisParts('**不能排除肺炎**')[1].strong,true);
+assert.equal(emphasisParts('不能排除**肺炎**')[1].strong,false);
+assert.equal(emphasisParts('未见**肺炎**')[1].strong,false);
+assert.equal(emphasisParts('<script>坏内容</script>')[0].text,'<script>坏内容</script>');
+assert.equal(emphasisParts('[点击](javascript:alert(1))')[0].strong,false);
+assert.equal(narrativeBlocks('旧概述\n\n旧事实一\n\n旧事实二\n\n你想问哪项？').filter(b=>b.kind==='point').length,2);
+assert.equal(narrativeBlocks('17.22元').filter(b=>b.kind==='point').length,0);
+console.log('PASS: adaptive numbered blocks, qualifiers retained, legacy text unchanged, no HTML/link interpretation');

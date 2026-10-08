@@ -16,6 +16,10 @@ class ModelWorkloadTests(unittest.TestCase):
         self.assertEqual(workload_options('https://proxy.invalid','deepseek-flash','narrative'),{})
         self.assertEqual(workload_options('https://api.deepseek.com','other-model','narrative'),{})
 
+    def test_fidelity_compares_sources_without_changing_professional_review(self):
+        self.assertEqual(workload_options('https://api.deepseek.com','deepseek-flash','fidelity'),{'thinking':{'type':'disabled'}})
+        self.assertEqual(workload_options('https://api.deepseek.com','deepseek-flash','review'),{'thinking':{'type':'enabled'},'reasoning_effort':'low'})
+
     def test_narrative_uses_fast_generation_and_normal_chat_stays_unchanged(self):
         with patch('services.api.app.conversation_agent.OpenAiCompatibleExtractor') as config, \
              patch('services.api.app.conversation_agent.requests.post') as post:
