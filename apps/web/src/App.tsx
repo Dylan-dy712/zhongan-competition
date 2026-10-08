@@ -1,6 +1,6 @@
 import {useCallback, useEffect, useRef, useState, type FormEvent} from 'react';
 import {ApiError, continueAnalysis, createConversation, getConversation, getEvidence, getOlderTurns,
-  listConversations, listSubjects, sendChatMessage, setRecall, setReportContext, uploadChatDocument,
+  listConversations, listSubjects, sendChatMessage, uploadChatDocument,
   listDeliveries, recordDeliveryReceipt, submitCareFeedback} from './api';
 import type {ChatSnapshot, ChatSubject, ChatTurn, Conversation, Evidence, ToolEvent, DeliveryNotice, FeedbackType,ReportSection} from './types';
 import {CareReport,EvidencePanel,brand} from './CarePages';
@@ -66,7 +66,6 @@ export default function App() {
   const currentReport = useRef('');
   currentReport.current=snapshot?.report.report_id || '';
   const [historyOpen,setHistoryOpen] = useState(false);
-  const [sharingBusy,setSharingBusy]=useState(false);
   const active = useRef('');
   const epoch = useRef(0);
   const busyRef = useRef(false);
@@ -81,7 +80,7 @@ export default function App() {
   const invalidateAccess = useCallback((e:unknown,id:string,generation:number,auth=token) => {
     if(!(e instanceof ApiError) || ![401,403,404].includes(e.status) || epoch.current!==generation || active.current!==id)return false;
     const fresh=++epoch.current;active.current='';busyRef.current=false;
-    setLoadingConversation(false);setSharingBusy(false);
+    setLoadingConversation(false);
     setSnapshot(null);setOlder([]);setEvidence(null);setAttachments([]);setInput('');setDelivery(null);
     setConversations([]);setSubjects([]);setSubject('');setCaseInput('');setFeedbackNotice('');setBusy(false);setUploading(false);
     localStorage.removeItem('zhongan_last_conversation');
@@ -113,7 +112,7 @@ export default function App() {
     active.current = id;
     olderExhausted.current = false;
     setSnapshot(null); setOlder([]); setAttachments([]); setInput(''); setEvidence(null); setError('');
-    busyRef.current=false;setBusy(false);setUploading(false);setSharingBusy(false);
+    busyRef.current=false;setBusy(false);setUploading(false);
     setLoadingConversation(true);setHasOlder(false);setDelivery(null);setFeedbackNotice('');
     setPanel(destination);setReportFocus(undefined); setHistoryOpen(false); pendingSend.current = null;
     try {
@@ -191,13 +190,13 @@ export default function App() {
     }finally{feedbackBusyRef.current=false;setFeedbackBusy(false);}
   };
 
-  const newChat = async (sameCase=false) => {
+  const newChat = async () => {
     if (busyRef.current || busy || uploading) return;
     const generation=epoch.current;
     busyRef.current=true;setBusy(true); setError('');
     try {
       const item = await createConversation(token,requestId(),subject,
-        sameCase ? snapshot?.conversation.case_id : caseInput.trim() || undefined);
+        caseInput.trim() || undefined);
       if(epoch.current!==generation)return;
       const items=await listConversations(token);
       if(epoch.current!==generation)return;
@@ -210,7 +209,7 @@ export default function App() {
 
   const prepareNewChat = () => {
     ++epoch.current;active.current='';olderExhausted.current=false;
-    busyRef.current=false;setBusy(false);setUploading(false);setSharingBusy(false);setLoadingConversation(false);
+    busyRef.current=false;setBusy(false);setUploading(false);setLoadingConversation(false);
     setDelivery(null);setFeedbackNotice('');setHasOlder(false);setReportFocus(undefined);setCaseInput('');
     setSnapshot(null);setOlder([]);setAttachments([]);setInput('');setEvidence(null);setError('');
     setHistoryOpen(false);pendingSend.current=null;
@@ -300,29 +299,11 @@ export default function App() {
     setOlder([]);setAttachments([]);setEvidence(null);setError('');setHistoryOpen(false);pendingSend.current=null;
     setSubjects([]);setSubject('');setCaseInput('');setInput('');localStorage.removeItem('zhongan_last_conversation');
     setDelivery(null);setFeedbackNotice('');careKeys.current.clear();
-    busyRef.current=false;setBusy(false);setUploading(false);setLoadingConversation(false);setSharingBusy(false);setPanel('home');
+    busyRef.current=false;setBusy(false);setUploading(false);setLoadingConversation(false);setPanel('home');
   };
   const signOut=async()=>{
     try {await revokeSession(token);logout();}
     catch(e){setError(errorText(e));}
-  };
-  const toggleRecall=async()=>{
-    if(!snapshot)return;
-    const id=active.current,generation=epoch.current;
-    try {await setRecall(token,id,!snapshot.conversation.recall_enabled);await refresh(id,token,generation);}
-    catch(e){if(!invalidateAccess(e,id,generation) && epoch.current===generation)setError(errorText(e));}
-  };
-  const toggleReportContext=async()=>{
-    if(!snapshot || sharingBusy)return;
-    const id=active.current,generation=epoch.current;
-    setSharingBusy(true);
-    try {
-      await setReportContext(token,id,!snapshot.conversation.report_context_enabled);
-      if(epoch.current!==generation)return;
-      setEvidence(null);setDelivery(null);setFeedbackNotice('');
-      await refresh(id,token,generation);
-    } catch(e){if(!invalidateAccess(e,id,generation) && epoch.current===generation)setError(errorText(e));}
-    finally{setSharingBusy(false);}
   };
   const turns=[...older,...(snapshot?.turns || [])].filter((t,i,all)=>all.findIndex(x=>x.turn_id===t.turn_id)===i);
   const working=busy || uploading || loadingConversation || !!snapshot?.turns.some(t=>t.status==='running');
@@ -396,11 +377,7 @@ export default function App() {
             <button type="button" className="attach-button" title="上传病历或发票" aria-label="上传病历或发票" disabled={working} onClick={()=>uploadInput.current?.click()}>＋</button>
             <textarea aria-label="给暖暖的消息" value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.nativeEvent.isComposing){e.preventDefault();void send();}}} rows={1} placeholder="哪一句没看懂？接着问暖暖"/>
             <button className="send-button" disabled={working || (!input.trim()&&!attachments.length)}>{uploading?'…':busy?'…':'↑'}</button>
-          </form><details className="chat-settings"><summary>对话与资料使用设置</summary><div className="chat-options"><label><input type="checkbox" checked={snapshot.conversation.report_context_enabled ?? false} disabled={sharingBusy} onChange={()=>void toggleReportContext()}/>让关怀报告结合本次聊天</label>
-            <p>开启后，报告可采用本次对话最近12条用户消息，审核者及本案件的授权查看者可见。关闭后，使用这些消息的报告将隐藏；重新开启需重新分析。</p>
-            <label><input type="checkbox" checked={snapshot.conversation.recall_enabled} disabled={working} onChange={()=>void toggleRecall()}/>允许新对话回忆本次聊天</label>
-            <button disabled={working} onClick={()=>void newChat(true)}>另开对话，接着聊这次就医</button></div>
-          </details><p className="chat-disclaimer">开发环境仅使用合成材料 · 解释与关怀不能替代医生诊疗</p>
+          </form>
         </footer></>}
       </PageBoundary>
       {connected && panel==='chat' && <div className="chat-page-tools"><button onClick={()=>setHistoryOpen(v=>!v)}>历史对话</button>{snapshot && <button onClick={()=>openReport()}>关怀指引</button>}</div>}
