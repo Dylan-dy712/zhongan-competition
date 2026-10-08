@@ -37,10 +37,10 @@ try {
   assert.match(document.body.textContent,/服务暂时不可用/);
   assert.equal(sessionStorage.getItem('zhongan_chat_token'),'synthetic-session');
   assert.equal(sessionStorage.getItem('zhongan_account_name'),'合成验证');
-  globalThis.fetch=async()=>Response.json([]);
+  globalThis.fetch=async url=>Response.json(new URL(url,'http://localhost').pathname==='/v1/me/members'?[{subject_id:'synthetic-subject',name:'合成验证',relationship:'self',gender:'unspecified',birth_date:null,profile_completed:true}]:[]);
   const retry=[...document.querySelectorAll('button')].find(b=>b.textContent==='重新连接');assert.ok(retry);
   await act(async()=>{retry.click();await new Promise(r=>setTimeout(r,20));});
-  assert.match(document.body.textContent,/申请医疗理赔/,'Manual reconnect must recover the actual app');
+  assert.match(document.body.textContent,/这次看病/,'Manual reconnect must recover the actual app');
   await act(async()=>root.unmount());root=createRoot(document.getElementById('root'));
   globalThis.fetch=async()=>new Response('',{status:401});
   await act(async()=>{root.render(React.createElement(App));await new Promise(r=>setTimeout(r,20));});

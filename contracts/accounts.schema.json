@@ -163,5 +163,118 @@
     ],
     "title": "ProfileResponse",
     "type": "object"
+  },
+  "MemberInput": {
+    "additionalProperties": false,
+    "properties": {
+      "name": {
+        "maxLength": 40,
+        "minLength": 1,
+        "title": "Name",
+        "type": "string"
+      },
+      "relationship": {
+        "enum": [
+          "self",
+          "parent",
+          "spouse",
+          "child",
+          "other"
+        ],
+        "title": "Relationship",
+        "type": "string"
+      },
+      "gender": {
+        "default": "unspecified",
+        "enum": [
+          "male",
+          "female",
+          "unspecified"
+        ],
+        "title": "Gender",
+        "type": "string"
+      },
+      "birth_date": {
+        "anyOf": [
+          {
+            "format": "date",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Birth Date"
+      }
+    },
+    "required": [
+      "name",
+      "relationship"
+    ],
+    "title": "MemberInput",
+    "type": "object"
+  },
+  "MemberResponse": {
+    "additionalProperties": false,
+    "properties": {
+      "name": {
+        "maxLength": 40,
+        "minLength": 1,
+        "title": "Name",
+        "type": "string"
+      },
+      "relationship": {
+        "enum": [
+          "self",
+          "parent",
+          "spouse",
+          "child",
+          "other"
+        ],
+        "title": "Relationship",
+        "type": "string"
+      },
+      "gender": {
+        "default": "unspecified",
+        "enum": [
+          "male",
+          "female",
+          "unspecified"
+        ],
+        "title": "Gender",
+        "type": "string"
+      },
+      "birth_date": {
+        "anyOf": [
+          {
+            "format": "date",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Birth Date"
+      },
+      "subject_id": {
+        "format": "uuid",
+        "title": "Subject Id",
+        "type": "string"
+      },
+      "profile_completed": {
+        "title": "Profile Completed",
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "name",
+      "relationship",
+      "subject_id",
+      "profile_completed"
+    ],
+    "title": "MemberResponse",
+    "type": "object"
   }
 }

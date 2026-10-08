@@ -239,13 +239,30 @@ def logout_account(authorization: str = Header(), actor_id=Depends(current_actor
 
 
 @app.get('/v1/me/consents', response_model=accounts.ConsentResponse)
-def get_account_consent(actor_id=Depends(current_actor), conn=Depends(database)):
-    return accounts.care_consent(conn, actor_id)
+def get_account_consent(response: Response, subject_id: UUID | None = None, actor_id=Depends(current_actor), conn=Depends(database)):
+    response.headers['Cache-Control'] = 'no-store'
+    return accounts.care_consent(conn, actor_id, subject_id)
 
 
 @app.post('/v1/me/consents', response_model=accounts.ConsentResponse)
-def set_account_consent(body: accounts.ConsentChange, idempotency_key: str = Header(min_length=1,max_length=128), actor_id=Depends(current_actor), conn=Depends(database)):
-    return accounts.change_consent(conn, actor_id, body, idempotency_key)
+def set_account_consent(body: accounts.ConsentChange, idempotency_key: str = Header(min_length=1,max_length=128), subject_id: UUID | None = None, actor_id=Depends(current_actor), conn=Depends(database)):
+    return accounts.change_consent(conn, actor_id, body, idempotency_key, subject_id)
+
+
+@app.get('/v1/me/members', response_model=list[accounts.MemberResponse])
+def account_members(response: Response, actor_id=Depends(current_actor), conn=Depends(database)):
+    response.headers['Cache-Control'] = 'no-store'
+    return accounts.list_members(conn, actor_id)
+
+
+@app.post('/v1/me/members', status_code=201, response_model=accounts.MemberResponse)
+def add_account_member(body: accounts.MemberInput, actor_id=Depends(current_actor), conn=Depends(database)):
+    return accounts.save_member(conn, actor_id, body)
+
+
+@app.patch('/v1/me/members/{subject_id}', response_model=accounts.MemberResponse)
+def edit_account_member(subject_id: UUID, body: accounts.MemberInput, actor_id=Depends(current_actor), conn=Depends(database)):
+    return accounts.save_member(conn, actor_id, body, subject_id)
 
 
 @app.post("/v1/cases", response_model=Case, status_code=201)
@@ -645,8 +662,8 @@ def chat_subjects(actor_id: UUID = Depends(current_actor), conn=Depends(database
 
 
 @app.get('/v1/conversations')
-def conversations(actor_id: UUID = Depends(current_actor), conn=Depends(database)):
-    return chats.list_conversations(conn, actor_id)
+def conversations(subject_id: UUID | None = None, actor_id: UUID = Depends(current_actor), conn=Depends(database)):
+    return chats.list_conversations(conn, actor_id, subject_id)
 
 
 @app.post('/v1/conversations', status_code=201)

@@ -3,7 +3,7 @@ import hashlib
 import json
 import hmac
 import secrets
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal
 from uuid import UUID
 from uuid import uuid4
@@ -132,30 +132,48 @@ class ConsentChange(Contract):
     expected_version: int = Field(ge=0)
 
 
-def care_consent(conn, actor_id):
+def member_scope(conn, actor_id, subject_id):
     owner = conn.execute('SELECT subject_id FROM user_accounts WHERE actor_id=%s', (actor_id,)).fetchone()
     if not owner:
         raise HTTPException(403, '此功能仅适用于注册账号。')
+    if subject_id is None or subject_id == owner['subject_id']:
+        return owner['subject_id']
+    member = conn.execute('SELECT subject_id FROM account_members WHERE actor_id=%s AND subject_id=%s',
+                          (actor_id, subject_id)).fetchone()
+    if not member:
+        raise HTTPException(404, '家庭成员不可访问。')
+    return member['subject_id']
+
+
+def care_consent(conn, actor_id, subject_id=None):
+    owner = conn.execute('SELECT subject_id FROM user_accounts WHERE actor_id=%s', (actor_id,)).fetchone()
+    if not owner:
+        raise HTTPException(403, '此功能仅适用于注册账号。')
+    selected = member_scope(conn, actor_id, subject_id) if subject_id is not None else owner['subject_id']
     row = conn.execute("""SELECT c.consent_id,c.version,c.notice_version,
         CASE WHEN p.status='active' AND p.expires_at IS NOT NULL AND p.expires_at<=clock_timestamp()
              THEN 'expired' ELSE p.status END AS status FROM consents c
         JOIN consent_purposes p USING(consent_id) WHERE c.subject_id=%s AND p.purpose='case_guidance'
-        ORDER BY c.created_at DESC LIMIT 1""", (owner['subject_id'],)).fetchone()
-    return {'subject_id': owner['subject_id'], 'version': row['version'] if row else 0,
+        ORDER BY c.created_at DESC,c.consent_id DESC LIMIT 1""", (selected,)).fetchone()
+    return {'subject_id': selected, 'version': row['version'] if row else 0,
             'status': row['status'] if row else 'not_granted', 'consent_id': row['consent_id'] if row else None,
             'notice_version': 'account-care-v1', 'purpose': 'case_guidance'}
 
 
-def change_consent(conn, actor_id, body, idempotency_key):
+def change_consent(conn, actor_id, body, idempotency_key, subject_id=None):
     with conn.transaction():
+        selected = member_scope(conn, actor_id, subject_id)
         conn.execute('SELECT pg_advisory_xact_lock(hashtextextended(%s,0))', ('consent:'+str(actor_id),))
-        digest=token_digest(json.dumps(body.model_dump(),sort_keys=True))
+        payload = body.model_dump()
+        if subject_id is not None:
+            payload['subject_id'] = str(selected)
+        digest=token_digest(json.dumps(payload,sort_keys=True))
         previous=conn.execute('SELECT request_hash,response FROM account_consent_operations WHERE actor_id=%s AND idempotency_key=%s', (actor_id,idempotency_key)).fetchone()
         if previous:
             if previous['request_hash']!=digest:
                 raise HTTPException(409, '同一请求标识不能用于不同的授权操作。')
             return previous['response']
-        current = care_consent(conn, actor_id)
+        current = care_consent(conn, actor_id, selected)
         target = 'active' if body.confirmation else 'revoked'
         if current['version'] != body.expected_version:
             raise HTTPException(409, '授权版本已更新，请刷新后重试。')
@@ -173,9 +191,75 @@ def change_consent(conn, actor_id, body, idempotency_key):
             consent_id=uuid4()
             conn.execute("INSERT INTO consents(consent_id,subject_id,notice_version,version) VALUES (%s,%s,'account-care-v1',1)", (consent_id,current['subject_id']))
             conn.execute("INSERT INTO consent_purposes(consent_id,purpose,status,granted_at) VALUES (%s,'case_guidance','active',now())", (consent_id,))
-        result=care_consent(conn, actor_id)
+        result=care_consent(conn, actor_id, selected)
         conn.execute('INSERT INTO account_consent_operations VALUES (%s,%s,%s,%s::jsonb,now())', (actor_id,idempotency_key,digest,json.dumps(result,default=str)))
         return result
+
+
+class MemberInput(Contract):
+    name: str = Field(min_length=1, max_length=40)
+    relationship: Literal['self','parent','spouse','child','other']
+    gender: Literal['male','female','unspecified'] = 'unspecified'
+    birth_date: date | None = None
+
+    @field_validator('name')
+    @classmethod
+    def clean_name(cls, value):
+        value = value.strip()
+        if not value:
+            raise ValueError('Name required')
+        return value
+
+    @field_validator('birth_date')
+    @classmethod
+    def valid_birth_date(cls, value):
+        if value and value > date.today():
+            raise ValueError('Birth date cannot be in the future')
+        return value
+
+
+class MemberResponse(MemberInput):
+    subject_id: UUID
+    profile_completed: bool
+
+
+def list_members(conn, actor_id):
+    # Also covers accounts created after the migration, without duplicating self.
+    member_scope(conn, actor_id, None)
+    conn.execute("""INSERT INTO account_members(actor_id,subject_id,name,relationship)
+        SELECT actor_id,subject_id,display_name,'self' FROM user_accounts WHERE actor_id=%s
+        ON CONFLICT(actor_id,subject_id) DO NOTHING""", (actor_id,))
+    return conn.execute("""SELECT subject_id,name,relationship,gender,birth_date,profile_completed
+        FROM account_members WHERE actor_id=%s ORDER BY (relationship='self') DESC,created_at,subject_id""",
+        (actor_id,)).fetchall()
+
+
+def save_member(conn, actor_id, body, subject_id=None):
+    with conn.transaction():
+        if subject_id is None:
+            owner = member_scope(conn, actor_id, None)
+            if body.relationship == 'self':
+                raise HTTPException(422, '本人档案已存在，请编辑本人资料。')
+            completed = conn.execute('SELECT profile_completed FROM account_members WHERE actor_id=%s AND subject_id=%s',
+                                     (actor_id, owner)).fetchone()
+            if not completed or not completed['profile_completed']:
+                raise HTTPException(409, '请先完善本人资料。')
+            subject_id = uuid4()
+            conn.execute('INSERT INTO actor_subject_access VALUES (%s,%s,true,true)', (actor_id,subject_id))
+            return conn.execute("""INSERT INTO account_members(actor_id,subject_id,name,relationship,gender,birth_date,profile_completed)
+                VALUES (%s,%s,%s,%s,%s,%s,true)
+                RETURNING subject_id,name,relationship,gender,birth_date,profile_completed""",
+                (actor_id,subject_id,body.name,body.relationship,body.gender,body.birth_date)).fetchone()
+        member_scope(conn, actor_id, subject_id)
+        list_members(conn, actor_id)
+        original = conn.execute('SELECT relationship FROM account_members WHERE actor_id=%s AND subject_id=%s FOR UPDATE',
+                                (actor_id,subject_id)).fetchone()
+        if not original or (original['relationship']=='self') != (body.relationship=='self'):
+            raise HTTPException(422, '不能改变本人身份。')
+        return conn.execute("""UPDATE account_members SET name=%s,relationship=%s,gender=%s,birth_date=%s,profile_completed=true
+            WHERE actor_id=%s AND subject_id=%s
+            RETURNING subject_id,name,relationship,gender,birth_date,profile_completed""",
+            (body.name,body.relationship,body.gender,body.birth_date,actor_id,subject_id)).fetchone()
 
 
 def login(conn, body):

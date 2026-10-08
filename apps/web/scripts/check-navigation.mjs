@@ -10,8 +10,9 @@ const dom=new JSDOM('<div id="root"></div>',{url:'http://localhost/#/home'});
 for(const key of ['window','document','sessionStorage','localStorage','HTMLElement'])globalThis[key]=dom.window[key];
 globalThis.IS_REACT_ACT_ENVIRONMENT=true;
 dom.window.HTMLElement.prototype.scrollIntoView=function(){};
+dom.window.HTMLDialogElement.prototype.showModal=function(){this.open=true;};dom.window.HTMLDialogElement.prototype.close=function(){this.open=false;};
 const calls=[];
-const conversation={conversation_id:'synthetic-a',case_id:'case-a',title:'合成测试记录',
+const conversation={conversation_id:'synthetic-a',subject_id:'synthetic-subject',case_id:'case-a',title:'合成测试记录',
   updated_at:'2026-10-05T09:00:00+08:00',created_at:'2026-10-05T09:00:00+08:00',recall_enabled:false};
 const snapshot={conversation,turns:[],analysis:{status:'completed'},report:{status:'published',report_id:'synthetic-report',report_version:1,
   actions:[],sections:[{section_type:'diagnosis_explanation',claims:[{claim_id:'synthetic-claim',text:'合成资料说明',
@@ -21,6 +22,8 @@ let delayedEvidence=null;
 globalThis.fetch=async url=>{
   const path=new URL(url,'http://localhost').pathname;calls.push(path);
   if(path==='/v1/conversations')return Response.json([conversation]);
+  if(path==='/v1/me/members')return Response.json([{subject_id:'synthetic-subject',name:'合成用户',relationship:'self',gender:'unspecified',birth_date:null,profile_completed:true}]);
+  if(path==='/v1/me/consents')return Response.json({subject_id:'synthetic-subject',status:'active',version:1});
   if(path==='/v1/chat/subjects')return Response.json([{subject_id:'synthetic-subject',consent_id:'synthetic-consent'}]);
   if(path==='/v1/cases/case-a/deliveries')return Response.json([]);
   if(path==='/v1/evidence/synthetic-evidence')return delayedEvidence.promise;
@@ -64,9 +67,10 @@ try {
   await flush();assert.equal(document.querySelector('dialog.evidence-overlay'),null,'Late evidence must not reopen a modal on another page');
   assert.match(document.body.textContent,/这次看病/);
   await click('问暖暖');
-  await click('新的关怀对话');assert.match(document.body.textContent,/开始新的对话/);
-  await click('就医记录');
-  assert.ok(document.querySelector('.records-profile'),'Original archive profile must be mounted');
+  await click('新的关怀对话');await click('年龄未填写');assert.match(document.body.textContent,/开始新的对话/);
+  await click('我的');await click('查看更多');
+  assert.ok(document.querySelector('.member-records-header'),'Secondary record list identifies the person');
+  assert.equal(document.querySelector('.records-profile'),null,'Record list must not duplicate the profile card');
   const requestsBeforeView=calls.length;
   await click('按时间');assert.ok(document.querySelector('.records-timeline'));
   await click('按就医');assert.ok(document.querySelector('.records-group'));
@@ -79,7 +83,7 @@ try {
   assert.doesNotMatch(document.body.textContent,/开始新的对话/,'Loading must not masquerade as a new case');
   await act(async()=>resolve(Response.json({message:'不可访问'},{status:404})));await flush();
   assert.doesNotMatch(document.body.textContent,/正在打开就医记录/,'Access failure must clear loading');
-  await click('问暖暖');assert.equal(button('新的关怀对话').disabled,false,'Access failure must not leave controls locked');
+  await click('问暖暖');await click('年龄未填写');assert.equal(button('开始新的对话').disabled,false,'Access failure must not leave controls locked');
   const {PageBoundary}=modules;
   const bad=()=>{throw new Error('Synthetic render failure');};
   await act(async()=>root.unmount());root=createRoot(document.getElementById('root'));

@@ -13,7 +13,7 @@ function uuid() {
   return `${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20)}`;
 }
 
-export default function ClaimIntake({token,subject,visible,onOpen,onAuthorize,onExit}:{token:string;subject:string;visible:boolean;onAuthorize:()=>void;onExit:()=>void;onOpen:(id:string,report?:boolean)=>Promise<void>}) {
+export default function ClaimIntake({token,subject,visible,onOpen,onAuthorize,onExit,onDirty}:{onDirty?:(dirty:boolean)=>void;token:string;subject:string;visible:boolean;onAuthorize:()=>void;onExit:()=>void;onOpen:(id:string,report?:boolean)=>Promise<void>}) {
   const [step,setStep]=useState(0);
   const form=useRef<ClaimForm>(initialClaimForm());
   const [files,setFiles]=useState<ClaimFile[]>([]);
@@ -99,6 +99,7 @@ export default function ClaimIntake({token,subject,visible,onOpen,onAuthorize,on
     finally{running.current=false;if(mounted.current){setBusy(false);setProgress(undefined);setSubmission(false);}}
   };
   const template=claimTemplate(form.current,files,step,finished);
+  useEffect(()=>{if(files.length||step>0||locked)onDirty?.(true);},[files.length,step,locked,onDirty]);
   const html=locked&&!finished?template.html.replace(/<(input|select) /g,'<$1 disabled '):template.html;
   useLayoutEffect(()=>{if(shell.current)syncClaimMarkup(shell.current,html);},[html]);
   useLayoutEffect(()=>{shell.current?.querySelector('.claim-main')?.scrollTo?.(0,0);},[step]);
@@ -111,10 +112,10 @@ export default function ClaimIntake({token,subject,visible,onOpen,onAuthorize,on
     <AnalysisFlow open={visible && progressOpen} snapshot={submission || progress?null:snapshot} upload={progress} submitting={submission} error={error} onClose={()=>setProgressOpen(false)} onReport={()=>{setProgressOpen(false);void onOpen(pending.current!.id,true).catch(e=>setError(e instanceof Error?e.message:'打开失败'));}} onRetry={()=>{if(finished && snapshot?.material_report?.status==='available' && snapshot.analysis.run_id){continuations.current.delete(snapshot.analysis.run_id);setError('');}else if(finished){setProgressOpen(false);void onOpen(pending.current!.id).catch(e=>setError(e instanceof Error?e.message:'打开失败'));}else void submit();}}/>
     <div className="claim-shell" ref={shell} onInput={e=>{
       const input=e.target as HTMLInputElement;const key=input.dataset.claimField as keyof ClaimForm;
-      if(key && key in form.current){form.current[key]=input.value;}
+      if(key && key in form.current){form.current[key]=input.value;onDirty?.(true);}
     }} onChange={e=>{
       const input=e.target as unknown as HTMLSelectElement;const key=input.dataset.claimField as keyof ClaimForm;
-      if(key && key in form.current){form.current[key]=input.value;setConfirmed(false);if(input.tagName==='SELECT')redraw(n=>n+1);}
+      if(key && key in form.current){form.current[key]=input.value;onDirty?.(true);setConfirmed(false);if(input.tagName==='SELECT')redraw(n=>n+1);}
     }} onClick={e=>{
       const button=(e.target as HTMLElement).closest<HTMLButtonElement>('button');if(!button||button.disabled)return;
       if(locked && !finished)return;
