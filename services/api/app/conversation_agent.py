@@ -18,6 +18,7 @@ from .analysis_sources import pack_sources
 from .model_workloads import workload_options
 from .analysis_format import strict_analysis_tool, decode_analysis_tool
 from .analysis_review import review_analysis
+from .analysis_partial import verified_partial
 
 
 PROMPT_VERSION = 'conversation-agent-v1'
@@ -316,6 +317,7 @@ def run_agent(history, question, attachments, tools, model=None, on_event=None, 
     analysis_has_evidence = False
     aliases = {}
     model_seconds = 0
+    partial_delivery = False
     review_calls = 0
     review_seconds = 0
     if analysis_mode:
@@ -425,18 +427,31 @@ def run_agent(history, question, attachments, tools, model=None, on_event=None, 
             review_calls+=1
             review_seconds+=time.monotonic()-review_started
             if not verdict.accepted:
-                if round_index>=1:raise ValueError('ANALYSIS_FIDELITY_REJECTED')
-                messages.extend([{'role':'assistant','content':content},
-                    {'role':'user','content':('费用有错时，删掉有问题的次要明细；只保留能直接核对的原文总额，不再列起付线、乙类费用等容易错配的项目。不要把错误数字换成新的推断。' if any(issue.category=='payment' for issue in verdict.issues) else '')+'原文复核未通过。仅修正这些有依据的具体问题，其他正确表述保持简短，不新增项目或解释。重新输出完整解读；原文才是依据，复核意见不是新增事实：'+
-                     json.dumps([issue.model_dump() for issue in verdict.issues],ensure_ascii=False)}])
-                continue
+                if round_index>=1 or verdict.unverified:
+                    partial=verified_partial(reply.text,verdict.issues,packed,aliases,reply.evidence_refs)
+                    if not partial:raise ValueError('ANALYSIS_FIDELITY_REJECTED')
+                    if on_event:on_event(events)
+                    partial_started=time.monotonic()
+                    checked=model.review_analysis(packed,partial)
+                    review_calls+=1
+                    review_seconds+=time.monotonic()-partial_started
+                    if not checked.accepted:raise ValueError('ANALYSIS_FIDELITY_REJECTED')
+                    reply=AgentReply.model_validate({**reply.model_dump(mode='json'),'text':partial})
+                    if _unsafe(reply.text.replace('**','')):raise ValueError('UNSAFE_ANALYSIS')
+                    tools.validate_reply(reply)
+                    partial_delivery=True
+                else:
+                    messages.extend([{'role':'assistant','content':content},
+                        {'role':'user','content':('费用有错时，删掉有问题的次要明细；只保留能直接核对的原文总额，不再列起付线、乙类费用等容易错配的项目。不要把错误数字换成新的推断。' if any(issue.category=='payment' for issue in verdict.issues) else '')+'原文复核未通过。仅修正这些有依据的具体问题，其他正确表述保持简短，不新增项目或解释。重新输出完整解读；原文才是依据，复核意见不是新增事实：'+
+                         json.dumps([issue.model_dump() for issue in verdict.issues],ensure_ascii=False)}])
+                    continue
         result = {**reply.model_dump(mode='json'),
                   'prompt_version': ANALYSIS_PROMPT_VERSION if analysis_mode else PROMPT_VERSION}
         if analysis_mode:
             result['performance'] = {'source_fragments':len(aliases), 'source_characters':size,
                 'model_input_characters':sum(len(m.get('content') or '') for m in messages),
                 'model_calls':len(model.usage) if isinstance(getattr(model,'usage',None),list) else round_index+1+review_calls, 'model_seconds':round(model_seconds+review_seconds,3),
-                'review_calls':review_calls, 'review_seconds':round(review_seconds,3),
+                'partial_delivery':partial_delivery, 'review_calls':review_calls, 'review_seconds':round(review_seconds,3),
                 'total_seconds':round(time.monotonic()-started,3)}
         model_id = getattr(getattr(model, 'config', None), 'model_id', None)
         if isinstance(model_id, str):

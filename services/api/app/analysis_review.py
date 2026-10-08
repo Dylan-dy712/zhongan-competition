@@ -16,6 +16,7 @@ class ReviewIssue(BaseModel):
 class AnalysisReview(BaseModel):
     model_config=ConfigDict(extra='forbid')
     accepted:bool=Field(strict=True)
+    unverified:bool=Field(default=False,strict=True)
     issues:list[ReviewIssue]=Field(max_length=3)
 
     @model_validator(mode='after')
@@ -35,6 +36,7 @@ INSTRUCTION="""你是患者材料解读的独立原文复核员。只核对提�
 不要求列齐所有费用项目或解释所有医学术语；准确保留“暂未回报异常”原句即可，不要求猜测结果是否已出。
 不能因正确文字未补充更多解释、未罗列重复条目或没解读普通无异常项目而拒绝；omission仅指转述某事实时漏了影响含义的条件。
 不要要求固定主题或覆盖每一碎片，也不要要求医学免责声明；只列影响准确理解的具体问题。
+解读中如实说明个别条目暂未核对、需要查看原文的流程状态，不是新的医学事实，不因这种保留不确定的说明判错。
 原文存在矛盾要说明，不能单方裁定；未出现不等于没有发生；未读部分不能说成用户未提供。
 最多列3项直接影响事实准确性的具体问题；每段引文不超过200字，解释不超过300字。不要输出分析过程。只返回JSON：{"accepted":true,"issues":[]}。有问题则accepted为false，issues列category、explanation、source_quote、draft_quote；后两项分别逐字摘自原文和拟交付文本，必须能直接对照证明问题，不能编造引文。
 category仅限unsupported、qualifier、phase、payment、emphasis、omission、scope。意见只指出问题，不编造替代事实。
@@ -47,31 +49,29 @@ def review_analysis(config,packed,text):
                 'text':'\n'.join(span[1] for span in page['spans'])} for page in packed]
     messages=[{'role':'system','content':INSTRUCTION},
               {'role':'user','content':json.dumps({'original_material_pages':originals,'draft':text},ensure_ascii=False,separators=(',',':'))}]
-    if workload_options(config.base_url,config.model_id,'fidelity'):
-        response=requests.post('https://api.deepseek.com/beta/chat/completions',
-            headers={'Authorization':f'Bearer {config.api_key}','Content-Type':'application/json'},
-            json={'model':config.model_id,'messages':messages,'temperature':0,'max_tokens':3000,
-                  'thinking':{'type':'disabled'},'tools':[review_tool()],
-                  'tool_choice':{'type':'function','function':{'name':'deliver_review'}}},timeout=(10,90))
-        response.raise_for_status();payload=response.json()
-        calls=payload['choices'][0]['message'].get('tool_calls') or []
-        if len(calls)!=1 or calls[0]['function']['name']!='deliver_review':raise ValueError('ANALYSIS_REVIEW_FORMAT')
-        data=json.loads(calls[0]['function']['arguments'])
-        if set(data)!={'accepted','issue_1','issue_2','issue_3'}:raise ValueError('ANALYSIS_REVIEW_FORMAT')
-        content=json.dumps({'accepted':data['accepted'],
-            'issues':[data[f'issue_{i}'] for i in range(1,4) if data[f'issue_{i}']['category']!='none']})
-    else:
-        payload,content=config._call(messages,timeout=(10,90),workload='fidelity')
-    verdict=AnalysisReview.model_validate_json(content)
-    compact=lambda value:''.join(value.replace('**','').split())
+    compact=lambda value:re.sub(r'[\s，,；;：:（）()“”\"。*]','',value)
     draft=compact(text)
     material=[compact(page['text']) for page in originals]
-    for issue in verdict.issues:
-        if (not compact(issue.draft_quote) or compact(issue.draft_quote) not in draft
-                or not compact(issue.source_quote)
-                or not any(compact(issue.source_quote) in source for source in material)):
-            raise ValueError('UNGROUNDED_ANALYSIS_REVIEW')
-    usages=[payload.get('usage',{})]
+    usages=[]
+    for attempt in range(2):
+        verdict,payload=source_verdict(config,messages)
+        usages.append(payload.get('usage',{}))
+        invalid=[issue for issue in verdict.issues if (
+            not compact(issue.draft_quote) or compact(issue.draft_quote) not in draft
+            or not compact(issue.source_quote)
+            or not any(compact(issue.source_quote) in source for source in material))]
+        if not invalid:break
+        if attempt:
+            if any(not compact(issue.draft_quote) or compact(issue.draft_quote) not in draft for issue in invalid):
+                raise ValueError('UNGROUNDED_ANALYSIS_REVIEW')
+            # No factual correction may rely on a quote we cannot verify.
+            # Mark the corresponding draft points as unverified instead, so they
+            # can be omitted and the remainder reviewed independently.
+            pending=[ReviewIssue(category='scope',explanation='该重点的原文依据暂未逐字核对，只暂不交付该点，不据此改写事实。',
+                                 source_quote='',draft_quote=issue.draft_quote) for issue in verdict.issues]
+            return AnalysisReview(accepted=False,unverified=True,issues=pending),{'request_usages':usages}
+        messages.extend([{'role':'assistant','content':verdict.model_dump_json()},
+            {'role':'user','content':'复核引句未能在原文或草稿中逐字找到，不能用于改写或判定。请重新比对并逐字复制引句，保留OCR中的O/0、标点和数值；不要把多个不同位置拼成一句，不自行规范药名、数字或原文。只提交能用实际引句证明的具体问题；没有事实问题则accepted为true。'}])
     if verdict.issues:
         # A focused reasoning pass judges the cited comparison, rather than
         # rereading hundreds of OCR fragments or trusting speculative criticism.
@@ -87,6 +87,25 @@ def review_analysis(config,packed,text):
         verdict=AnalysisReview(accepted=not confirmed,issues=confirmed)
         usages.append(judged.get('usage',{}))
     return verdict,{'request_usages':usages}
+
+
+def source_verdict(config,messages):
+    if workload_options(config.base_url,config.model_id,'fidelity'):
+        response=requests.post('https://api.deepseek.com/beta/chat/completions',
+            headers={'Authorization':f'Bearer {config.api_key}','Content-Type':'application/json'},
+            json={'model':config.model_id,'messages':messages,'temperature':0,'max_tokens':3000,
+                  'thinking':{'type':'disabled'},'tools':[review_tool()],
+                  'tool_choice':{'type':'function','function':{'name':'deliver_review'}}},timeout=(10,90))
+        response.raise_for_status();payload=response.json()
+        calls=payload['choices'][0]['message'].get('tool_calls') or []
+        if len(calls)!=1 or calls[0]['function']['name']!='deliver_review':raise ValueError('ANALYSIS_REVIEW_FORMAT')
+        data=json.loads(calls[0]['function']['arguments'])
+        if set(data)!={'accepted','issue_1','issue_2','issue_3'}:raise ValueError('ANALYSIS_REVIEW_FORMAT')
+        content=json.dumps({'accepted':data['accepted'],
+            'issues':[data[f'issue_{i}'] for i in range(1,4) if data[f'issue_{i}']['category']!='none']})
+    else:
+        payload,content=config._call(messages,timeout=(10,90),workload='fidelity')
+    return AnalysisReview.model_validate_json(content),payload
 
 
 def review_tool():
