@@ -7,8 +7,8 @@ const API_BASE = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
 
 export async function authenticate(mode:'login'|'register',body:unknown):Promise<SessionResponse> {
   const response=await apiFetch(`${API_BASE}/v1/auth/${mode}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-  const result=await response.json();
-  if(!response.ok)throw new ApiError(response.status===422?'请检查手机号、密码和授权信息。':result.message || '登录失败',response.status);
+  const result=await response.json().catch(()=>null);
+  if(!response.ok)throw new ApiError(response.status===422?'请检查手机号、密码和授权信息。':result?.message || failureMessage(response.status),response.status);
   return result;
 }
 
@@ -22,14 +22,22 @@ export class ApiError extends Error {
 }
 
 async function apiFetch(url:string,options:RequestInit):Promise<Response> {
-  try {
-    return await fetch(url,{...options,signal:AbortSignal.timeout(options.method && options.method!=='GET' ? 120000 : 15000)});
-  } catch(e) {
-    if(e instanceof Error && ['TimeoutError','AbortError'].includes(e.name))
-      throw new Error('连接超时，请稍后重试。');
-    throw e;
+  const readOnly=!options.method || options.method==='GET';
+  for(let attempt=0;;attempt++) {
+    try {
+      const response=await fetch(url,{...options,signal:AbortSignal.timeout(readOnly?15000:120000)});
+      if(!readOnly || ![502,503,504].includes(response.status) || attempt===2)return response;
+      await response.body?.cancel().catch(()=>{});
+    } catch(e) {
+      if(!readOnly || attempt===2){
+        if(e instanceof Error && ['TimeoutError','AbortError'].includes(e.name))throw new Error('连接超时，请稍后重试。');
+        throw e;
+      }
+    }
+    await new Promise(resolve=>setTimeout(resolve,attempt===0?500:1500));
   }
 }
+function failureMessage(status:number){return [502,503,504].includes(status)?'服务暂时不可用，请稍后重试。':`请求失败（${status}）`;}
 
 async function request<T>(path: string, token: string): Promise<T> {
   const response = await apiFetch(`${API_BASE}${path}`, {
@@ -37,7 +45,7 @@ async function request<T>(path: string, token: string): Promise<T> {
   });
   if (!response.ok) {
     const detail = await response.json().catch(() => null);
-    throw new ApiError(detail?.message || `请求失败（${response.status}）`, response.status, detail?.trace_id);
+    throw new ApiError(detail?.message || failureMessage(response.status), response.status, detail?.trace_id);
   }
   return response.json() as Promise<T>;
 }
@@ -56,7 +64,7 @@ export async function askAssistant(caseId: string, reportVersion: number, questi
   });
   if (!response.ok) {
     const detail = await response.json().catch(() => null);
-    throw new ApiError(detail?.message || `请求失败（${response.status}）`, response.status, detail?.trace_id);
+    throw new ApiError(detail?.message || failureMessage(response.status), response.status, detail?.trace_id);
   }
   return response.json() as Promise<AssistantAnswer>;
 }
@@ -71,7 +79,7 @@ async function chatRequest<T>(path: string, token: string, method = 'GET', data?
   });
   if (!response.ok) {
     const detail = await response.json().catch(() => null);
-    throw new ApiError(detail?.message || `请求失败（${response.status}）`, response.status, detail?.trace_id);
+    throw new ApiError(detail?.message || failureMessage(response.status), response.status, detail?.trace_id);
   }
   return response.json() as Promise<T>;
 }
