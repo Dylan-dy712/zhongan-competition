@@ -40,6 +40,13 @@ function ToolActivity({events}:{events:ToolEvent[]}) {
   </details> : null;
 }
 
+function UploadSourceIcon({kind}:{kind:'image'|'document'}) {
+  return <svg width="26" height="28" viewBox="0 0 28 30" fill="none" aria-hidden="true">
+    {kind==='image' ? <><rect x="3" y="5" width="22" height="20" rx="5" stroke="currentColor" strokeWidth="1.7"/><circle cx="10" cy="11" r="2" fill="currentColor"/><path d="m4 21 6-6 5 5 4-4 5 5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"/></>
+      : <><path d="M7 3h10l6 6v16a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z" fill="#fff" stroke="currentColor" strokeWidth="1.5"/><path d="M17 3v6h6M9 13h10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/><rect x="3" y="17" width="22" height="9" rx="3" fill="currentColor"/><text x="14" y="23.6" textAnchor="middle" fill="#fff" fontSize="7" fontWeight="700" fontFamily="Arial,sans-serif">PDF</text></>}
+  </svg>;
+}
+
 export default function App() {
   const [token,setToken] = useState(()=>sessionStorage.getItem('zhongan_chat_token') || '');
   const [connected,setConnected] = useState(false);
@@ -413,10 +420,10 @@ export default function App() {
             <input ref={photoInput} aria-label="选择照片或图片" hidden type="file" multiple accept="image/jpeg,image/png" onChange={e=>void upload(e.target.files)}/>
             <details ref={uploadMenu} className="chat-upload-menu" onBlur={e=>{if(!e.currentTarget.contains(e.relatedTarget))e.currentTarget.open=false;}} onKeyDown={e=>{if(e.key==='Escape'){e.preventDefault();e.currentTarget.open=false;e.currentTarget.querySelector('summary')?.focus();}}}>
               <summary title="上传病历或发票" aria-label="上传病历或发票" aria-disabled={working} onClick={e=>{if(working)e.preventDefault();}}>＋</summary>
-              <div className="chat-upload-options" aria-label="选择上传方式"><p>上传就医材料</p>
-                <button type="button" disabled={working} onClick={()=>{if(uploadMenu.current)uploadMenu.current.open=false;photoInput.current?.click();}}>照片或图片<span>JPG、PNG</span></button>
-                <button type="button" disabled={working} onClick={()=>{if(uploadMenu.current)uploadMenu.current.open=false;uploadInput.current?.click();}}>PDF / TXT 文件<span>从手机文件中选择</span></button>
-                <small>支持多选，每份文件不超过 10MB</small>
+              <div className="chat-upload-options" aria-label="选择上传方式"><div className="upload-panel-heading"><p>上传就医材料</p><small>补充资料，一起看得更清楚</small></div>
+                <button className="upload-source-photo" type="button" aria-label="照片或图片" aria-describedby="upload-photo-hint" disabled={working} onClick={()=>{if(uploadMenu.current)uploadMenu.current.open=false;photoInput.current?.click();}}><span className="upload-source-icon"><UploadSourceIcon kind="image"/></span><span className="upload-source-copy"><strong>照片或图片</strong><small id="upload-photo-hint">从相册选择 · JPG、PNG</small></span><DemoIcon name="arrow"/></button>
+                <button className="upload-source-document" type="button" aria-label="PDF / TXT 文件" aria-describedby="upload-document-hint" disabled={working} onClick={()=>{if(uploadMenu.current)uploadMenu.current.open=false;uploadInput.current?.click();}}><span className="upload-source-icon"><UploadSourceIcon kind="document"/></span><span className="upload-source-copy"><strong>PDF / TXT 文件</strong><small id="upload-document-hint">从文件中选择病历或票据</small></span><DemoIcon name="arrow"/></button>
+                <small className="upload-panel-note"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" aria-hidden="true"><path d="M8 12v5a4 4 0 0 0 8 0V7a3 3 0 0 0-6 0v10a1 1 0 0 0 2 0V9"/></svg>支持多选 · 每份不超过 10MB</small>
               </div>
             </details>
             <textarea aria-label="给暖暖的消息" value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.nativeEvent.isComposing){e.preventDefault();void send();}}} rows={1} placeholder="有哪里不清楚？问问暖暖"/>
