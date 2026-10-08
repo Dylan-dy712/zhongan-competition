@@ -6,6 +6,7 @@ import {loadTestModules} from './test-modules.mjs';
 const dom=new JSDOM('<div id="root"></div>',{url:'http://localhost/#/home'});
 for(const key of ['window','document','sessionStorage','localStorage','HTMLElement'])globalThis[key]=dom.window[key];
 globalThis.IS_REACT_ACT_ENVIRONMENT=true;
+globalThis.requestAnimationFrame=callback=>setTimeout(callback,0);
 dom.window.HTMLElement.prototype.scrollIntoView=function(){};
 dom.window.HTMLDialogElement.prototype.showModal=function(){this.open=true;};dom.window.HTMLDialogElement.prototype.close=function(){this.open=false;};
 const {createRoot}=await import('react-dom/client');
@@ -35,7 +36,11 @@ globalThis.fetch=async(url,options={})=>{
     if(uploadCount===2 && failUpload){failUpload=false;return Response.json({message:'合成上传中断'},{status:503});}
     return Response.json({document_id:'doc-'+uploadCount,source_ref:'synthetic'});
   }
-  if(path.endsWith('/messages') || path.endsWith('/analyses'))return Response.json({status:'completed'});
+  if(path.endsWith('/analyses')){
+    claimTurns=[{turn_id:'claim-start',input_kind:'user',status:'completed',question:'合成测试',attachments:[],tool_events:[{tool:'start_analysis',run_id:'claim-run'}]}];
+    return Response.json({status:'completed'});
+  }
+  if(path.endsWith('/messages'))return Response.json({status:'completed'});
   if(path.endsWith('/continue')){
     await new Promise(r=>resolveClaimNarrative=r);
     claimTurns=[{turn_id:'claim-narrative',input_kind:'analysis_ready',status:'completed',question:'合成测试',attachments:[],tool_events:[],answer:{text:'我看过你上传的资料了，咱们先把这次费用理清楚。',evidence_refs:[],history_refs:[],analysis_run_id:'claim-run'}}];
@@ -90,21 +95,24 @@ try{
   await act(async()=>fileInput.dispatchEvent(new dom.window.Event('change',{bubbles:true})));for(const title of ['发票相关资料']){await click('添加'+title);document.querySelector('dialog').close();Object.defineProperty(fileInput,'files',{value:[new File(['synthetic'],'synthetic-'+title+'.pdf',{type:'application/pdf'})],configurable:true});await act(async()=>fileInput.dispatchEvent(new dom.window.Event('change',{bubbles:true})));}
   await click('下一步，核对申请');
   const confirmation=[...document.querySelectorAll('input[type="checkbox"]')].find(visible);await act(async()=>confirmation.click());
-  await click('确认并开始关怀');assert.match(document.body.textContent,/合成上传中断/);
+  await click('确认提交材料');assert.match(document.body.textContent,/合成上传中断/);
   await click('返回首页');await click('我的');await click('首页');await click('提交理赔材料');await click('年龄未填写');
-  await click('重试整理');assert.match(document.body.textContent,/资料已进入你的关怀空间/);
+  await click('重试提交');assert.match(document.body.textContent,/本次提交已完成/);
   assert.equal(uploadCount,28,'All 27 files upload; retry must not reupload first file');
-  assert.equal(calls.find(c=>c.path.endsWith('/analyses')).body.document_ids.length,27);
+  assert.equal(calls.filter(c=>c.path.endsWith('/analyses')).length,0,'Success page must precede analysis');
+  assert.equal(document.querySelector('.claim-react dialog.analysis-dialog').open,false);
 
   const creations=calls.filter(c=>c.path==='/v1/conversations' && c.body);
   assert.equal(creations.length,2);assert.equal(creations[0].body.conversation_id,creations[1].body.conversation_id);
   assert.equal(creations[0].body.recall_enabled,false);
-  claimReady=true;await act(async()=>{await new Promise(r=>setTimeout(r,2100));});await flush();
-  assert.ok(resolveClaimNarrative,'Claim intake starts the actual text generation before completing progress');
-  const claimProgress=document.querySelector('.claim-react dialog.analysis-dialog');
+  claimReady=true;await click('查看相关报告');
+  assert.equal(calls.find(c=>c.path.endsWith('/analyses')).body.document_ids.length,27);
+  await act(async()=>{await new Promise(r=>setTimeout(r,2100));});await flush();
+  assert.ok(resolveClaimNarrative,'Explicit report entry starts text generation');
+  const claimProgress=document.querySelector('.chat-workspace > dialog.analysis-dialog');
   assert.equal(claimProgress.open,true);
   assert.ok(claimProgress.querySelector('progress').value>=95 && claimProgress.querySelector('progress').value<100);
-  assert.equal(window.location.hash,'#/claim');
+  assert.equal(window.location.hash,'#/chat');
   await act(async()=>resolveClaimNarrative());await flush();await flush();
   assert.equal(window.location.hash,'#/chat','Claim report opens automatically once its text is ready');
   assert.ok(document.querySelector('.analysis-narrative'));
@@ -114,6 +122,10 @@ try{
   await click('首页');await click('问暖暖');
   assert.equal(document.querySelector('#chat-topic-action'),null,'Ordinary chat visits must not retain claim-entry cards');
   assert.equal(document.querySelector('.nuan-quick-actions'),null,'No shortcuts to absent cards');
+  await click('首页');await click('提交理赔材料');await click('年龄未填写');
+  assert.ok(document.querySelector('.claim-form-shell'),'Reentering completed intake starts a fresh form');
+  assert.equal(document.querySelector('[data-claim-field="diagnosis"]').value,'');
+  await click('返回首页');await click('问暖暖');
   await click('新的关怀对话');await click('年龄未填写');await click('开始新的对话');
   assert.ok(document.querySelector('.composer'),'Ordinary new chat must still support messages');
   assert.equal(document.querySelector('.nuan-conversation-caption'),null);

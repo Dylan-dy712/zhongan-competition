@@ -1,8 +1,6 @@
 import {useEffect,useLayoutEffect,useRef,useState} from 'react';
-import {createConversation,startChatAnalysis,uploadChatDocument,getConversation,continueAnalysis} from './api';
-import {currentNarrative} from './AnalysisNarrative';
+import {createConversation,startChatAnalysis,uploadChatDocument} from './api';
 import AnalysisFlow,{type UploadProgress} from './AnalysisFlow';
-import type {ChatSnapshot} from './types';
 import {claimTemplate,initialClaimForm,validateClaimInfo,type ClaimFile,type ClaimForm} from './claimTemplate';
 import './claim-original.css';
 import {syncClaimMarkup} from './claimDom';
@@ -32,44 +30,38 @@ export default function ClaimIntake({token,subject,visible,onOpen,onAuthorize,on
   const [error,setError]=useState('');
   const [progressOpen,setProgressOpen]=useState(false);
   const [progress,setProgress]=useState<UploadProgress>();
-  const [snapshot,setSnapshot]=useState<ChatSnapshot|null>(null);
   const [submission,setSubmission]=useState(false);
-  const pending=useRef<{id:string;requestId:string;uploaded:Map<File,string>} | null>(null);
+  const pending=useRef<{id:string;requestId:string;uploaded:Map<File,string>;analysisStarted?:boolean} | null>(null);
   const [finished,setFinished]=useState(false);
   const [locked,setLocked]=useState(false);
   const mounted=useRef(true);
   const running=useRef(false);
-  const continuations=useRef(new Set<string>());
-  const openedReports=useRef(new Set<string>());
-  const onOpenRef=useRef(onOpen);onOpenRef.current=onOpen;
+  const wasVisible=useRef(visible);
   useEffect(()=>{
-    if(!visible || (!busy && !finished) || !pending.current)return;
-    let stopped=false,timer:ReturnType<typeof setTimeout>;
-    const tick=async()=>{
-      try{
-        const id=pending.current!.id;
-        let state=await getConversation(token,id);
-        if(stopped)return;
-        setSnapshot(state);
-        const run=state.analysis.run_id;
-        if(run && state.material_report?.status==='available' && !currentNarrative(state.turns,run) && !continuations.current.has(run)){
-          continuations.current.add(run);
-          try{
-            await continueAnalysis(token,id,run);
-            state=await getConversation(token,id);
-            if(stopped)return;
-            setSnapshot(state);
-          }catch(e){if(!stopped)setError(e instanceof Error?e.message:'解读暂时没能完成，可以重试。');}
-        }
-        if(!stopped && run && currentNarrative(state.turns,run) && !openedReports.current.has(run)){
-          openedReports.current.add(run);setProgressOpen(false);
-          await onOpenRef.current(id,true);
-        }
-      }catch{/* Polling can recover without replacing submission errors. */}
-      if(!stopped)timer=setTimeout(tick,2000);
-    };
-    void tick();return()=>{stopped=true;clearTimeout(timer);};
-  },[visible,busy,finished,token]);
+    const entering=visible&&!wasVisible.current;wasVisible.current=visible;
+    if(!entering||!finished||running.current)return;
+    fileRef.current.forEach(f=>{if(f.url)URL.revokeObjectURL(f.url);});
+    form.current=initialClaimForm();pending.current=null;
+    setFiles([]);setStep(0);setConfirmed(false);setFinished(false);setLocked(false);
+    setError('');setProgressOpen(false);setProgress(undefined);setPreviewFile(null);
+    onDirty?.(false);
+  },[visible,finished,onDirty]);
+  const viewReport=async()=>{
+    const attempt=pending.current;if(!finished||!attempt||running.current)return;
+    running.current=true;setBusy(true);setError('');setSubmission(true);setProgressOpen(true);
+    try{
+      if(!attempt.analysisStarted){
+        const activeGroups=claimTemplate(form.current,files,step).groups;
+        const entries=files.filter(f=>activeGroups.some(g=>g.id===f.category));
+        await startChatAnalysis(token,attempt.id,attempt.requestId,
+          `请帮我整理本次就医资料，解释费用与需要补充的材料。用户填写的信息：${JSON.stringify(form.current)}；材料分类：${JSON.stringify(activeGroups.map(group=>({category:group.title,count:entries.filter(entry=>entry.category===group.id).length})))}。这些是个人补充信息，请以材料原文核对，不代表已确认事实。`,[...attempt.uploaded.values()]);
+        attempt.analysisStarted=true;
+      }
+      await onOpen(attempt.id);
+      if(mounted.current)setProgressOpen(false);
+    }catch(e){if(mounted.current)setError(e instanceof Error?e.message:'分析暂时没能开始，请重试。');}
+    finally{running.current=false;if(mounted.current){setBusy(false);setSubmission(false);}}
+  };
   useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;};},[]);
   const submit=async()=>{
     if(running.current || !confirmed || !subject)return;
@@ -77,7 +69,7 @@ export default function ClaimIntake({token,subject,visible,onOpen,onAuthorize,on
     const missing=claimTemplate(form.current,files,step).groups.filter(g=>g.required&&!files.some(f=>f.category===g.id));
     if(missing.length){setError('请补充：'+missing.map(g=>g.title).join('、'));setStep(1);return;}
     running.current=true;
-    setBusy(true);setError('');setLocked(true);setProgressOpen(true);setSnapshot(null);
+    setBusy(true);setError('');setLocked(true);
     pending.current ??= {id:uuid(),requestId:uuid(),uploaded:new Map()};
     const attempt=pending.current;
     try {
@@ -92,15 +84,12 @@ export default function ClaimIntake({token,subject,visible,onOpen,onAuthorize,on
         setProgress({done:attempt.uploaded.size,total:entries.length});
         if(!mounted.current)return;
       }
-      setProgress(undefined);setSubmission(true);
-      await startChatAnalysis(token,attempt.id,attempt.requestId,
-        `请帮我整理本次就医资料，解释费用与需要补充的材料。用户填写的信息：${JSON.stringify(form.current)}；材料分类：${JSON.stringify(activeGroups.map(group=>({category:group.title,count:entries.filter(entry=>entry.category===group.id).length})))}。这些是个人补充信息，请以材料原文核对，不代表已确认事实。`,[...attempt.uploaded.values()]);
-      if(mounted.current)setFinished(true);
+      if(mounted.current){setFinished(true);onDirty?.(false);}
     }catch(e){if(mounted.current)setError(e instanceof Error?e.message:'材料整理失败，请重试。');}
     finally{running.current=false;if(mounted.current){setBusy(false);setProgress(undefined);setSubmission(false);}}
   };
   const template=claimTemplate(form.current,files,step,finished);
-  useEffect(()=>{if(files.length||step>0||locked)onDirty?.(true);},[files.length,step,locked,onDirty]);
+  useEffect(()=>{onDirty?.(!finished&&!!(files.length||step>0||locked));},[files.length,step,locked,finished,onDirty]);
   const html=locked&&!finished?template.html.replace(/<(input|select) /g,'<$1 disabled '):template.html;
   useLayoutEffect(()=>{if(shell.current)syncClaimMarkup(shell.current,html);},[html]);
   useLayoutEffect(()=>{shell.current?.querySelector('.claim-main')?.scrollTo?.(0,0);},[step]);
@@ -110,7 +99,8 @@ export default function ClaimIntake({token,subject,visible,onOpen,onAuthorize,on
     setError('');setStep(step+1);shell.current?.querySelector('.claim-main')?.scrollTo?.(0,0);
   };
   return <main className="claim-react"><button className="claim-text" onClick={onExit}>返回首页</button>
-    <AnalysisFlow open={visible && progressOpen} snapshot={submission || progress?null:snapshot} upload={progress} submitting={submission} error={error} onClose={()=>setProgressOpen(false)} onReport={()=>{setProgressOpen(false);void onOpen(pending.current!.id,true).catch(e=>setError(e instanceof Error?e.message:'打开失败'));}} onRetry={()=>{if(finished && snapshot?.material_report?.status==='available' && snapshot.analysis.run_id){continuations.current.delete(snapshot.analysis.run_id);setError('');}else if(finished){setProgressOpen(false);void onOpen(pending.current!.id).catch(e=>setError(e instanceof Error?e.message:'打开失败'));}else void submit();}}/>
+    <AnalysisFlow open={visible && progressOpen} snapshot={null} submitting={submission} error={error} onClose={()=>setProgressOpen(false)} onReport={()=>void viewReport()} onRetry={()=>void viewReport()}/>
+    {progress && <p className="claim-text" role="status">正在上传材料：{progress.done} / {progress.total} 份</p>}
     <div className="claim-shell" ref={shell} onInput={e=>{
       const input=e.target as HTMLInputElement;const key=input.dataset.claimField as keyof ClaimForm;
       if(key && key in form.current){form.current[key]=input.value;onDirty?.(true);}
@@ -126,14 +116,14 @@ export default function ClaimIntake({token,subject,visible,onOpen,onAuthorize,on
       else if(action?.startsWith('pick-')){category.current=action.slice(5);setSourceCategory(template.groups.find(g=>g.id===category.current)?.title||'理赔材料');source.current?.showModal();}
       else if(button.dataset.claimRemove){const removed=files.find(f=>f.id===button.dataset.claimRemove);if(removed?.url)URL.revokeObjectURL(removed.url);setFiles(files.filter(f=>f!==removed));setConfirmed(false);}
       else if(button.dataset.claimPreview){setPreviewFile(files.find(f=>f.id===button.dataset.claimPreview)||null);preview.current?.showModal();}
-      else if(button.dataset.go && finished)void onOpen(pending.current!.id).catch(e=>setError(e instanceof Error?e.message:'打开失败，请重试。'));
+      else if(button.dataset.go && finished)void viewReport();
     }}/>
     {error && <p className="claim-error" role="alert">{error}</p>}
     <footer className="claim-shell claim-footer">
       {!finished && step===2 && <label className="claim-consent"><input type="checkbox" checked={confirmed} disabled={locked} onChange={e=>setConfirmed(e.target.checked)}/><span>我已核对信息，同意将合成材料上传并用于关怀分析<small>不会向保险公司提交理赔申请。</small></span></label>}
       {!subject && !finished && <button className="claim-text" onClick={onAuthorize}>确认资料用途授权</button>}
       {step>0 && !finished && <button className="claim-finish" disabled={locked||busy} onClick={()=>{setStep(step-1);setError('');}}>返回修改</button>}
-      <button className="claim-primary" disabled={busy||(!finished&&step===2&&(!confirmed||!subject))} onClick={()=>{if(finished)void onOpen(pending.current!.id).catch(e=>setError(e instanceof Error?e.message:'打开失败'));else if(step<2)next();else void submit();}}>{busy?'正在整理材料…':finished?'查看专属关怀':step===0?'下一步，上传材料':step===1?'下一步，核对申请':locked?'重试整理':'确认并开始关怀'}</button>
+      <button className="claim-primary" disabled={busy||(!finished&&step===2&&(!confirmed||!subject))} onClick={()=>{if(finished)void viewReport();else if(step<2)next();else void submit();}}>{busy?(finished?'正在开始分析…':'正在上传材料…'):finished?'查看相关报告':step===0?'下一步，上传材料':step===1?'下一步，核对申请':locked?'重试提交':'确认提交材料'}</button>
     </footer>
     <input ref={picker} hidden aria-label="添加就医材料" type="file" multiple accept=".pdf,.jpg,.jpeg,.png" onChange={e=>{
       const added=Array.from(e.target.files||[]);e.target.value='';
