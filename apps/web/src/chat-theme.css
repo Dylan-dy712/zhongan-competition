@@ -1,7 +1,8 @@
 .chat-original {
   --chat-ink:#111;
   --chat-muted:#666;
-  --chat-line:#e6e6e6;
+  --chat-line:#e2eae5;
+  --chat-accent:#008565;
   color:var(--chat-ink);
   background:#fff;
 }
@@ -17,12 +18,12 @@
 .chat-original :is(.nuan-welcome p,.nuan-conversation-caption,.nuan-conversation-caption small,.nuan-hint,.nuan-end,.tool-activity,.history-reference,.analysis-continuation,.nuan-topic-details>summary>span) {
   color:var(--chat-muted);
 }
-.chat-original .nuan-welcome::before {display:none}
+.chat-original .nuan-welcome::before {display:block;background:#f2faf6;border:0}
 .chat-original .nuan-welcome img {filter:none}
 .chat-original :is(.nuan-message-body,.nuan-topic-details) {
   border-color:var(--chat-line);
   background:#fff;
-  box-shadow:none;
+  box-shadow:0 4px 16px #254d3504;
 }
 .chat-original .nuan-topic-details[open]>summary {border-color:var(--chat-line)}
 .chat-original .message-row.assistant .message-bubble {
@@ -33,12 +34,12 @@
   padding:4px 2px 12px;
 }
 .chat-original .message-row.user .message-bubble {
-  background:#f4f4f4;
+  background:#f0f7f3;
   color:var(--chat-ink);
   border:0;
   box-shadow:none;
 }
-.chat-original :is(.avatar,.nuan-avatar) {background:#222;color:#fff}
+.chat-original :is(.avatar,.nuan-avatar) {background:#175e48;color:#fff;border-radius:12px;box-shadow:0 2px 6px #175e4814}
 .chat-original .nuan-date-card {background:#f7f7f7;border-color:var(--chat-line)}
 .chat-original .chat-footer {border-color:var(--chat-line);padding-top:12px}
 .chat-original .nuan-quick-actions button {
@@ -47,43 +48,47 @@
   color:#333;
   font-size:12px;
 }
+.chat-original .composer {padding:7px;gap:8px;align-items:center;background:#fff;border:1px solid #dbe5df;border-radius:22px;box-shadow:0 4px 20px #254d3507}
 .chat-original .composer textarea {
-  background:#fff;
+  background:transparent;
   color:var(--chat-ink);
-  border-color:#d9d9d9;
+  border:0;
   box-shadow:none;
 }
 .chat-original .composer textarea::placeholder {color:#737373}
-.chat-original .composer:focus-within {border:0;box-shadow:none}
-.chat-original .composer .send-button {background:#111;color:#fff;box-shadow:none}
-.chat-original .composer .send-button:hover:not(:disabled) {background:#333}
-.chat-original .composer .send-button:disabled {background:#e5e5e5;color:#888;opacity:1}
-.chat-original .chat-upload-menu>summary {background:#fff;color:#111;border-color:#ddd}
+.chat-original .composer:focus-within {border-color:#80b9a1;box-shadow:0 0 0 3px #0085650a}
+.chat-original .composer .send-button {background:var(--chat-accent);color:#fff;box-shadow:0 3px 8px #00856518;border-radius:15px}
+.chat-original .composer .send-button:hover:not(:disabled) {background:#006e53}
+.chat-original .composer .send-button:disabled {background:#dcebe3;color:#799486;opacity:1;box-shadow:none}
+.chat-original .chat-upload-menu>summary {background:#f0f7f3;color:#37664f;border:0;border-radius:15px}
 .chat-original .chat-upload-options {background:#fff;color:#111;border-color:#e5e5e5;box-shadow:0 8px 28px #00000014}
-.chat-original .composer .chat-upload-options button {background:#fafafa;color:#111;border-color:#e6e6e6}
+.chat-original .composer .chat-upload-options button {background:#f8fbf9;color:#111;border-color:#e2eae5}
 .chat-original .chat-upload-options :is(button span,small) {color:#666}
-.chat-original .attachment {background:#f8f8f8;color:#333;border-color:#e5e5e5}
-.chat-original .chat-page-actions .history-trigger {background:#fff;color:#111;border-color:#ddd;box-shadow:none}
+.chat-original .attachment {background:#f7faf8;color:#333;border-color:#e2eae5}
+.chat-original .chat-page-actions .history-trigger {background:#f8fcfa;color:#202c25;border-color:#d6e8dd;box-shadow:0 2px 8px #244c3105}
+.chat-original .history-trigger svg {color:var(--chat-accent)}
 .chat-original .chat-guide-entry {color:#333}
+.chat-original .chat-guide-entry::after {color:var(--chat-accent)}
 .chat-original .claim-entry-link {color:#111;text-decoration:underline;text-underline-offset:4px}
 .chat-original .connect-form {background:#fff;border-color:#e6e6e6}
-.chat-original .connect-form button {background:#111;color:#fff}
+.chat-original .connect-form button {background:var(--chat-accent);color:#fff}
 .chat-original .connect-form :is(small,summary) {color:#666}
 .chat-original .analysis-status {color:#555}
 .chat-original .care-navigation {background:#fff;border-color:#e6e6e6}
 .chat-original .care-navigation button {color:#666}
-.chat-original .care-navigation button[aria-current=page] {background:transparent;color:#111}
-.chat-view .chat-sidebar {background:#fff;color:#111;border-color:#e6e6e6}
+.chat-original .care-navigation button[aria-current=page] {background:transparent;color:var(--chat-accent)}
+.chat-view .chat-sidebar {background:#fafcfb;color:#111;border-color:#e2eae5}
 .chat-view .chat-sidebar :is(.history-list>p,.history-list small) {color:#666}
 .chat-view .chat-sidebar .history-list>button {color:#111}
-.chat-view .chat-sidebar .history-list>button.selected {background:#f1f1f1}
-.chat-view .chat-sidebar :is(.new-chat,.history-close) {background:#f7f7f7;color:#111;border-color:#e5e5e5}
+.chat-view .chat-sidebar .history-list>button.selected {background:#eaf4ee}
+.chat-view .chat-sidebar .new-chat {background:#eaf4ee;color:#1e4030;border:1px solid #daeadf}
+.chat-view .chat-sidebar .history-close {background:#fff;color:#305942;border-color:#e0eae4}
 .chat-view .chat-sidebar .quiet-button {color:#333}
 .chat-view .history-drawer {background:#fff;color:#111;box-shadow:14px 0 40px #00000016}
 .chat-view .history-drawer::backdrop {background:#0006}
-.chat-view :is(button,summary,input,textarea,select):focus-visible {outline:2px solid #555;outline-offset:3px}
+.chat-view :is(button,summary,input,textarea,select):focus-visible {outline:2px solid #008565;outline-offset:3px}
 @media(hover:hover) {
   .chat-original :is(.history-trigger,.chat-guide-entry,.nuan-quick-actions button,.chat-upload-menu>summary):hover,
   .chat-original .composer .chat-upload-options button:hover,
-  .chat-view .chat-sidebar .history-list>button:hover {background:#f5f5f5}
+  .chat-view .chat-sidebar .history-list>button:hover {background:#edf6f0}
 }

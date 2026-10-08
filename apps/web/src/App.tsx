@@ -17,7 +17,7 @@ import {prepareChatFiles} from './chatFiles';
 import './chat.css';
 import './care.css';
 import './chat-original.css';
-import './chat-monochrome.css';
+import './chat-theme.css';
 
 // randomUUID requires HTTPS in some browsers; retain a cryptographic HTTP development fallback.
 function requestId() {
@@ -151,7 +151,7 @@ export default function App() {
   },[openConversation,setPanel]);
 
   useEffect(()=>{if(!initialized.current){initialized.current=true;if(token) void connect(token);}},[connect,token]);
-  useEffect(()=>{if(panel==='chat')bottom.current?.scrollIntoView({behavior:'smooth'});},[snapshot?.turns.length,busy,panel]);
+  useEffect(()=>{if(panel==='chat' && (snapshot?.turns.length || busy))bottom.current?.scrollIntoView({behavior:'smooth'});},[snapshot?.turns.length,busy,panel]);
   useEffect(()=>{++evidenceRequest.current;setHistoryOpen(false);setEvidence(null);},[panel]);
   useEffect(()=>{
     const media=window.matchMedia?.('(max-width:760px)');
