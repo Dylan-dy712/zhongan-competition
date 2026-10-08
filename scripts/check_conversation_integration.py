@@ -219,6 +219,19 @@ def main():
                 audited = conn.execute('SELECT candidates FROM model_extractions WHERE run_id=%s AND prompt_version=%s',
                                        (run_id, REPORT_PROMPT_VERSION)).fetchone()
                 check(audited['candidates'] == draft, 'worker preserves raw report source quotes for audit')
+            material=client.get(base,headers=headers).json()['material_report']
+            check(material['status']=='available' and material['pending_count']>0,
+                  'pending clinical report has an independent readable material report')
+            material_text=json.dumps(material,ensure_ascii=False)
+            check('999.00' not in material_text and '自行停药' not in material_text and '不能排除肺炎' in material_text,
+                  'automatic material report excludes fabricated conclusions and preserves uncertain source wording')
+            check(client.get(base,headers=other_headers).status_code==404,
+                  'material report remains private to conversation owner')
+            with connection() as conn:
+                checked_tools=CareTools(conn,actor,conversation_id)
+                checked=checked_tools.execute('read_material_report','{}')
+                check(checked['report_id']==material['report_id'] and bool(checked_tools.evidence_ids),
+                      'follow-up agent can read the same checked material report and cite its evidence')
             evidence_ref=[]
             def grounded_reply(messages):
                 data=json.loads(next(m['content'] for m in reversed(messages) if m['role']=='tool'))
@@ -471,6 +484,14 @@ def main():
         check(len(client.get(base,headers=headers).json()['turns'])>=4,'recall disable does not erase visible conversation')
 
         # Failed models persist the user message and allow a retry under the same request ID.
+        direct={'request_id':str(uuid4()),'message':'直接启动材料分析','document_ids':[document_id]}
+        with patch('services.api.app.conversation_agent.AgentModel',side_effect=AssertionError('queue must not call model')):
+            queued=client.post(base+'/analyses',headers=headers,json=direct)
+            replay=client.post(base+'/analyses',headers=headers,json=direct)
+        check(queued.status_code==200 and replay.json()['turn_id']==queued.json()['turn_id'],
+              'direct analysis submission is durable and idempotent without a chat model call')
+        check(client.post(base+'/analyses',headers=other_headers,json=direct).status_code==404,
+              'another actor cannot start analysis in a private conversation')
         failure={'request_id':str(uuid4()),'message':'一次失败测试'}
         with patch('services.api.app.conversation_agent.AgentModel',side_effect=RuntimeError('not configured')):
             check(client.post(base+'/messages',headers=headers,json=failure).status_code==503,'model failure is explicit')

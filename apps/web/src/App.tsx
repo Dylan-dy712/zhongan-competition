@@ -2,6 +2,8 @@ import {useCallback, useEffect, useRef, useState, type FormEvent} from 'react';
 import {ApiError, continueAnalysis, createConversation, getConversation, getEvidence, getOlderTurns,
   listConversations, listSubjects, sendChatMessage, uploadChatDocument,
   listDeliveries, recordDeliveryReceipt, submitCareFeedback} from './api';
+import {startChatAnalysis} from './api';
+import AnalysisFlow,{analysisView,MaterialReportContent,type UploadProgress} from './AnalysisFlow';
 import type {ChatSnapshot, ChatSubject, ChatTurn, Conversation, Evidence, ToolEvent, DeliveryNotice, FeedbackType,ReportSection} from './types';
 import {CareReport,EvidencePanel,brand} from './CarePages';
 import {DemoHome,DemoRecords,DemoIcon} from './DemoPages';
@@ -63,6 +65,12 @@ export default function App() {
   const [attachments,setAttachments] = useState<{document_id:string; name:string}[]>([]);
   const [busy,setBusy] = useState(false);
   const [uploading,setUploading] = useState(false);
+  const [analysisOpen,setAnalysisOpen]=useState(false);
+  const [uploadProgress,setUploadProgress]=useState<UploadProgress>();
+  const [analysisSubmitting,setAnalysisSubmitting]=useState(false);
+  const [analysisError,setAnalysisError]=useState('');
+  const observedAnalysis=useRef('');
+  const analysisRequest=useRef<{id:string;message:string;docs:string[]}|null>(null);
   const [error,setError] = useState('');
   const [evidence,setEvidence] = useState<Evidence|null>(null);
   const evidenceRequest=useRef(0);
@@ -89,6 +97,7 @@ export default function App() {
   const uploadInput = useRef<HTMLInputElement>(null);
   const photoInput = useRef<HTMLInputElement>(null);
   const uploadMenu = useRef<HTMLDetailsElement>(null);
+  const uploadingRef=useRef(false);
   const bottom = useRef<HTMLDivElement>(null);
   const pendingSend = useRef<{id:string; text:string; docs:string[]}|null>(null);
   const connecting=useRef(false);
@@ -126,6 +135,7 @@ export default function App() {
   const openConversation = useCallback(async (id:string, auth=token, destination:CarePanel='home', fromClaim=false) => {
     const generation = ++epoch.current;
     active.current = id;
+    analysisRequest.current=null;uploadingRef.current=false;
     setClaimGuideConversation(fromClaim ? id : '');
     olderExhausted.current = false;
     setSnapshot(null); setOlder([]); setAttachments([]); setInput(''); setEvidence(null); setError('');
@@ -133,7 +143,8 @@ export default function App() {
     setLoadingConversation(true);setHasOlder(false);setDelivery(null);setFeedbackNotice('');
     setPanel(destination);setReportFocus(undefined); setHistoryOpen(false); pendingSend.current = null;
     try {
-      await refresh(id,auth,generation);
+      const state=await refresh(id,auth,generation);
+      if(epoch.current===generation){setAnalysisOpen(!!fromClaim && !!state.analysis.run_id);setAnalysisError('');setUploadProgress(undefined);}
       if (epoch.current===generation) localStorage.setItem('zhongan_last_conversation',id);
     } catch(e) {if(epoch.current===generation) setError(errorText(e));}
     finally {if(epoch.current===generation)setLoadingConversation(false);}
@@ -162,6 +173,13 @@ export default function App() {
 
   useEffect(()=>{if(!initialized.current){initialized.current=true;if(token) void connect(token);}},[connect,token]);
   useEffect(()=>{if(panel==='chat' && snapshot?.turns.length)bottom.current?.scrollIntoView({behavior:'smooth'});},[snapshot?.turns.length,busy,panel]);
+  useEffect(()=>{
+    const run=snapshot?.analysis;
+    const key=`${snapshot?.conversation.conversation_id}:${run?.run_id}`;
+    if(run?.run_id && ['queued','running'].includes(run.status) && observedAnalysis.current!==key){
+      observedAnalysis.current=key;setAnalysisError('');setAnalysisOpen(true);
+    }
+  },[snapshot?.analysis.run_id,snapshot?.analysis.status,snapshot?.conversation.conversation_id]);
   useEffect(()=>{++evidenceRequest.current;setHistoryOpen(false);setEvidence(null);if(panel!=='chat')setClaimGuideConversation('');},[panel]);
   useEffect(()=>{
     const media=window.matchMedia?.('(max-width:760px)');
@@ -263,7 +281,7 @@ export default function App() {
         const shouldContinue=run.run_id && ['completed','waiting_review'].includes(run.status)
           && state.turns.some(t=>t.status==='completed' && t.tool_events.some(e=>e.tool==='start_analysis' && e.run_id===run.run_id));
         const key=`${id}:${run.run_id}`;
-        if(shouldContinue && !busyRef.current && !state.turns.some(t=>t.status==='running') && !resumed.current.has(key)) {
+        if(shouldContinue && !busyRef.current && !uploadingRef.current && !state.turns.some(t=>t.status==='running') && !resumed.current.has(key)) {
           resumed.current.add(key);busyRef.current=true;setBusy(true);
           try {await continueAnalysis(token,id,run.run_id!);await refresh(id,token,generation);}
           catch(e){if(epoch.current===generation)setError(errorText(e));}
@@ -285,31 +303,56 @@ export default function App() {
     const previous=pendingSend.current;
     const req=retry?.request_id || (previous && previous.text===text && JSON.stringify(previous.docs)===JSON.stringify(docs) ? previous.id : requestId());
     pendingSend.current={id:req,text,docs};busyRef.current=true;setBusy(true);setError('');
+    if(docs.length){setAnalysisOpen(true);setAnalysisError('');setAnalysisSubmitting(true);}
     try {
       if(retry?.input_kind==='analysis_ready' && snapshot?.analysis.run_id) {
         await continueAnalysis(token,id,snapshot.analysis.run_id);
       } else {
-        await sendChatMessage(token,id,req,text,docs);
+        if(docs.length)await startChatAnalysis(token,id,req,text,docs);
+        else await sendChatMessage(token,id,req,text,docs);
       }
       if(epoch.current===generation){setInput('');setAttachments([]);pendingSend.current=null;}
     } catch(e){if(!invalidateAccess(e,id,generation) && epoch.current===generation)setError(errorText(e));}
     finally {
       try {await refresh(id,token,generation);if(epoch.current===generation)setConversations(await listConversations(token));}
       catch(e){if(epoch.current===generation)setError(errorText(e));}
-      if(epoch.current===generation){busyRef.current=false;setBusy(false);}
+      if(epoch.current===generation){busyRef.current=false;setBusy(false);setAnalysisSubmitting(false);}
+    }
+  };
+
+  const startMaterialAnalysis=async(docs=attachments.map(a=>a.document_id),message=input.trim() || '请分析本次上传材料，整理就医经过、费用与待补充信息。')=>{
+    const id=active.current,generation=epoch.current;if(!id || busyRef.current)return;
+    const previous=analysisRequest.current;
+    const request=previous && previous.message===message && JSON.stringify(previous.docs)===JSON.stringify(docs)?previous:{id:requestId(),message,docs};
+    analysisRequest.current=request;busyRef.current=true;setBusy(true);setAnalysisSubmitting(true);setAnalysisOpen(true);setAnalysisError('');
+    try {
+      await startChatAnalysis(token,id,request.id,message,docs);
+      if(epoch.current===generation){setAttachments([]);setInput('');analysisRequest.current=null;}
+    } catch(e){if(!invalidateAccess(e,id,generation) && epoch.current===generation)setAnalysisError(errorText(e));}
+    finally{
+      try{await refresh(id,token,generation);}catch(e){if(epoch.current===generation)setAnalysisError(errorText(e));}
+      if(epoch.current===generation){busyRef.current=false;setBusy(false);setAnalysisSubmitting(false);}
     }
   };
 
   const upload = async(files:FileList|null) => {
     if(!files || !active.current || busyRef.current || busy || uploading)return;
-    const id=active.current,generation=epoch.current;setUploading(true);setError('');
+    const id=active.current,generation=epoch.current;
+    let selected:File[];
+    try{selected=prepareChatFiles(files,attachments.length);}catch(e){setError(errorText(e));return;}
+    if(!selected.length)return;
+    uploadingRef.current=true;
+    const uploaded=[...attachments];setUploading(true);setError('');setAnalysisError('');setAnalysisOpen(true);setUploadProgress({done:0,total:selected.length});
     try {
-      for(const file of prepareChatFiles(files,attachments.length)) {
+      for(const file of selected) {
         const doc=await uploadChatDocument(token,id,file);
-        if(epoch.current===generation)setAttachments(v=>v.some(x=>x.document_id===doc.document_id)?v:[...v,{document_id:doc.document_id,name:file.name}]);
+        if(epoch.current!==generation)return;
+        if(!uploaded.some(x=>x.document_id===doc.document_id))uploaded.push({document_id:doc.document_id,name:file.name});
+        setAttachments([...uploaded]);setUploadProgress({done:selected.indexOf(file)+1,total:selected.length});
       }
-    } catch(e){if(!invalidateAccess(e,id,generation) && epoch.current===generation)setError(errorText(e));}
-    finally {if(epoch.current===generation){setUploading(false);if(uploadInput.current)uploadInput.current.value='';if(photoInput.current)photoInput.current.value='';}}
+      if(epoch.current===generation){setUploadProgress(undefined);await startMaterialAnalysis(uploaded.map(a=>a.document_id));}
+    } catch(e){if(!invalidateAccess(e,id,generation) && epoch.current===generation){setError(errorText(e));setAnalysisError(errorText(e));}}
+    finally {if(epoch.current===generation){uploadingRef.current=false;setUploading(false);setUploadProgress(undefined);if(uploadInput.current)uploadInput.current.value='';if(photoInput.current)photoInput.current.value='';}}
   };
 
   const showEvidence = async(id:string) => {
@@ -341,7 +384,10 @@ export default function App() {
   const showClaimGuide=!!snapshot && claimGuideConversation===snapshot.conversation.conversation_id;
   const working=busy || uploading || loadingConversation || !!snapshot?.turns.some(t=>t.status==='running');
   const submit=(e:FormEvent)=>{e.preventDefault();void send();};
-  const openReport=(section?:ReportSection['section_type'])=>{setReportFocus(section);setPanel('report');};
+  const openReport=(section?:ReportSection['section_type'])=>{setAnalysisOpen(false);setReportFocus(section);setPanel('report');};
+  const askMaterial=(question:string)=>{setAnalysisOpen(false);setPanel('chat');setInput(question);requestAnimationFrame(()=>document.querySelector<HTMLTextAreaElement>('.composer textarea')?.focus());};
+  const material=snapshot?.material_report;
+  const progressView=analysisView(snapshot,uploadProgress,analysisSubmitting,analysisError);
   const historyPanel=<aside className="chat-sidebar" aria-label="历史对话列表">
       <div className="history-panel-head"><div className="brand"><img src={brand} alt="暖愈智护"/></div><button className="history-close" autoFocus={mobileHistory} aria-label="关闭历史对话" onClick={()=>setHistoryOpen(false)}>×</button></div>
       <button className="new-chat" disabled={working} onClick={prepareNewChat}>＋ 新的关怀对话</button>
@@ -365,9 +411,9 @@ export default function App() {
         {delivery.receipt_state==='read' ? <span>已查看</span> : <button onClick={()=>openReport()}>查看指引</button>}</div>}
       {error && <div role="alert" className="chat-error persistent-error">{error}<button aria-label="关闭提示" onClick={()=>setError('')}>×</button></div>}
       <PageBoundary resetKey={`${panel}:${snapshot?.conversation.conversation_id || ''}`}>
-      {connected && <div className="claim-panel" hidden={panel!=='claim'}><ClaimIntake key={token} token={token} subject={subject} onExit={()=>setPanel('home')} onAuthorize={()=>setPanel('account')} onOpen={async id=>{
+      {connected && <div className="claim-panel" hidden={panel!=='claim'}><ClaimIntake key={token} token={token} subject={subject} visible={panel==='claim'} onExit={()=>setPanel('home')} onAuthorize={()=>setPanel('account')} onOpen={async (id,report=false)=>{
           const generation=epoch.current;const items=await listConversations(token);
-          if(epoch.current!==generation)return;setConversations(items);await openConversation(id,token,'chat',true);}}/></div>}
+          if(epoch.current!==generation)return;setConversations(items);await openConversation(id,token,'chat',true);if(report)openReport();}}/></div>}
       {!connected ? token ? <main className="start-screen" role="status"><h1>{busy?'正在连接服务…':'服务暂时不可用'}</h1><p>登录状态已保留，恢复连接后可继续。</p><button className="care-primary" disabled={busy} onClick={()=>void connect(token)}>{busy?'正在连接…':'重新连接'}</button></main> : <AuthPage onAuthenticated={auth=>connect(auth,true)}/>
       : panel==='claim' ? null
       : panel==='account' ? <AccountPage token={token} onLogout={signOut} onChanged={async()=>{
@@ -388,6 +434,7 @@ export default function App() {
           <button disabled={busy || (!subjects.length && !caseInput)} onClick={()=>void newChat()}>{busy?'正在打开…':'开始新的对话'}</button>
           {!subjects.length && !caseInput && <small>请先到“我的”确认关怀资料授权，再开始对话。</small>}</div></main>
       : panel==='report' ? <main className="chat-report"><h1>本次关怀指引</h1>
+          {material?.status==='available' && <><h2>材料分析报告</h2><MaterialReportContent report={material} onEvidence={id=>void showEvidence(id)} onAsk={askMaterial}/></>}
           {publishedCare(snapshot.report) ? <><p className="care-report-version">第 {snapshot.report.report_version} 版 · 已审核发布</p>
             <CareReport report={snapshot.report} initialSection={reportFocus} onEvidence={id=>void showEvidence(id)}/>
             {snapshot.report.report_id && <div className="report-feedback"><p>这份指引对你有帮助吗？</p>
@@ -396,9 +443,11 @@ export default function App() {
               <button disabled={feedbackBusy} onClick={()=>void feedback('inaccurate')}>内容需要核实</button>
               <button disabled={feedbackBusy} onClick={()=>void feedback('needs_help')}>我需要帮助</button>
               {feedbackNotice && <p role="status">{feedbackNotice}</p>}</div>}</>
-          : <div className="empty-report"><p>{snapshot.report.status==='not_generated'?'还没有报告。你可以在对话中上传材料，让暖暖帮你分析。':'报告尚未发布，部分内容可能需要复核。你仍可以在对话中查阅材料、核对事实。'}</p>
+          : material?.status==='available'?<p className="material-report-notice">正式关怀指引中的专业结论和行动建议仍在复核；上方材料报告可直接阅读和追问。</p>
+          : <div className="empty-report"><p>{material?.status==='failed'?'报告生成失败，材料已保存。请回到对话重新分析。':snapshot.report.status==='not_generated'?'还没有报告。你可以在对话中上传材料，让暖暖帮你分析。':'正在准备可阅读的材料报告。'}</p>
             <button onClick={()=>setPanel('chat')}>回到对话</button></div>}</main>
       : <><main className="chat-scroll inline-report-thread">{showClaimGuide ? <OriginalChatGuide snapshot={snapshot} onEvidence={id=>void showEvidence(id)}/> : <OriginalChatWelcome/>}
+        {(snapshot.analysis.run_id || analysisSubmitting || uploadProgress || analysisError) && <button className="analysis-card" onClick={()=>material?.status==='available'?openReport():setAnalysisOpen(true)}><span className="analysis-card-icon" aria-hidden="true">{material?.status==='available'?'▤':'✦'}</span><span className="analysis-card-copy"><strong>{progressView.title}</strong><small>{material?.status==='available'?'查看报告 · 核对依据 · 继续追问':`${progressView.detail}${progressView.percent!==null?` · ${progressView.percent}%`:''}`}</small></span><span className="analysis-card-arrow" aria-hidden="true">›</span></button>}
         {hasOlder && turns.length>0 && <button className="load-history" onClick={()=>void loadOlder()}>查看更早的聊天</button>}
         <div className="nuan-chat-heading"><span><DemoIcon name="chat"/>和暖暖聊聊</span><small>有疑问，接着问</small></div>
         <div className="messages">{turns.length===0 && <div className="message-row assistant"><div className="avatar">✦</div><div className="message-bubble"><div className="nuan-reply-label"><DemoIcon name="leaf"/>暖暖</div><p>你好，我是暖暖。你可以告诉我现在最关心什么，也可以直接上传病历或发票，我会结合材料帮你梳理。</p></div></div>}
@@ -412,8 +461,7 @@ export default function App() {
                 : <p role="status">正在结合对话处理你的请求…</p>}
             </div></div></div>)}
         </div><div ref={bottom}/></main>
-        <footer className="chat-footer">{snapshot.analysis.run_id && ['queued','running'].includes(snapshot.analysis.status) && <div className="analysis-status" role="status">{statusLabels[snapshot.analysis.status] || snapshot.analysis.status}
-          {['completed','waiting_review'].includes(snapshot.analysis.status) && <button disabled={working} onClick={()=>{setInput('请查看最新分析，继续帮我解释。');}}>继续了解</button>}</div>}
+        <footer className="chat-footer">
           <div className="upload-list">{attachments.map(a=><span className="attachment" key={a.document_id}>▤ {a.name} · 已上传</span>)}</div>
           {showClaimGuide && <div className="nuan-quick-actions">{[['summary','看病经过'],['cost','费用解读'],['action','下一步安排']].map(([id,label])=><button key={id} onClick={()=>{const target=document.getElementById('chat-topic-'+id);if(target?.tagName==='DETAILS')target.setAttribute('open','');target?.scrollIntoView({behavior:'smooth',block:'start'});}}><DemoIcon name={id==='summary'?'file':id==='cost'?'chat':'leaf'}/>{label}</button>)}</div>}<form className="composer" onSubmit={submit}>
             <input ref={uploadInput} aria-label="选择文档文件" hidden type="file" multiple onChange={e=>void upload(e.target.files)}/>
@@ -431,6 +479,7 @@ export default function App() {
           </form>
         </footer></>}
       </PageBoundary>
+      {connected && snapshot && <AnalysisFlow open={analysisOpen && ['chat','report'].includes(panel)} snapshot={analysisSubmitting || uploadProgress?null:snapshot} upload={uploadProgress} submitting={analysisSubmitting} error={analysisError} onClose={()=>setAnalysisOpen(false)} onReport={()=>openReport()} onRetry={()=>void startMaterialAnalysis()}/>}
       {connected && panel!=='claim' && <nav className="care-navigation" aria-label="关怀页面"><button aria-current={panel==='home'?'page':undefined} onClick={()=>setPanel('home')}><DemoIcon name="leaf"/>首页</button>
         <button aria-current={panel==='chat'?'page':undefined} onClick={()=>setPanel('chat')}><DemoIcon name="chat"/>问暖暖</button>
         <button aria-current={panel==='records'?'page':undefined} onClick={()=>setPanel('records')}><DemoIcon name="file"/>就医记录</button>

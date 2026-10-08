@@ -1,5 +1,7 @@
 import {useEffect,useLayoutEffect,useRef,useState} from 'react';
-import {createConversation,sendChatMessage,uploadChatDocument} from './api';
+import {createConversation,startChatAnalysis,uploadChatDocument,getConversation} from './api';
+import AnalysisFlow,{type UploadProgress} from './AnalysisFlow';
+import type {ChatSnapshot} from './types';
 import {claimTemplate,initialClaimForm,validateClaimInfo,type ClaimFile,type ClaimForm} from './claimTemplate';
 import './claim-original.css';
 import {syncClaimMarkup} from './claimDom';
@@ -10,7 +12,7 @@ function uuid() {
   return `${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20)}`;
 }
 
-export default function ClaimIntake({token,subject,onOpen,onAuthorize,onExit}:{token:string;subject:string;onAuthorize:()=>void;onExit:()=>void;onOpen:(id:string)=>Promise<void>}) {
+export default function ClaimIntake({token,subject,visible,onOpen,onAuthorize,onExit}:{token:string;subject:string;visible:boolean;onAuthorize:()=>void;onExit:()=>void;onOpen:(id:string,report?:boolean)=>Promise<void>}) {
   const [step,setStep]=useState(0);
   const form=useRef<ClaimForm>(initialClaimForm());
   const [files,setFiles]=useState<ClaimFile[]>([]);
@@ -26,11 +28,21 @@ export default function ClaimIntake({token,subject,onOpen,onAuthorize,onExit}:{t
   const [confirmed,setConfirmed]=useState(false);
   const [busy,setBusy]=useState(false);
   const [error,setError]=useState('');
+  const [progressOpen,setProgressOpen]=useState(false);
+  const [progress,setProgress]=useState<UploadProgress>();
+  const [snapshot,setSnapshot]=useState<ChatSnapshot|null>(null);
+  const [submission,setSubmission]=useState(false);
   const pending=useRef<{id:string;requestId:string;uploaded:Map<File,string>} | null>(null);
   const [finished,setFinished]=useState(false);
   const [locked,setLocked]=useState(false);
   const mounted=useRef(true);
   const running=useRef(false);
+  useEffect(()=>{
+    if(!visible || (!busy && !finished) || !pending.current)return;
+    let stopped=false,timer:ReturnType<typeof setTimeout>;
+    const tick=async()=>{try{const state=await getConversation(token,pending.current!.id);if(!stopped)setSnapshot(state);}catch{/* Submission owns errors; polling can recover. */}if(!stopped)timer=setTimeout(tick,2000);};
+    void tick();return()=>{stopped=true;clearTimeout(timer);};
+  },[visible,busy,finished,token]);
   useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;};},[]);
   const submit=async()=>{
     if(running.current || !confirmed || !subject)return;
@@ -38,23 +50,27 @@ export default function ClaimIntake({token,subject,onOpen,onAuthorize,onExit}:{t
     const missing=claimTemplate(form.current,files,step).groups.filter(g=>g.required&&!files.some(f=>f.category===g.id));
     if(missing.length){setError('请补充：'+missing.map(g=>g.title).join('、'));setStep(1);return;}
     running.current=true;
-    setBusy(true);setError('');setLocked(true);
+    setBusy(true);setError('');setLocked(true);setProgressOpen(true);setSnapshot(null);
     pending.current ??= {id:uuid(),requestId:uuid(),uploaded:new Map()};
     const attempt=pending.current;
     try {
       await createConversation(token,attempt.id,subject);
       if(!mounted.current)return;
       const activeGroups=claimTemplate(form.current,files,step).groups;
+      const entries=files.filter(f=>activeGroups.some(g=>g.id===f.category));
+      setProgress({done:attempt.uploaded.size,total:entries.length});
       for(const entry of files.filter(f=>activeGroups.some(g=>g.id===f.category))){
         const file=entry.file;if(attempt.uploaded.has(file))continue;
         const result=await uploadChatDocument(token,attempt.id,file);attempt.uploaded.set(file,result.document_id);
+        setProgress({done:attempt.uploaded.size,total:entries.length});
         if(!mounted.current)return;
       }
-      await sendChatMessage(token,attempt.id,attempt.requestId,
+      setProgress(undefined);setSubmission(true);
+      await startChatAnalysis(token,attempt.id,attempt.requestId,
         `请帮我整理本次就医资料，解释费用与需要补充的材料。用户填写的信息：${JSON.stringify(form.current)}；材料分类：${JSON.stringify(files.map(f=>({name:f.name,category:f.category})))}。这些是个人补充信息，请以材料原文核对，不代表已确认事实。`,[...attempt.uploaded.values()]);
       if(mounted.current)setFinished(true);
     }catch(e){if(mounted.current)setError(e instanceof Error?e.message:'材料整理失败，请重试。');}
-    finally{running.current=false;if(mounted.current)setBusy(false);}
+    finally{running.current=false;if(mounted.current){setBusy(false);setProgress(undefined);setSubmission(false);}}
   };
   const template=claimTemplate(form.current,files,step,finished);
   const html=locked&&!finished?template.html.replace(/<(input|select) /g,'<$1 disabled '):template.html;
@@ -66,6 +82,7 @@ export default function ClaimIntake({token,subject,onOpen,onAuthorize,onExit}:{t
     setError('');setStep(step+1);shell.current?.querySelector('.claim-main')?.scrollTo?.(0,0);
   };
   return <main className="claim-react"><button className="claim-text" onClick={onExit}>返回首页</button>
+    <AnalysisFlow open={visible && progressOpen} snapshot={submission || progress?null:snapshot} upload={progress} submitting={submission} error={error} onClose={()=>setProgressOpen(false)} onReport={()=>{setProgressOpen(false);void onOpen(pending.current!.id,true).catch(e=>setError(e instanceof Error?e.message:'打开失败'));}} onRetry={()=>{if(finished){setProgressOpen(false);void onOpen(pending.current!.id).catch(e=>setError(e instanceof Error?e.message:'打开失败'));}else void submit();}}/>
     <div className="claim-shell" ref={shell} onInput={e=>{
       const input=e.target as HTMLInputElement;const key=input.dataset.claimField as keyof ClaimForm;
       if(key && key in form.current){form.current[key]=input.value;}

@@ -32,7 +32,7 @@ globalThis.fetch=async(url,options={})=>{
     if(uploadCount===2 && failUpload){failUpload=false;return Response.json({message:'合成上传中断'},{status:503});}
     return Response.json({document_id:'doc-'+uploadCount,source_ref:'synthetic'});
   }
-  if(path.endsWith('/messages'))return Response.json({status:'completed'});
+  if(path.endsWith('/messages') || path.endsWith('/analyses'))return Response.json({status:'completed'});
   if(path.includes('/v1/conversations/'))return Response.json({conversation,turns:[],analysis:{status:'not_started'},report:{status:'not_generated'}});
   if(path.endsWith('/deliveries'))return Response.json([]);
   throw Error('Unexpected test request '+path);

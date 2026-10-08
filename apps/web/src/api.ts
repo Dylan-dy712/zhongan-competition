@@ -91,6 +91,8 @@ export const recordDeliveryReceipt = (token:string,id:string,state:'presented'|'
 export const submitCareFeedback = (token:string,reportId:string,version:number,type:FeedbackType,key:string) =>
   chatRequest<FeedbackResult>('/v1/feedback',token,'POST',{report_id:reportId,report_version:version,type},key);
 export const listSubjects = (token: string) => chatRequest<ChatSubject[]>('/v1/chat/subjects', token);
+export const startChatAnalysis = (token:string,id:string,requestId:string,message:string,documentIds:string[]=[]) =>
+  chatRequest<{turn_id:string}>(`/v1/conversations/${id}/analyses`,token,'POST',{request_id:requestId,message,document_ids:documentIds});
 export const createConversation = (token: string, conversationId: string, subjectId?: string, caseId?: string) =>
   chatRequest<Conversation>('/v1/conversations', token, 'POST', {conversation_id:conversationId, subject_id:subjectId || null, case_id:caseId || null,recall_enabled:false});
 

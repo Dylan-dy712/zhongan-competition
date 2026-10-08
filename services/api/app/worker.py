@@ -286,7 +286,14 @@ def route_document(document: dict, path: Path, pipeline_version: str, ocr: Tence
 
 def process_run(conn, run: dict, storage_root: Path) -> None:
     parsed_documents = []
+    def advance(stage):
+        # Production connection is autocommit, so polling can observe each milestone.
+        row = conn.execute("UPDATE analysis_runs SET current_stage=%s WHERE run_id=%s AND lease_token=%s AND status='running' RETURNING run_id",
+                           (stage, run['run_id'], run['lease_token'])).fetchone()
+        if not row:
+            raise RuntimeError('ANALYSIS_LEASE_LOST')
     try:
+        advance('parse')
         source_refs=context_sources(conn,run)
         for reference in run["document_versions"]:
             document = conn.execute(
@@ -304,6 +311,7 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
             pages = route_document(document, path, run["pipeline_version"])
             parsed_documents.append((document, pages))
 
+        advance('extract')
         material = "\n\n".join(
             page["text"] for _document, pages in parsed_documents for page in pages if page["text"]
         )
@@ -340,6 +348,7 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
                 ).allowed
             except PackExcludedError:
                 knowledge_excluded = True
+        advance('insights')
         insight_model_result = {"status": "not_configured", "candidates": [],
                                 "raw_output": None, "usage_metadata": {},
                                 "error_code": "LLM_NOT_CONFIGURED"}
@@ -353,6 +362,7 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
                FROM cases c JOIN consents co ON co.consent_id=c.consent_id WHERE c.case_id=%s""",
             (run["case_id"],),
         ).fetchone()
+        advance('guidance')
         report_model_result = {"status": "not_configured", "draft": {"sections": [], "actions": []},
                                "raw_output": None, "repaired_output": None,
                                "usage_metadata": {}, "error_code": "LLM_NOT_CONFIGURED"}
@@ -370,6 +380,7 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
                                                 personnel=model_result.get("personnel", []),
                                                 normalized_dates=encounter_dates)
 
+        advance('validate')
         evidence_ids = [str(row['evidence_id']) for row in fact_inputs]
         routing = []
         waiting_review = any(
@@ -678,15 +689,16 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
                 "status": report_status, "report_id": str(report_id),
                 "report_version": report_version, "prompt_version": REPORT_PROMPT_VERSION,
                 "policy_version": REPORT_POLICY_VERSION,
-                "validation_errors": report_errors,
+                "validation_errors": report_errors, "model_status": report_model_result['status'],
             }}
+            result_status = 'failed' if report_model_result['status'] == 'failed' else ('waiting_review' if waiting_review else 'completed')
             conn.execute(
                 """UPDATE analysis_runs SET status=%s, current_stage='validate', stage_results=%s::jsonb,
-                   finished_at=CASE WHEN %s='completed' THEN now() ELSE NULL END,
+                   finished_at=now(), error=%s::jsonb,
                    lease_token=NULL, lease_expires_at=NULL
                    WHERE run_id=%s AND lease_token=%s""",
-                ("waiting_review" if waiting_review else "completed", json.dumps(result),
-                 "waiting_review" if waiting_review else "completed",
+                (result_status, json.dumps(result),
+                 json.dumps({'code': 'REPORT_MODEL_FAILED', 'retryable': True}) if result_status == 'failed' else None,
                  run["run_id"], run["lease_token"]),
             )
     except Exception as exc:
