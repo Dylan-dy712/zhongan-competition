@@ -16,7 +16,7 @@ jobs:
     timeout-minutes: 15
     services:
       postgres:
-        image: postgres:16
+        image: pgvector/pgvector:0.8.7-pg16
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: synthetic-ci-only
@@ -41,6 +41,7 @@ jobs:
       - run: python -m unittest discover -s tests
       - run: python -m scripts.check_review_integration
       - run: python -m scripts.check_conversation_integration
+      - run: python -m scripts.check_knowledge_vectors_integration
       - run: python -m scripts.check_release_integration
       - run: for script in scripts/*.sh; do bash -n "$script"; done
   web:

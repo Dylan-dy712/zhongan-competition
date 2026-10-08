@@ -1,4 +1,4 @@
-"""Local BM25 RAG over the user's authorized reference library.
+"""Local hybrid RAG over the user's authorized reference library.
 
 Approval metadata is retained: reference use does not approve patient reports.
 No patient records or queries are sent to a separate embedding service.
@@ -32,8 +32,9 @@ def tokens(text):
 
 
 class KnowledgeRetriever:
-    def __init__(self, documents=None, version='synthetic', assembler=None):
+    def __init__(self, documents=None, version='synthetic', assembler=None, semantic=None):
         self.assembler = assembler
+        self.semantic = semantic
         if documents is None:
             self.assembler = assembler or KnowledgeAssembler()
             documents = [{'entry_id': e.entry_id, 'title': e.title or e.entry_id,
@@ -83,11 +84,13 @@ class KnowledgeRetriever:
                 except PackExcludedError:
                     blocked.add(code)
         scored = []
+        allowed = []
         for i, doc in enumerate(self.documents):
             if selected and doc['disease_code'] not in selected:
                 continue
             if doc['disease_code'] in blocked:
                 continue
+            allowed.append(doc['entry_id'])
             count = self.counts[i]
             score = 0.0
             title_terms = set(tokens(doc['title']))
@@ -103,10 +106,45 @@ class KnowledgeRetriever:
             if score > 0:
                 scored.append((score, doc['entry_id'], doc))
         scored.sort(key=lambda row: (-row[0], row[1]))
+        method, degraded = 'bm25', None
+        semantic_scores = {}
+        if self.semantic and allowed:
+            from .knowledge_vectors import VectorUnavailable
+            try:
+                context = '、'.join(DISEASE_NAMES[code][0] for code in sorted(medical))
+                semantic_query = (context + ' ' + query).strip()
+                candidates = self.semantic.search(semantic_query, version=self.version, allowed_ids=allowed,
+                                                  document_count=len(self.documents), limit=24)
+                semantic_scores = {ref: similarity for ref, similarity in candidates
+                                   if ref in allowed and math.isfinite(similarity) and similarity >= 0.55}
+                method = 'bm25+pgvector-rrf'
+            except VectorUnavailable as exc:
+                degraded = str(exc)
+            if semantic_scores:
+                # Rank fusion avoids comparing incompatible BM25 and cosine scales.
+                fused = Counter()
+                for rank, (_, ref, _) in enumerate(scored[:24], 1):
+                    if ref in semantic_scores:
+                        fused[ref] += 1 / (20 + rank)
+                for rank, ref in enumerate(semantic_scores, 1):
+                    fused[ref] += 1 / (20 + rank)
+                scored = sorted([(score, ref, self.by_id[ref]) for ref, score in fused.items()],
+                                key=lambda row: (-row[0], row[1]))
+            elif method == 'bm25+pgvector-rrf':
+                # A working semantic path found no sufficiently related passage.
+                # Don't promote incidental n-grams for unrelated questions.
+                scored = []
         hits = [{**doc, 'version': self.version, 'score': round(score, 4),
                  'use': 'general_reference', 'reference_policy': REFERENCE_POLICY}
                 for score, _, doc in scored[:max(1,min(limit,6))]]
-        return self._result('available' if hits else 'no_results', hits)
+        for hit in hits:
+            if hit['entry_id'] in semantic_scores:
+                hit['semantic_similarity'] = round(semantic_scores[hit['entry_id']], 4)
+        result = self._result('available' if hits else 'no_results', hits)
+        result['retrieval_method'] = method
+        if degraded:
+            result['vector_status'] = degraded
+        return result
 
     def _result(self, status, hits):
         return {'status': status, 'results': hits, 'knowledge_version': self.version,

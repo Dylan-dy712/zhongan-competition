@@ -8,7 +8,7 @@ fi
 
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
-apt-get install -y postgresql-16 postgresql-client-16 openssl
+apt-get install -y postgresql-16 postgresql-client-16 postgresql-16-pgvector openssl
 
 systemctl enable --now postgresql
 
@@ -37,6 +37,9 @@ ALTER ROLE zhongan_app NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION PASSWOR
 SELECT 'CREATE DATABASE zhongan_dev OWNER zhongan_app'
 WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = 'zhongan_dev') \gexec
 SQL
+
+sudo -u postgres psql -d zhongan_dev --set=ON_ERROR_STOP=1 \
+  -c 'CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA public;'
 
 umask 077
 cat > "${env_file}" <<EOF

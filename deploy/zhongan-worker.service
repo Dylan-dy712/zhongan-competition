@@ -12,6 +12,8 @@ EnvironmentFile=/home/ubuntu/.config/zhongan/database.env
 EnvironmentFile=-/home/ubuntu/.config/zhongan/tencent-ocr.env
 EnvironmentFile=-/home/ubuntu/.config/zhongan/llm.env
 Environment=PYTHONUNBUFFERED=1
+Environment=ZHONGAN_RAG_ENABLED=1
+Environment=ZHONGAN_RAG_CACHE_DIR=/home/ubuntu/zhongan-data/embeddings
 Environment=ZHONGAN_STORAGE_ROOT=/home/ubuntu/zhongan-data/documents
 ExecStart=/home/ubuntu/zhongan-app/.venv/bin/python -m services.api.app.worker
 Restart=on-failure

@@ -106,7 +106,9 @@ fi
 cp "$release_dir/REVISION" "$app_dir/REVISION"
 cd "$app_dir"
 if [[ "$backend_changed" == 1 ]]; then
+    "$app_dir/.venv/bin/python" -m pip install -r services/api/requirements-rag.txt
     "$app_dir/.venv/bin/python" -m scripts.migrate_database
+    "$app_dir/.venv/bin/python" -m scripts.build_knowledge_vectors
 fi
 "$app_dir/.venv/bin/python" -m pip check
 if [[ "$backend_changed" == 1 ]]; then
