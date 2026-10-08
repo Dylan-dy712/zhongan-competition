@@ -13,7 +13,7 @@ dom.window.HTMLDialogElement.prototype.showModal=function(){this.open=true;};
 dom.window.HTMLDialogElement.prototype.close=function(){this.open=false;};
 const realTimeout=globalThis.setTimeout;
 globalThis.setTimeout=(fn,ms,...args)=>realTimeout(fn,ms>=1500?20:ms,...args);
-const conversation={conversation_id:'analysis-ui',case_id:'case-ui',title:'合成分析流程',recall_enabled:false,updated_at:'2026-10-08T00:00:00Z'};
+const conversation={conversation_id:'analysis-ui',subject_id:'synthetic',case_id:'case-ui',title:'合成分析流程',recall_enabled:false,updated_at:'2026-10-08T00:00:00Z'};
 let phase='initial',run='run-1',uploads=0,submissions=[],turns=[],resolveSecond,resolveNarrative;
 let delayNarrative=false,failNarrative=false,continuations=0;
 const section={section_type:'cost_explanation',pending_count:1,items:[{text:'医疗总费用：120元',kind:'checked',evidence_refs:['source-ui']}]};
@@ -22,6 +22,7 @@ const state=()=>({conversation,turns,analysis:{status:phase==='initial'?'not_sta
 globalThis.fetch=async(url,options={})=>{
  const path=new URL(url,'http://localhost').pathname;
  if(path==='/v1/conversations')return Response.json([conversation]);
+ if(path==='/v1/me/members')return Response.json([{subject_id:'synthetic',name:'合成分析用户',relationship:'self',gender:'unspecified',birth_date:null,profile_completed:true}]);
  if(path==='/v1/chat/subjects')return Response.json([{subject_id:'synthetic'}]);
  if(path.endsWith('/deliveries'))return Response.json([]);
  if(path.endsWith('/documents')){uploads++;if(uploads===2)await new Promise(r=>resolveSecond=r);return Response.json({document_id:'doc-'+uploads});}
