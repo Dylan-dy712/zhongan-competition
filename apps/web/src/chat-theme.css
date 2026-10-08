@@ -20,6 +20,7 @@
 }
 .chat-original .nuan-welcome::before {display:block;background:#f2faf6;border:0}
 .chat-original .nuan-welcome img {filter:none}
+.chat-original .nuan-welcome h2 {text-wrap:balance;line-height:1.45}
 .chat-original :is(.nuan-message-body,.nuan-topic-details) {
   border-color:var(--chat-line);
   background:#fff;
