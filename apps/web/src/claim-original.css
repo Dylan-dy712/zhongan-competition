@@ -97,9 +97,38 @@
 @keyframes claim-care-nudge{0%,100%{transform:translateY(0)}50%{transform:translateY(3px)}}
 @keyframes claim-care-emphasis{0%,100%{box-shadow:0 5px 20px #37c99a18}50%{box-shadow:0 0 0 4px #00bd9115,0 6px 24px #37c99a28}}
 @media(prefers-reduced-motion:reduce){.claim-care-invitation>span,.claim-result-shell .claim-care-card{animation:none}}
-.claim-review-footer{flex-wrap:wrap}.claim-review-footer .claim-submit-check{flex-basis:100%;padding:0 0 7px;align-items:center;font-size:11px}.claim-review-footer .claim-submit-check input{width:20px;height:20px;margin:0}.claim-review-footer .claim-submit-check small{font-size:9px;margin-top:2px}.claim-review-footer .claim-finish{width:85px;padding:8px;font-size:12px!important}.claim-header-back{position:absolute;left:12px;top:8px;min-height:42px;padding:6px 3px;font-size:11px!important;color:#009b77;background:none;border:0}.claim-upload-dialog{width:min(92vw,390px);padding:18px;border-radius:15px}.claim-upload-dialog::backdrop{background:#162b2466}.claim-source-option{display:block;width:100%;text-align:left;padding:16px;margin:10px 0;background:#f0fbf7;border:1px solid #d6eee5;border-radius:10px;color:#21735b;min-height:68px;font:inherit;cursor:pointer}.claim-source-option>span{display:block;font-size:15px;font-weight:600}.claim-source-option>small{display:block;font-size:11px;color:#899e94;margin-top:5px}.claim-upload-dialog>p{font-size:10px;color:#999;margin:12px 0 0}
+.claim-review-footer{flex-wrap:wrap}.claim-review-footer .claim-submit-check{flex-basis:100%;padding:0 0 7px;align-items:center;font-size:11px}.claim-review-footer .claim-submit-check input{width:20px;height:20px;margin:0}.claim-review-footer .claim-submit-check small{font-size:9px;margin-top:2px}.claim-review-footer .claim-finish{width:85px;padding:8px;font-size:12px!important}.claim-header-back{position:absolute;left:12px;top:8px;min-height:42px;padding:6px 3px;font-size:11px!important;color:#009b77;background:none;border:0}
 
 /* Refined application, materials and review screens. */
+/* Material source picker shares the claim form's calm green palette. */
+.claim-upload-dialog{box-sizing:border-box;width:min(calc(100vw - 32px),420px);max-height:calc(100dvh - 32px);padding:24px;border:1px solid #e0ece5;border-radius:24px;background:linear-gradient(155deg,#f0fbf5 0,#fff 42%);color:#234b3c;font-family:"PingFang SC","Microsoft YaHei",sans-serif;box-shadow:0 24px 80px #123c2b30;overflow-y:auto;overscroll-behavior:contain}
+.claim-upload-dialog *{box-sizing:border-box}
+.claim-upload-dialog::backdrop{background:#15382d66;backdrop-filter:blur(4px)}
+.claim-source-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+.claim-source-category{display:inline-block;color:#238467;font-size:11px;line-height:1.5;margin-bottom:7px}
+.claim-source-heading h2{margin:0;color:#203f33;font-size:22px;font-weight:650;line-height:1.4;letter-spacing:-.3px}
+.claim-source-close{display:grid;place-items:center;flex:none;width:40px;height:40px;padding:0;border:1px solid #e1ebe5;border-radius:50%;background:#ffffffc9;color:#6c8276;cursor:pointer}
+.claim-source-description{margin:10px 0 22px;font-size:12px;line-height:1.7;color:#708679}
+.claim-source-options{display:grid;gap:12px}
+.claim-source-option{display:flex;align-items:center;gap:14px;width:100%;min-height:108px;margin:0;padding:17px 16px;border:1px solid #d9e9e0;border-radius:16px;background:#fff;text-align:left;color:#285440;font:inherit;cursor:pointer;-webkit-tap-highlight-color:transparent;transition:background .16s,border-color .16s,box-shadow .16s,transform .16s}
+.claim-source-option>.claim-source-icon{display:grid;place-items:center;flex:none;width:50px;height:50px;border:1px solid #d3eee0;border-radius:15px;background:linear-gradient(145deg,#e9f9f0,#dcf3e6);color:#118764}
+.claim-source-pdf>.claim-source-icon{background:linear-gradient(145deg,#f2f6fc,#e7edf7);border-color:#e0e7f1;color:#617ea6}
+.claim-source-option>.claim-source-copy{display:block;flex:1;min-width:0}
+.claim-source-copy strong{display:block;font-size:15px;font-weight:600;line-height:1.5;color:#294b3b}
+.claim-source-copy small{display:block;margin-top:4px;font-size:11px;line-height:1.6;color:#748679}
+.claim-source-format{display:inline-block;margin-top:8px;padding:2px 6px;border-radius:5px;background:#f1f6f3;color:#658575;font-size:9px;line-height:1.4;letter-spacing:.4px}
+.claim-source-pdf .claim-source-format{background:#f1f4f9;color:#7286a1}
+.claim-source-arrow{flex:none;color:#8ba698}
+.claim-source-note{display:flex;align-items:flex-start;justify-content:center;gap:7px;margin-top:21px;padding-top:17px;border-top:1px solid #edf2ee;color:#6a8977}
+.claim-source-note svg{flex:none;margin-top:2px}
+.claim-source-note p{margin:0;font-size:11px;line-height:1.8;color:#6c8274}
+.claim-source-note p span{color:#84958b}
+.claim-upload-dialog button:focus-visible{outline:2px solid #079675;outline-offset:3px}
+.claim-source-option:active{transform:scale(.985);background:#f0f8f3;border-color:#8dc7ac}
+.claim-source-close:active{background:#eaf4ed}
+@media(hover:hover){.claim-source-option:hover{background:#f7fcf9;border-color:#a3d6bd;box-shadow:0 4px 14px #215a3d09}.claim-source-close:hover{background:#edf6f0;color:#285440}}
+@media(max-width:360px){.claim-upload-dialog{padding:20px;border-radius:20px}.claim-source-option{gap:10px;padding:15px 12px}.claim-source-option>.claim-source-icon{width:42px;height:46px;border-radius:12px}.claim-source-copy strong{font-size:14px}.claim-source-description{font-size:11px;margin-bottom:18px}}
+@media(prefers-reduced-motion:reduce){.claim-source-option{transition:none}}
 .claim-form-shell{--green:#059c79;--ink:#173d34;--muted:#758b83;background:radial-gradient(ellipse at 100% 0%,#cbf3e6,transparent 45%),linear-gradient(180deg,#effaf5,#f4f8f6 42%);color:var(--ink)}
 .claim-form-shell .claim-header{background:transparent;justify-content:flex-start;padding:16px 22px 8px;min-height:54px}.claim-form-shell .claim-header strong{font-size:17px;letter-spacing:0}.claim-form-shell .claim-header>span{right:22px;color:#60877a;border-color:#cee6dc;background:#ffffff90;border-radius:20px;padding:3px 8px}
 .claim-form-shell .claim-steps{background:transparent;padding:10px 20px 16px;gap:12px}.claim-form-shell .claim-steps button{flex-direction:column;gap:7px;padding:0;font-size:11px;min-height:60px;color:#83978f}.claim-form-shell .claim-steps span{width:30px;height:30px;background:#e3ece7;color:#8aa097;font-size:12px;border:3px solid #f2faf6}.claim-form-shell .claim-steps .active span{background:#079d79;color:#fff}.claim-form-shell .claim-steps .active{color:#087f63}.claim-form-shell .claim-steps button[aria-current] span{box-shadow:0 0 0 3px #09a47c19}.claim-form-shell .claim-steps li:not(:last-child):after{top:15px;width:calc(100% - 38px);right:calc(-50% + 13px);background:#d5e5dd}.claim-form-shell .claim-steps li.active:not(:last-child):after{background:#9bd6c0}

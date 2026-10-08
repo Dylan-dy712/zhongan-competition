@@ -24,6 +24,7 @@ export default function ClaimIntake({token,subject,visible,onOpen,onAuthorize,on
   const preview=useRef<HTMLDialogElement>(null);
   const [previewFile,setPreviewFile]=useState<ClaimFile|null>(null);
   const category=useRef('record');
+  const [sourceCategory,setSourceCategory]=useState('');
   const fileRef=useRef(files);fileRef.current=files;
   useEffect(()=>()=>fileRef.current.forEach(f=>{if(f.url)URL.revokeObjectURL(f.url);}),[]);
   const [confirmed,setConfirmed]=useState(false);
@@ -122,7 +123,7 @@ export default function ClaimIntake({token,subject,visible,onOpen,onAuthorize,on
       const action=button.dataset.claimAction;
       if(action==='example'){form.current={...initialClaimForm(),diagnosis:'肺炎（虚构示例）',start:'2026-09-20',end:'2026-09-25',total:'1200.00',social:'是'};redraw(n=>n+1);setError('');}
       else if(action?.startsWith('step-')){setStep(Number(action.slice(5)));setError('');setConfirmed(false);}
-      else if(action?.startsWith('pick-')){category.current=action.slice(5);source.current?.showModal();}
+      else if(action?.startsWith('pick-')){category.current=action.slice(5);setSourceCategory(template.groups.find(g=>g.id===category.current)?.title||'理赔材料');source.current?.showModal();}
       else if(button.dataset.claimRemove){const removed=files.find(f=>f.id===button.dataset.claimRemove);if(removed?.url)URL.revokeObjectURL(removed.url);setFiles(files.filter(f=>f!==removed));setConfirmed(false);}
       else if(button.dataset.claimPreview){setPreviewFile(files.find(f=>f.id===button.dataset.claimPreview)||null);preview.current?.showModal();}
       else if(button.dataset.go && finished)void onOpen(pending.current!.id).catch(e=>setError(e instanceof Error?e.message:'打开失败，请重试。'));
@@ -139,9 +140,27 @@ export default function ClaimIntake({token,subject,visible,onOpen,onAuthorize,on
       if(added.some(f=>!f.size||f.size>10*1024*1024||!/\.(pdf|jpe?g|png)$/i.test(f.name))){setError('请选择有效 PDF 或图片，每份不超过 10 MB。');return;}
       setFiles([...files,...added.map(file=>({id:uuid(),name:file.name,size:file.size,category:category.current,sample:false,url:/\.(jpe?g|png)$/i.test(file.name)?URL.createObjectURL(file):null,file}))]);setError('');setConfirmed(false);
     }}/>
-    <dialog ref={source} className="claim-upload-dialog" aria-label="选择材料来源"><div className="claim-preview-head"><strong>添加理赔材料</strong><button onClick={()=>source.current?.close()} aria-label="关闭材料来源">×</button></div>
-      <button className="claim-source-option" onClick={()=>{source.current?.close();picker.current!.accept='.jpg,.jpeg,.png';picker.current?.click();}}>从相册选择图片<small>JPG、PNG 格式</small></button>
-      <button className="claim-source-option" onClick={()=>{source.current?.close();picker.current!.accept='.pdf';picker.current?.click();}}>从文件选择 PDF<small>选择已保存的 PDF</small></button><p>每份不超过 10 MB，确认前仅本机预览。</p></dialog>
+    <dialog ref={source} className="claim-upload-dialog" aria-labelledby="claim-source-title" aria-describedby="claim-source-description" onClick={e=>{
+      if(e.target!==e.currentTarget)return;
+      const bounds=e.currentTarget.getBoundingClientRect();
+      if(e.clientX<bounds.left||e.clientX>bounds.right||e.clientY<bounds.top||e.clientY>bounds.bottom)source.current?.close();
+    }}>
+      <div className="claim-source-heading"><div><span className="claim-source-category">{sourceCategory}</span><h2 id="claim-source-title">添加理赔材料</h2></div><button type="button" className="claim-source-close" onClick={()=>source.current?.close()} aria-label="关闭材料来源"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div>
+      <p id="claim-source-description" className="claim-source-description">请选择材料类型，支持一次选择多份</p>
+      <div className="claim-source-options">
+        <button type="button" className="claim-source-option" onClick={()=>{source.current?.close();picker.current!.accept='.jpg,.jpeg,.png';picker.current?.click();}}>
+          <span className="claim-source-icon" aria-hidden="true"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="4"/><circle cx="8" cy="8" r="1.5"/><path d="m3 16 5-5 4 4 4-5 5 6"/></svg></span>
+          <span className="claim-source-copy"><strong>从相册选择图片</strong><small>上传清晰的材料照片</small><span className="claim-source-format">JPG / PNG</span></span>
+          <svg className="claim-source-arrow" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg>
+        </button>
+        <button type="button" className="claim-source-option claim-source-pdf" onClick={()=>{source.current?.close();picker.current!.accept='.pdf';picker.current?.click();}}>
+          <span className="claim-source-icon" aria-hidden="true"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9l-6-6Zm0 0v6h6M8 13h8M8 17h5"/></svg></span>
+          <span className="claim-source-copy"><strong>从文件选择 PDF</strong><small>上传已保存的电子材料</small><span className="claim-source-format">PDF</span></span>
+          <svg className="claim-source-arrow" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg>
+        </button>
+      </div>
+      <div className="claim-source-note"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6l8-3Z"/><path d="m8 12 3 3 5-5"/></svg><p>每份不超过 10 MB，数量不限<br/><span>确认前仅在本机预览</span></p></div>
+    </dialog>
     <dialog ref={preview} className="claim-preview-dialog" aria-label="材料图片预览"><div className="claim-preview-head"><strong>{previewFile?.name}</strong><button aria-label="关闭图片预览" onClick={()=>preview.current?.close()}>×</button></div>{previewFile?.url && <img src={previewFile.url} alt={previewFile.name}/>}</dialog>
   </main>;
 }
