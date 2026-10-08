@@ -11,4 +11,8 @@ assert.equal(emphasisParts('<script>坏内容</script>')[0].text,'<script>坏内
 assert.equal(emphasisParts('[点击](javascript:alert(1))')[0].strong,false);
 assert.equal(narrativeBlocks('旧概述\n\n旧事实一\n\n旧事实二\n\n你想问哪项？').filter(b=>b.kind==='point').length,2);
 assert.equal(narrativeBlocks('17.22元').filter(b=>b.kind==='point').length,0);
+const legacy=narrativeBlocks('先看材料。\n\n原文写着不能排除肺炎。这项限定应保留。\n\n票据金额120元。支付口径另行核对。\n\n你最想问哪项？');
+assert.equal(legacy[1].text,'原文写着不能排除肺炎。');
+assert.equal(legacy[1].legacyLead,true);
+assert.equal(legacy[1].text+legacy[1].paragraphs.join(''),'原文写着不能排除肺炎。这项限定应保留。');
 console.log('PASS: adaptive numbered blocks, qualifiers retained, legacy text unchanged, no HTML/link interpretation');
