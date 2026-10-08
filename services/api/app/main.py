@@ -39,6 +39,7 @@ from .delivery_repository import (list_deliveries, record_receipt, submit_feedba
 from .care_assistant import AssistantAnswer, answer_question
 from . import conversation_repository as chats
 from .conversation_agent import CareTools, run_agent
+from .material_report import get_material_report
 from . import accounts
 
 app = FastAPI(title="众安·暖愈智护", version="0.1.0")
@@ -663,7 +664,8 @@ def conversation_detail(conversation_id: UUID, actor_id: UUID = Depends(current_
     tools = CareTools(conn, actor_id, conversation_id)
     return {'conversation': conversation, 'turns': chats.get_turns(conn, actor_id, conversation_id),
             'analysis': tools.execute('analysis_status', '{}'),
-            'report': tools.execute('read_report', '{}')}
+            'report': tools.execute('read_report', '{}'),
+            'material_report': get_material_report(conn, actor_id, conversation_id)}
 
 
 @app.get('/v1/conversations/{conversation_id}/turns')
@@ -706,6 +708,34 @@ async def chat_upload(conversation_id: UUID, response: Response, file: Annotated
 def chat_message(conversation_id: UUID, body: ChatMessage,
                  actor_id: UUID = Depends(current_actor), conn=Depends(database)):
     return process_chat_message(conversation_id, body, actor_id, conn)
+
+
+@app.post('/v1/conversations/{conversation_id}/analyses')
+def submit_chat_analysis(conversation_id: UUID, body: ChatMessage,
+                         actor_id: UUID = Depends(current_actor), conn=Depends(database)):
+    """Persist the user's request and queue material processing without a model round."""
+    if not body.message.strip():
+        raise HTTPException(422, '分析请求不能为空')
+    turn = chats.begin_turn(conn, actor_id, conversation_id, body.request_id,
+                            body.message.strip(), body.document_ids, 'user')
+    conn.commit()
+    if turn['status'] == 'completed':
+        return {'turn_id': turn['turn_id'], 'answer': turn['answer'], 'tool_events': turn['tool_events']}
+    tools = CareTools(conn, actor_id, conversation_id, turn['turn_id'])
+    try:
+        result = tools.execute('start_analysis', '{}')
+        if not result.get('run_id'):
+            raise ValueError('NEEDS_MATERIALS')
+        events = [{'tool': 'start_analysis', 'status': result['status'], 'run_id': result['run_id']}]
+        answer = {'text': '材料已收到，正在分析。完成后会生成材料分析报告，你可以查看依据并继续追问。',
+                  'evidence_refs': [], 'history_refs': []}
+        chats.finish_turn(conn, actor_id, conversation_id, turn, answer=answer, events=events)
+        conn.commit()
+        return {'turn_id': turn['turn_id'], 'answer': answer, 'tool_events': events}
+    except ValueError:
+        chats.finish_turn(conn, actor_id, conversation_id, turn, error='ANALYSIS_SUBMISSION_FAILED')
+        conn.commit()
+        raise HTTPException(422, '请先上传材料，再开始分析。') from None
 
 
 def process_chat_message(conversation_id, body, actor_id, conn, input_kind='user'):

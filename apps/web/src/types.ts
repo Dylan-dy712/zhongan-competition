@@ -75,6 +75,13 @@ export interface ChatSnapshot {
   conversation: Conversation; turns: ChatTurn[];
   analysis: {status:string; run_id?:string; stage?:string; error?:unknown};
   report: {status:string; report_id?:string; report_version?:number; sections?:ReportSection[]; actions?:CareAction[]};
+  material_report?: MaterialReport;
+}
+export interface MaterialReport {
+  status:string; report_id?:string; run_id?:string; source_report_version?:number;
+  document_count?:number; pending_count?:number; notice?:string;
+  sections?: {section_type:ReportSection['section_type']; pending_count:number;
+    items:{text:string; kind:'checked'|'source'; evidence_refs:string[]}[]}[];
 }
 export interface ChatSubject {subject_id:string; consent_id:string}
 
