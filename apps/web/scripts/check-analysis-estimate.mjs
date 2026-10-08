@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import {estimateWithinStage} from '../src/analysisProgress.ts';
 
-for(let index=0;index<5;index++){
- const base=index*20,cap=index===4?99:base+19;
+for(let index=0;index<6;index++){
+ const base=index===5?95:index*20,cap=index===5?99:index===4?94:base+19;
  let previous=base;
  for(const elapsed of [0,1,3,8,15,30,60,120,3600]){
   const value=estimateWithinStage(base,index,elapsed);

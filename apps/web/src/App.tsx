@@ -186,8 +186,12 @@ export default function App() {
     if(panel==='report' && snapshot && !publishedCare(snapshot.report))setPanel('chat');
   },[panel,snapshot,setPanel]);
   useEffect(()=>{
-    if(snapshot?.material_report?.status==='available')setAnalysisOpen(false);
-  },[snapshot?.material_report?.status,snapshot?.analysis.run_id]);
+    const ready=currentNarrative(snapshot?.turns || [],snapshot?.analysis.run_id);
+    if(analysisOpen && ready){
+      setAnalysisOpen(false);
+      if(panel==='chat')requestAnimationFrame(()=>document.getElementById(`turn-${ready.turn_id}`)?.scrollIntoView({behavior:'smooth',block:'start'}));
+    }
+  },[snapshot?.turns,snapshot?.analysis.run_id,analysisOpen,panel]);
   useEffect(()=>{
     const media=window.matchMedia?.('(max-width:760px)');
     if(!media)return;
@@ -275,6 +279,13 @@ export default function App() {
     setPanel('chat');
   };
 
+  const completeNarrative=useCallback(async(id:string,generation:number,runId:string)=>{
+    busyRef.current=true;setBusy(true);setAnalysisError('');
+    try {await continueAnalysis(token,id,runId);await refresh(id,token,generation);}
+    catch(e){if(epoch.current===generation){setError(errorText(e));setAnalysisError('解读暂时没能完成，你的材料已保存，可以重试。');}}
+    finally{if(epoch.current===generation){busyRef.current=false;setBusy(false);}}
+  },[token,refresh]);
+
   // Processing labels come from persisted backend events, never timed animations.
   useEffect(()=>{
     if(!connected || !active.current) return;
@@ -290,17 +301,15 @@ export default function App() {
           && state.turns.some(t=>t.status==='completed' && t.tool_events.some(e=>e.tool==='start_analysis' && e.run_id===run.run_id));
         const key=`${id}:${run.run_id}`;
         if(shouldContinue && !busyRef.current && !uploadingRef.current && !state.turns.some(t=>t.status==='running') && !resumed.current.has(key)) {
-          resumed.current.add(key);busyRef.current=true;setBusy(true);
-          try {await continueAnalysis(token,id,run.run_id!);await refresh(id,token,generation);}
-          catch(e){if(epoch.current===generation)setError(errorText(e));}
-          finally{if(epoch.current===generation){busyRef.current=false;setBusy(false);}}
+          resumed.current.add(key);
+          await completeNarrative(id,generation,run.run_id!);
         }
       } catch(e) {if(!stopped && epoch.current===generation)setError(errorText(e));}
       if(!stopped)timer=setTimeout(tick,3500);
     };
     timer=setTimeout(tick,1500);
     return()=>{stopped=true;clearTimeout(timer);};
-  },[connected,snapshot?.conversation.conversation_id,token,refresh]);
+  },[connected,snapshot?.conversation.conversation_id,token,refresh,completeNarrative]);
 
   const send = async (retry?:ChatTurn) => {
     const id=active.current, generation=epoch.current;
@@ -458,7 +467,7 @@ export default function App() {
           : <div className="empty-report"><p>暖暖会在对话里结合材料为你解释。</p>
             <button onClick={()=>setPanel('chat')}>回到对话</button></div>}</main>
       : <><main className="chat-scroll inline-report-thread">{showClaimGuide ? <OriginalChatGuide snapshot={snapshot} onEvidence={id=>void showEvidence(id)}/> : <OriginalChatWelcome/>}
-        {(snapshot.analysis.run_id || analysisSubmitting || uploadProgress || analysisError) && !narrative && <button className="analysis-card" onClick={()=>material?.status==='available'?openNarrative():setAnalysisOpen(true)}><span className="analysis-card-icon" aria-hidden="true">✦</span><span className="analysis-card-copy"><strong>{progressView.title}</strong><small>{material?.status==='available'?'解读会直接出现在下面，可以接着问':`${progressView.detail}${progressView.percent!==null?` · ${progressView.percent}%`:''}`}</small></span><span className="analysis-card-arrow" aria-hidden="true">›</span></button>}
+        {(snapshot.analysis.run_id || analysisSubmitting || uploadProgress || analysisError) && !narrative && <button className="analysis-card" onClick={()=>setAnalysisOpen(true)}><span className="analysis-card-icon" aria-hidden="true">✦</span><span className="analysis-card-copy"><strong>{progressView.title}</strong><small>{`${progressView.detail}${progressView.percent!==null?` · ${progressView.percent}%`:''}`}</small></span><span className="analysis-card-arrow" aria-hidden="true">›</span></button>}
         {hasOlder && turns.length>0 && <button className="load-history" onClick={()=>void loadOlder()}>查看更早的聊天</button>}
         <div className="nuan-chat-heading"><span><DemoIcon name="chat"/>和暖暖聊聊</span><small>有疑问，接着问</small></div>
         <div className="messages">{turns.length===0 && <div className="message-row assistant"><div className="avatar">✦</div><div className="message-bubble"><div className="nuan-reply-label"><DemoIcon name="leaf"/>暖暖</div><p>你好，我是暖暖。你可以从最想说的事情聊起，不用一下子把所有事情讲清楚。如果有看不懂的病历或发票，我也会陪你一点点看。</p></div></div>}
@@ -490,7 +499,7 @@ export default function App() {
           </form>
         </footer></>}
       </PageBoundary>
-      {connected && snapshot && <AnalysisFlow open={analysisOpen && ['chat','report'].includes(panel)} snapshot={analysisSubmitting || uploadProgress?null:snapshot} upload={uploadProgress} submitting={analysisSubmitting} error={analysisError} onClose={()=>setAnalysisOpen(false)} onReport={openNarrative} onRetry={()=>void startMaterialAnalysis()}/>}
+      {connected && snapshot && <AnalysisFlow open={analysisOpen && ['chat','report'].includes(panel)} snapshot={analysisSubmitting || uploadProgress?null:snapshot} upload={uploadProgress} submitting={analysisSubmitting} error={analysisError} onClose={()=>setAnalysisOpen(false)} onReport={openNarrative} onRetry={()=>{if(material?.status==='available' && snapshot.analysis.run_id)void completeNarrative(active.current,epoch.current,snapshot.analysis.run_id);else void startMaterialAnalysis();}}/>}
       {connected && panel!=='claim' && <nav className="care-navigation" aria-label="关怀页面"><button aria-current={panel==='home'?'page':undefined} onClick={()=>setPanel('home')}><DemoIcon name="leaf"/>首页</button>
         <button aria-current={panel==='chat'?'page':undefined} onClick={()=>setPanel('chat')}><DemoIcon name="chat"/>问暖暖</button>
         <button aria-current={panel==='records'?'page':undefined} onClick={()=>setPanel('records')}><DemoIcon name="file"/>就医记录</button>
