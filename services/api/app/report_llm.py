@@ -1,6 +1,7 @@
 """Structured six-section report drafting through the configured LLM."""
 
 import json
+import time
 from typing import Literal
 
 import requests
@@ -10,6 +11,32 @@ from .llm_extractor import OpenAiCompatibleExtractor
 from .report_builder import SECTION_TYPES
 
 PROMPT_VERSION = "six-section-care-report-v6"
+REPORT_READ_TIMEOUT = 180
+REPORT_REQUEST_BUDGET = 240
+
+
+def request_failure(exc):
+    """Safe diagnostics only: exception messages can contain credentials or inputs."""
+    cause = exc
+    seen = set()
+    timed_out = isinstance(exc, requests.Timeout)
+    while cause is not None and id(cause) not in seen:
+        seen.add(id(cause))
+        timed_out |= type(cause).__name__ in {"ReadTimeoutError", "ConnectTimeoutError"}
+        cause = cause.__cause__ or cause.__context__ or next(
+            (arg for arg in cause.args if isinstance(arg, BaseException)), None)
+    status = getattr(getattr(exc, "response", None), "status_code", None)
+    if timed_out:
+        code, retryable = "REPORT_MODEL_TIMEOUT", True
+    elif isinstance(exc, requests.ConnectionError):
+        code, retryable = "REPORT_MODEL_CONNECTION_ERROR", True
+    elif isinstance(exc, requests.HTTPError):
+        code = "REPORT_MODEL_RATE_LIMITED" if status == 429 else "REPORT_MODEL_HTTP_ERROR"
+        retryable = status in {408, 429, 500, 502, 503, 504}
+    else:
+        code, retryable = "REPORT_MODEL_RESPONSE_INVALID", False
+    return {"code": code, "retryable": retryable,
+            "exception_type": type(exc).__name__, "http_status": status}
 
 
 class DraftClaim(BaseModel):
@@ -79,20 +106,43 @@ def draft_report(material: str, reviewable_knowledge: list[dict], user_context: 
         "structured_costs":structured_costs, "personnel": personnel or [],
         "normalized_dates": normalized_dates or {}}, ensure_ascii=False)}]
     first_payload = None
+    repaired_payload = None
+    deadline = time.monotonic() + REPORT_REQUEST_BUDGET
+    diagnostics = []
+    failure = {"code": "REPORT_MODEL_FAILED", "retryable": False}
+    repairing = False
     for attempt in range(2):
+        remaining = deadline - time.monotonic()
+        if remaining <= 10:
+            failure = {"code": "REPORT_MODEL_TIMEOUT", "retryable": True}
+            break
+        started = time.monotonic()
         try:
-            payload, content = client._call(messages)
+            payload, content = client._call(
+                messages, timeout=(10, min(REPORT_READ_TIMEOUT, remaining - 10)))
             first_payload = first_payload or payload
+            if repairing:
+                repaired_payload = payload
+            diagnostics.append({"attempt": attempt + 1, "received": True,
+                                "elapsed_seconds": round(time.monotonic() - started, 2)})
             try:
                 parsed = DraftReport.model_validate_json(content)
                 return {"status": "completed", "draft": parsed.model_dump(mode="json"),
-                        "raw_output": first_payload, "repaired_output": payload if attempt else None,
-                        "usage_metadata": payload.get("usage", {})}
+                        "raw_output": first_payload, "repaired_output": repaired_payload,
+                        "usage_metadata": {**payload.get("usage", {}), "request_attempts": diagnostics}}
             except ValidationError:
+                failure = {"code": "REPORT_MODEL_SCHEMA_INVALID", "retryable": False}
                 messages += [{"role": "assistant", "content": content},
                              {"role": "user", "content": "仅修复JSON结构与六段完整性，不增加新事实。"}]
-        except (requests.RequestException, KeyError, ValueError):
-            break
+                repairing = True
+        except (requests.RequestException, KeyError, ValueError, IndexError, TypeError) as exc:
+            failure = request_failure(exc)
+            diagnostics.append({"attempt": attempt + 1, **failure,
+                                "elapsed_seconds": round(time.monotonic() - started, 2)})
+            if not failure["retryable"] or attempt == 1:
+                break
+            time.sleep(1)
     return {"status": "failed", "draft": {"sections": [], "actions": []},
-            "raw_output": first_payload, "repaired_output": None,
-            "usage_metadata": {}, "error_code": "REPORT_MODEL_FAILED"}
+            "raw_output": first_payload, "repaired_output": repaired_payload,
+            "usage_metadata": {"request_attempts": diagnostics},
+            "error_code": failure["code"], "retryable": failure["retryable"]}
