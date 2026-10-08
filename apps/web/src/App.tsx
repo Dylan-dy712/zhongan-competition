@@ -17,6 +17,7 @@ import {prepareChatFiles} from './chatFiles';
 import './chat.css';
 import './care.css';
 import './chat-original.css';
+import './chat-theme.css';
 
 // randomUUID requires HTTPS in some browsers; retain a cryptographic HTTP development fallback.
 function requestId() {
@@ -150,7 +151,7 @@ export default function App() {
   },[openConversation,setPanel]);
 
   useEffect(()=>{if(!initialized.current){initialized.current=true;if(token) void connect(token);}},[connect,token]);
-  useEffect(()=>{if(panel==='chat')bottom.current?.scrollIntoView({behavior:'smooth'});},[snapshot?.turns.length,busy,panel]);
+  useEffect(()=>{if(panel==='chat' && snapshot?.turns.length)bottom.current?.scrollIntoView({behavior:'smooth'});},[snapshot?.turns.length,busy,panel]);
   useEffect(()=>{++evidenceRequest.current;setHistoryOpen(false);setEvidence(null);},[panel]);
   useEffect(()=>{
     const media=window.matchMedia?.('(max-width:760px)');
@@ -338,7 +339,7 @@ export default function App() {
       <button className="quiet-button" disabled={working} onClick={()=>void signOut()}>退出登录</button>
     </aside>;
 
-  return <div className="chat-shell">
+  return <div className={`chat-shell ${panel==='chat'?'chat-view':''}`}>
     {connected && panel==='chat' && (mobileHistory ? historyOpen && <dialog id="history-dialog" ref={historyDialog} className="history-drawer" aria-label="历史对话"
       onKeyDown={e=>{if(e.key!=='Tab')return;const buttons=Array.from(e.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)'));const first=buttons[0],last=buttons.at(-1);if(e.shiftKey&&document.activeElement===first){e.preventDefault();last?.focus();}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first?.focus();}}}
       onCancel={e=>{e.preventDefault();setHistoryOpen(false);}} onClick={e=>{if(e.target===e.currentTarget)setHistoryOpen(false);}}>{historyPanel}</dialog> : historyPanel)}
