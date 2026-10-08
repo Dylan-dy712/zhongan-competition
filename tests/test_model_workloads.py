@@ -1,8 +1,10 @@
 import unittest
+import json
 from unittest.mock import patch
 from services.api.app.model_workloads import workload_options
 from services.api.app.conversation_agent import AgentModel
 from services.api.app.llm_extractor import OpenAiCompatibleExtractor
+from services.api.app.analysis_format import strict_analysis_tool,decode_analysis_tool
 
 
 class ModelWorkloadTests(unittest.TestCase):
@@ -19,17 +21,38 @@ class ModelWorkloadTests(unittest.TestCase):
              patch('services.api.app.conversation_agent.requests.post') as post:
             config.return_value.base_url='https://api.deepseek.com'
             config.return_value.model_id='deepseek-flash'
-            post.return_value.json.return_value={'choices':[{'message':{'content':'{}'}}]}
+            args={'text':'材料解读',**{f'source_{i}':'S1' if i==1 else '' for i in range(1,21)}}
+            post.return_value.json.return_value={'choices':[{'message':{'tool_calls':[{
+                'function':{'name':'deliver_analysis','arguments':json.dumps(args)}}]}}]}
             narrative=AgentModel(analysis_mode=True)
             narrative.complete([])
             self.assertEqual(post.call_args.kwargs['json']['thinking'],{'type':'disabled'})
             self.assertEqual(post.call_args.kwargs['json']['max_tokens'],8000)
+            self.assertEqual(post.call_args.args[0],'https://api.deepseek.com/beta/chat/completions')
+            self.assertTrue(post.call_args.kwargs['json']['tools'][0]['function']['strict'])
             narrative.complete([])
             self.assertEqual(post.call_args.kwargs['json']['thinking'],{'type':'enabled'})
             self.assertEqual(post.call_args.kwargs['json']['reasoning_effort'],'low')
             self.assertEqual(post.call_args.kwargs['json']['max_tokens'],16000)
             AgentModel().complete([])
             self.assertNotIn('thinking',post.call_args.kwargs['json'])
+
+    def test_strict_format_limits_metadata_slots_and_keeps_free_text(self):
+        schema=strict_analysis_tool()['function']['parameters']
+        self.assertEqual(len(schema['properties']),21)
+        self.assertEqual(set(schema['required']),set(schema['properties']))
+        self.assertFalse(schema['additionalProperties'])
+        args={'text':'材料A的自由段落。\n\n材料B的自由段落。',
+              **{f'source_{i}':'S37' if i==2 else '' for i in range(1,21)}}
+        reply=decode_analysis_tool({'tool_calls':[{'function':{
+            'name':'deliver_analysis','arguments':json.dumps(args)}}]})
+        data=json.loads(reply['content'])
+        self.assertEqual(data['text'],args['text'])
+        self.assertEqual(data['evidence_refs'],['S37'])
+        args['source_21']='S99'
+        with self.assertRaisesRegex(RuntimeError,'ANALYSIS_RESPONSE_FORMAT'):
+            decode_analysis_tool({'tool_calls':[{'function':{
+                'name':'deliver_analysis','arguments':json.dumps(args)}}]})
 
     def test_extraction_and_review_send_their_respective_settings(self):
         with patch('services.api.app.llm_extractor.requests.post') as post:

@@ -16,6 +16,7 @@ from .repository import AccessDenied, create_analysis_run, get_analysis_run, get
 from .report_builder import _unsafe
 from .analysis_sources import pack_sources
 from .model_workloads import workload_options
+from .analysis_format import strict_analysis_tool, decode_analysis_tool
 
 
 PROMPT_VERSION = 'conversation-agent-v1'
@@ -133,13 +134,20 @@ class AgentModel:
                 body['max_tokens']=8000
         if not self.analysis_mode:
             body.update(tools=TOOLS, tool_choice='auto' if allow_tools else 'none')
-        response = requests.post(f'{self.config.base_url}/chat/completions',
+        strict_format = self.analysis_mode and bool(options)
+        url = f'{self.config.base_url}/chat/completions'
+        if strict_format:
+            url='https://api.deepseek.com/beta/chat/completions'
+            body.pop('response_format',None)
+            body.update(tools=[strict_analysis_tool()],tool_choice={'type':'function','function':{'name':'deliver_analysis'}})
+        response = requests.post(url,
             headers={'Authorization': f'Bearer {self.config.api_key}', 'Content-Type': 'application/json'},
             json=body, timeout=(10, 180) if self.analysis_mode else (5, 20))
         response.raise_for_status()
         payload = response.json()
         self.usage.append(payload.get('usage', {}))
-        return payload['choices'][0]['message']
+        message=payload['choices'][0]['message']
+        return decode_analysis_tool(message) if strict_format else message
 
 
 class CareTools:
