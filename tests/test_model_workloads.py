@@ -43,9 +43,10 @@ class ModelWorkloadTests(unittest.TestCase):
 
     def test_strict_format_limits_metadata_slots_and_keeps_free_text(self):
         schema=strict_analysis_tool()['function']['parameters']
-        self.assertEqual(len(schema['properties']),25)
+        self.assertEqual(len(schema['properties']),26)
         self.assertEqual(set(schema['required']),set(schema['properties']))
         self.assertFalse(schema['additionalProperties'])
+        self.assertEqual(schema['properties']['citations']['maxItems'],40)
         args={**{f'knowledge_{i}':'TY-COST-01' if i==1 else '' for i in range(1,5)},'text':'材料A的自由段落。\n\n材料B的自由段落。',
               **{f'source_{i}':'S37' if i==2 else '' for i in range(1,21)}}
         reply=decode_analysis_tool({'tool_calls':[{'function':{

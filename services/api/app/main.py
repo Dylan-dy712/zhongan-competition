@@ -13,6 +13,7 @@ import requests
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Path as ApiPath, Query, Request, Response, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
+from starlette.concurrency import run_in_threadpool
 from pydantic import Field
 
 from .contracts.core import (
@@ -38,9 +39,11 @@ from .delivery_repository import (list_deliveries, record_receipt, submit_feedba
     resolve_feedback, FeedbackNotFound, FeedbackAccessDenied, StaleFeedback)
 from .care_assistant import AssistantAnswer, answer_question
 from . import conversation_repository as chats
-from .conversation_agent import CareTools, run_agent
+from .conversation_agent import CareTools, run_agent, ANALYSIS_PROMPT_VERSION
 from .material_report import get_material_report
 from . import accounts
+from .document_quality import inspect_photo
+from .tencent_ocr import TencentOcr
 
 app = FastAPI(title="众安·暖愈智护", version="0.1.0")
 
@@ -134,6 +137,10 @@ class ChatMessage(Contract):
     request_id: UUID
     message: str = Field(min_length=1, max_length=4000)
     document_ids: list[UUID] = Field(default_factory=list)
+
+
+class AnalysisRequest(ChatMessage):
+    force_new: bool = False
 
 
 class RecallSetting(Contract):
@@ -296,6 +303,39 @@ def read_case(case_id: UUID, actor_id: UUID = Depends(current_actor), conn=Depen
     return case
 
 
+@app.post('/v1/materials/inspect')
+async def inspect_material(file: Annotated[UploadFile, File()], subject_id: Annotated[UUID, Form()],
+                           actor_id: UUID = Depends(current_actor), conn=Depends(database)):
+    try:
+        if not any(str(item['subject_id']) == str(subject_id) for item in chats.available_subjects(conn, actor_id)):
+            raise HTTPException(status_code=403, detail='请先确认该人员的资料用途授权。')
+        if file.content_type not in {'image/jpeg', 'image/png'}:
+            raise HTTPException(status_code=415, detail='照片检查支持 JPG 或 PNG。')
+        data = await file.read(document_size_limit() + 1)
+        if not data or len(data) > document_size_limit():
+            raise HTTPException(status_code=413, detail='请选择非空且不超过 10 MB 的图片。')
+        try:
+            result = await run_in_threadpool(inspect_photo, data, TencentOcr)
+        except (ValueError, OSError) as exc:
+            raise HTTPException(status_code=422, detail='图片无法读取，请重新选择有效图片。') from exc
+        # Consent can be withdrawn while OCR is in flight.
+        if not any(str(item['subject_id']) == str(subject_id) for item in chats.available_subjects(conn, actor_id)):
+            raise HTTPException(status_code=403, detail='资料授权已变更，请重新确认。')
+        return result
+    finally:
+        await file.close()
+
+
+@app.get('/v1/knowledge/{entry_id}')
+def read_knowledge_source(entry_id: str, actor_id: UUID = Depends(current_actor)):
+    from .knowledge_retrieval import KnowledgeRetriever
+    retriever = KnowledgeRetriever()
+    item = retriever.by_id.get(entry_id)
+    if not item:
+        raise HTTPException(status_code=404, detail='该参考资料暂不可用。')
+    return {key: item.get(key, '') for key in ('entry_id', 'title', 'source', 'scope', 'content')} | {'version': retriever.version}
+
+
 @app.post("/v1/cases/{case_id}/documents", response_model=Document, status_code=201)
 async def post_document(
     case_id: UUID,
@@ -303,6 +343,7 @@ async def post_document(
     file: Annotated[UploadFile, File()],
     source_ref: Annotated[str, Form(min_length=1, max_length=512)],
     document_type: Annotated[str | None, Form(max_length=100)] = None,
+    replaces_document_id: Annotated[UUID | None, Form()] = None,
     actor_id: UUID = Depends(current_actor),
     conn=Depends(database),
     storage_root: Path = Depends(document_storage_root),
@@ -338,9 +379,12 @@ async def post_document(
                 source_hash=digest.hexdigest(), source_ref=source_ref,
                 policy_version=DOCUMENT_POLICY_VERSION, temp_path=temp_path,
                 storage_root=storage_root,
+                replaces_document_id=replaces_document_id,
             )
         except AccessDenied:
             raise HTTPException(status_code=404, detail="Case not found") from None
+        except IdempotencyConflict as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from None
         if not created:
             response.status_code = 200
         return document
@@ -409,6 +453,21 @@ def read_evidence(evidence_id: UUID, actor_id: UUID = Depends(current_actor),
     if item is None:
         raise HTTPException(status_code=404, detail="Evidence not found")
     return item
+
+
+@app.get('/v1/cases/{case_id}/material-quality')
+def read_material_quality(case_id: UUID, run_id: UUID = Query(), actor_id: UUID = Depends(current_actor), conn=Depends(database)):
+    run = get_analysis_run(conn, actor_id=actor_id, run_id=run_id)
+    if run is None or run.case_id != case_id:
+        raise HTTPException(status_code=404, detail='Run not found')
+    rows = conn.execute('''SELECT d.document_id,d.source_ref AS name,p.page_index,
+           p.structure_metadata->'photo_quality' AS quality
+        FROM analysis_runs r CROSS JOIN LATERAL jsonb_array_elements(r.document_versions) v
+        JOIN documents d ON d.document_id=(v->>'document_id')::uuid
+        JOIN document_pages p ON p.document_id=d.document_id AND p.document_version=(v->>'document_version')::integer
+        WHERE r.run_id=%s AND r.case_id=%s AND p.structure_metadata ? 'photo_quality'
+        ORDER BY d.document_id,p.page_index''',(run_id,case_id)).fetchall()
+    return [dict(row) for row in rows]
 
 
 @app.get("/v1/cases/{case_id}/facts", response_model=list[ExtractedFact])
@@ -562,6 +621,18 @@ def post_feedback_resolution(feedback_id: UUID, body: ResolveFeedback,
         raise HTTPException(status_code=403, detail="Medical reviewer or customer service role required") from None
     except StaleFeedback:
         raise HTTPException(status_code=409, detail="Feedback is not pending or has already been resolved") from None
+
+
+@app.get('/v1/quality/demo')
+def quality_demo_snapshot(actor_id: UUID = Depends(current_actor)):
+    from .quality_demo import demo_snapshot
+    return demo_snapshot()
+
+
+@app.post('/v1/quality/demo/recommendations')
+def quality_demo_match(body: ProfileMatchRequest, actor_id: UUID = Depends(current_actor)):
+    from .quality_demo import demo_recommendations
+    return demo_recommendations(body)
 
 
 @app.post("/v1/quality/recommendations")
@@ -721,6 +792,17 @@ async def chat_upload(conversation_id: UUID, response: Response, file: Annotated
         source_ref=name, document_type=None, actor_id=actor_id, conn=conn, storage_root=storage_root)
 
 
+@app.post('/v1/conversations/{conversation_id}/documents/{document_id}/replacement', response_model=Document, status_code=201)
+async def replace_chat_document(conversation_id: UUID, document_id: UUID, response: Response,
+                                file: Annotated[UploadFile, File()], actor_id: UUID = Depends(current_actor),
+                                conn=Depends(database), storage_root: Path = Depends(document_storage_root)):
+    conversation = chats.require_conversation(conn, actor_id, conversation_id)
+    name = (file.filename or '重新上传材料').replace('\\', '/').rsplit('/', 1)[-1][:200]
+    return await post_document(case_id=conversation['case_id'],response=response,file=file,
+        source_ref=name,document_type=None,replaces_document_id=document_id,actor_id=actor_id,
+        conn=conn,storage_root=storage_root)
+
+
 @app.post('/v1/conversations/{conversation_id}/messages')
 def chat_message(conversation_id: UUID, body: ChatMessage,
                  actor_id: UUID = Depends(current_actor), conn=Depends(database)):
@@ -728,17 +810,17 @@ def chat_message(conversation_id: UUID, body: ChatMessage,
 
 
 @app.post('/v1/conversations/{conversation_id}/analyses')
-def submit_chat_analysis(conversation_id: UUID, body: ChatMessage,
+def submit_chat_analysis(conversation_id: UUID, body: AnalysisRequest,
                          actor_id: UUID = Depends(current_actor), conn=Depends(database)):
     """Persist the user's request and queue material processing without a model round."""
     if not body.message.strip():
         raise HTTPException(422, '分析请求不能为空')
     turn = chats.begin_turn(conn, actor_id, conversation_id, body.request_id,
-                            body.message.strip(), body.document_ids, 'user')
+                            body.message.strip() + ('\n（重新分析当前材料）' if body.force_new else ''), body.document_ids, 'user')
     conn.commit()
     if turn['status'] == 'completed':
         return {'turn_id': turn['turn_id'], 'answer': turn['answer'], 'tool_events': turn['tool_events']}
-    tools = CareTools(conn, actor_id, conversation_id, turn['turn_id'])
+    tools = CareTools(conn, actor_id, conversation_id, turn['turn_id'],force_analysis=body.force_new)
     try:
         result = tools.execute('start_analysis', '{}')
         if not result.get('run_id'):
@@ -791,7 +873,7 @@ def process_chat_message(conversation_id, body, actor_id, conn, input_kind='user
                                   (current['case_id'],)).fetchone()
             if not latest or latest['run_id'] != analysis_run_id:
                 raise ValueError('ANALYSIS_SUPERSEDED')
-            documents = conn.execute('SELECT document_id,document_version,source_hash FROM documents WHERE case_id=%s ORDER BY document_id',
+            documents = conn.execute('SELECT document_id,document_version,source_hash FROM documents WHERE case_id=%s AND NOT EXISTS (SELECT 1 FROM document_replacements replacement WHERE replacement.old_document_id=documents.document_id) ORDER BY document_id',
                                      (current['case_id'],)).fetchall()
             actual = [{**d, 'document_id': str(d['document_id'])} for d in documents]
             # Even an upload that has not queued its new analysis invalidates this draft.
@@ -836,7 +918,7 @@ def continue_analysis(conversation_id: UUID, run_id: UUID,
         ORDER BY created_at DESC,run_id DESC LIMIT 1''', (run.case_id,)).fetchone()
     if latest['run_id'] != run_id:
         raise HTTPException(409, '已有更新的分析任务')
-    request_id = uuid5(NAMESPACE_URL, f'zhongan:analysis-narrative-v1:{conversation_id}:{run_id}')
+    request_id = uuid5(NAMESPACE_URL, f'zhongan:{ANALYSIS_PROMPT_VERSION}:{conversation_id}:{run_id}')
     return process_chat_message(conversation_id, ChatMessage(request_id=request_id,
         message='请结合本次实际材料和我关注的问题，写一份温和清楚、连贯自然的文字分析，直接在对话里解释；内容重点由材料决定，有不确定的地方就说明。'),
         actor_id=actor_id, conn=conn, input_kind='analysis_ready', analysis_run_id=run_id)

@@ -3,9 +3,9 @@ import {ApiError, continueAnalysis, createConversation, getConversation, getEvid
   listConversations, listSubjects, listMembers, sendChatMessage, uploadChatDocument,
   listDeliveries, recordDeliveryReceipt, submitCareFeedback} from './api';
 import {startChatAnalysis} from './api';
+import {replaceChatDocument} from './api';
 import AnalysisFlow,{analysisView,type UploadProgress} from './AnalysisFlow';
-import AnalysisNarrative,{currentNarrative,Emphasis} from './AnalysisNarrative';
-import KnowledgeSources from './KnowledgeSources';
+import AnalysisNarrative,{currentNarrative} from './AnalysisNarrative';
 import type {ChatSnapshot, ChatSubject, ChatTurn, Conversation, Evidence, ToolEvent, DeliveryNotice, FeedbackType,ReportSection} from './types';
 import {CareReport,EvidencePanel,brand} from './CarePages';
 import {DemoHome,DemoIcon} from './DemoPages';
@@ -21,6 +21,10 @@ import type {MemberResponse} from './api';
 import {revokeSession} from './api';
 import OriginalChatGuide,{OriginalChatWelcome} from './OriginalChatGuide';
 import {prepareChatFiles} from './chatFiles';
+import PhotoReview from './PhotoReview';
+import EncounterOverview from './EncounterOverview';
+import DemoShowcase from './DemoShowcase';
+import {SourceToken,CitedText} from './SourceCitations';
 import './chat.css';
 import './care.css';
 import './chat-original.css';
@@ -88,6 +92,7 @@ export default function App() {
   const [attachments,setAttachments] = useState<{document_id:string; name:string}[]>([]);
   const [busy,setBusy] = useState(false);
   const [uploading,setUploading] = useState(false);
+  const [photoReview,setPhotoReview]=useState<{files:File[];conversationId:string;replaceId?:string}|null>(null);
   const [analysisOpen,setAnalysisOpen]=useState(false);
   const [uploadProgress,setUploadProgress]=useState<UploadProgress>();
   const [analysisSubmitting,setAnalysisSubmitting]=useState(false);
@@ -129,7 +134,7 @@ export default function App() {
     if(!(e instanceof ApiError) || ![401,403,404].includes(e.status) || epoch.current!==generation || active.current!==id)return false;
     const fresh=++epoch.current;active.current='';busyRef.current=false;
     setLoadingConversation(false);
-    setSnapshot(null);setOlder([]);setEvidence(null);setAttachments([]);setInput('');setDelivery(null);
+    setSnapshot(null);setOlder([]);setEvidence(null);setAttachments([]);setPhotoReview(null);setInput('');setDelivery(null);
     setConversations([]);setSubjects([]);setSubject('');setCaseInput('');setFeedbackNotice('');setBusy(false);setUploading(false);
     localStorage.removeItem('zhongan_last_conversation');
     pendingSend.current=null;careKeys.current.clear();
@@ -161,7 +166,7 @@ export default function App() {
     analysisRequest.current=null;uploadingRef.current=false;
     setClaimGuideConversation(fromClaim ? id : '');
     olderExhausted.current = false;
-    setSnapshot(null); setOlder([]); setAttachments([]); setInput(''); setEvidence(null); setError('');
+    setSnapshot(null); setOlder([]); setAttachments([]);setPhotoReview(null); setInput(''); setEvidence(null); setError('');
     busyRef.current=false;setBusy(false);setUploading(false);
     setLoadingConversation(true);setHasOlder(false);setDelivery(null);setFeedbackNotice('');
     setPanel(destination);setReportFocus(undefined); setHistoryOpen(false); pendingSend.current = null;
@@ -299,7 +304,7 @@ export default function App() {
     ++epoch.current;active.current='';olderExhausted.current=false;
     busyRef.current=false;setBusy(false);setUploading(false);setLoadingConversation(false);
     setDelivery(null);setFeedbackNotice('');setHasOlder(false);setReportFocus(undefined);setCaseInput('');
-    setSnapshot(null);setOlder([]);setAttachments([]);setInput('');setEvidence(null);setError('');
+    setSnapshot(null);setOlder([]);setAttachments([]);setPhotoReview(null);setInput('');setEvidence(null);setError('');
     setHistoryOpen(false);pendingSend.current=null;
     setClaimGuideConversation('');
     setPanel('chat');
@@ -326,7 +331,7 @@ export default function App() {
     if(memberEpoch.current!==generation)return;
     setConversations(items);setSubjects(allowed);
     if(snapshot?.conversation.subject_id===changedSubject&&active.current===snapshot.conversation.conversation_id&&!items.some(item=>item.conversation_id===snapshot.conversation.conversation_id)){
-      ++epoch.current;active.current='';setSnapshot(null);setEvidence(null);setOlder([]);setAttachments([]);setInput('');setDelivery(null);
+      ++epoch.current;active.current='';setSnapshot(null);setEvidence(null);setOlder([]);setAttachments([]);setPhotoReview(null);setInput('');setDelivery(null);
       pendingSend.current=null;careKeys.current.clear();localStorage.removeItem('zhongan_last_conversation');
     }
   };
@@ -380,7 +385,7 @@ export default function App() {
         if(docs.length)await startChatAnalysis(token,id,req,text,docs);
         else await sendChatMessage(token,id,req,text,docs);
       }
-      if(epoch.current===generation){setInput('');setAttachments([]);pendingSend.current=null;}
+      if(epoch.current===generation){setInput('');setAttachments([]);setPhotoReview(null);pendingSend.current=null;}
     } catch(e){if(!invalidateAccess(e,id,generation) && epoch.current===generation)setError(errorText(e));}
     finally {
       try {await refresh(id,token,generation);if(epoch.current===generation)setConversations(await listConversations(token));}
@@ -389,14 +394,14 @@ export default function App() {
     }
   };
 
-  const startMaterialAnalysis=async(docs=attachments.map(a=>a.document_id),message=input.trim() || '请分析本次上传材料，整理就医经过、费用与待补充信息。')=>{
+  const startMaterialAnalysis=async(docs=attachments.map(a=>a.document_id),message=input.trim() || '请分析本次上传材料，整理就医经过、费用与待补充信息。',forceNew=false)=>{
     const id=active.current,generation=epoch.current;if(!id || busyRef.current)return;
     const previous=analysisRequest.current;
     const request=previous && previous.message===message && JSON.stringify(previous.docs)===JSON.stringify(docs)?previous:{id:requestId(),message,docs};
     analysisRequest.current=request;busyRef.current=true;setBusy(true);setAnalysisSubmitting(true);setAnalysisOpen(true);setAnalysisError('');
     try {
-      await startChatAnalysis(token,id,request.id,message,docs);
-      if(epoch.current===generation){setAttachments([]);setInput('');analysisRequest.current=null;}
+      await startChatAnalysis(token,id,request.id,message,docs,forceNew);
+      if(epoch.current===generation){setAttachments([]);setPhotoReview(null);setInput('');analysisRequest.current=null;}
     } catch(e){if(!invalidateAccess(e,id,generation) && epoch.current===generation)setAnalysisError(errorText(e));}
     finally{
       try{await refresh(id,token,generation);}catch(e){if(epoch.current===generation)setAnalysisError(errorText(e));}
@@ -406,15 +411,21 @@ export default function App() {
 
   const upload = async(files:FileList|null) => {
     if(!files || !active.current || busyRef.current || busy || uploading)return;
+    try{const selected=prepareChatFiles(files,attachments.length);
+      if(selected.some(file=>file.type.startsWith('image/')))setPhotoReview({files:selected,conversationId:active.current});
+      else await uploadAccepted(selected);
+    }catch(e){setError(errorText(e));}
+    if(uploadInput.current)uploadInput.current.value='';if(photoInput.current)photoInput.current.value='';
+  };
+  const uploadAccepted = async(selected:File[],replaceId?:string) => {
+    if(!active.current || busyRef.current || uploading)return;
     const id=active.current,generation=epoch.current;
-    let selected:File[];
-    try{selected=prepareChatFiles(files,attachments.length);}catch(e){setError(errorText(e));return;}
     if(!selected.length)return;
     uploadingRef.current=true;
-    const uploaded=[...attachments];setUploading(true);setError('');setAnalysisError('');setAnalysisOpen(true);setUploadProgress({done:0,total:selected.length});
+    const uploaded=attachments.filter(item=>item.document_id!==replaceId);setUploading(true);setError('');setAnalysisError('');setAnalysisOpen(true);setUploadProgress({done:0,total:selected.length});
     try {
       for(const file of selected) {
-        const doc=await uploadChatDocument(token,id,file);
+        const doc=replaceId?await replaceChatDocument(token,id,replaceId,file):await uploadChatDocument(token,id,file);
         if(epoch.current!==generation)return;
         if(!uploaded.some(x=>x.document_id===doc.document_id))uploaded.push({document_id:doc.document_id,name:file.name});
         setAttachments([...uploaded]);setUploadProgress({done:selected.indexOf(file)+1,total:selected.length});
@@ -422,6 +433,16 @@ export default function App() {
       if(epoch.current===generation){setUploadProgress(undefined);await startMaterialAnalysis(uploaded.map(a=>a.document_id));}
     } catch(e){if(!invalidateAccess(e,id,generation) && epoch.current===generation){setError(errorText(e));setAnalysisError(errorText(e));}}
     finally {if(epoch.current===generation){uploadingRef.current=false;setUploading(false);setUploadProgress(undefined);if(uploadInput.current)uploadInput.current.value='';if(photoInput.current)photoInput.current.value='';}}
+  };
+
+  const runDemo=async(file:File)=>{
+    const person=viewMember?.subject_id;if(!person||busyRef.current)return;
+    const generation=epoch.current;busyRef.current=true;setBusy(true);setError('');
+    try{const created=await createConversation(token,requestId(),person);if(epoch.current!==generation)return;
+      const document=await uploadChatDocument(token,created.conversation_id,file);if(epoch.current!==generation)return;
+      await startChatAnalysis(token,created.conversation_id,requestId(),'请分析这份明确标识的合成演示材料，逐条引用依据并区分疑点与已确认事实。',[document.document_id]);
+      if(epoch.current!==generation)return;setConversations(await listConversations(token));await openConversation(created.conversation_id,token,'overview');
+    }catch(e){if(epoch.current===generation)setError(errorText(e));}finally{busyRef.current=false;setBusy(false);}
   };
 
   const showEvidence = async(id:string) => {
@@ -440,7 +461,7 @@ export default function App() {
     ++epoch.current;active.current='';sessionStorage.removeItem('zhongan_chat_token');
     sessionStorage.removeItem('zhongan_account_name');
     setToken('');setConnected(false);setConversations([]);setSnapshot(null);
-    setOlder([]);setAttachments([]);setEvidence(null);setError('');setHistoryOpen(false);pendingSend.current=null;
+    setOlder([]);setAttachments([]);setPhotoReview(null);setEvidence(null);setError('');setHistoryOpen(false);pendingSend.current=null;
     setSubjects([]);setSubject('');setCaseInput('');setInput('');localStorage.removeItem('zhongan_last_conversation');
     ++memberEpoch.current;setClaimSubject('');setClaimDirty(false);setMembers([]);setViewSubject('');setMemberPicker(undefined);setRecordCase(undefined);
     if(memberCacheKey.current)localStorage.removeItem(memberCacheKey.current);memberCacheKey.current='';
@@ -474,7 +495,7 @@ export default function App() {
       <button className="quiet-button" disabled={working} onClick={()=>void signOut()}>退出登录</button>
     </aside>;
 
-  return <div className={`chat-shell ${panel==='chat'?'chat-view':''}`}>
+  return <SourceToken.Provider value={token}><div className={`chat-shell ${panel==='chat'?'chat-view':''}`}>
     {connected && panel==='chat' && (mobileHistory ? historyOpen && <dialog id="history-dialog" ref={historyDialog} className="history-drawer" aria-label="历史对话"
       onKeyDown={e=>{if(e.key!=='Tab')return;const buttons=Array.from(e.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)'));const first=buttons[0],last=buttons.at(-1);if(e.shiftKey&&document.activeElement===first){e.preventDefault();last?.focus();}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first?.focus();}}}
       onCancel={e=>{e.preventDefault();setHistoryOpen(false);}} onClick={e=>{if(e.target===e.currentTarget)setHistoryOpen(false);}}>{historyPanel}</dialog> : historyPanel)}
@@ -484,7 +505,7 @@ export default function App() {
         <div className="nuan-header-identity"><strong>暖暖</strong><span>你的就医关怀助手</span></div>
         {snapshot && (publishedCare(snapshot.report) || narrative) && <button className="chat-guide-entry" onClick={()=>narrative?openNarrative():openReport()}>{narrative?'材料解读':'关怀指引'}</button>}
       </div>}
-      {connected && !needsProfile && ['chat','report'].includes(panel) && snapshot && <div className="member-identity">当前对话所属：{members.find(member=>member.subject_id===snapshot.conversation.subject_id)?.name||'当前人员'}</div>}
+      {connected && !needsProfile && ['chat','report','overview'].includes(panel) && snapshot && <div className="member-identity">当前对话所属：{members.find(member=>member.subject_id===snapshot.conversation.subject_id)?.name||'当前人员'}</div>}
       {delivery && snapshot?.report.report_id===delivery.report_id && <div className="analysis-status care-notice" role="status">{delivery.message}
         {delivery.receipt_state==='read' ? <span>已查看</span> : <button onClick={()=>openReport()}>查看指引</button>}</div>}
       {error && <div role="alert" className="chat-error persistent-error">{error}<button aria-label="关闭提示" onClick={()=>setError('')}>×</button></div>}
@@ -502,6 +523,7 @@ export default function App() {
       : panel==='records' && viewMember ? <PersonalRecords key={viewMember.subject_id} token={token} member={viewMember} selected={recordCase} onSelect={setRecordCase}
           currentCase={snapshot?.conversation.case_id} busy={working} onOpen={id=>void openConversation(id,token,'chat')}
           onNew={()=>requestBusiness('claim',viewMember.subject_id)} onAccount={()=>setPanel('account')}/>
+      : panel==='demo' ? <DemoShowcase token={token} busy={working} canRun={subjects.some(s=>s.subject_id===viewMember?.subject_id)} onRun={file=>void runDemo(file)} onBack={()=>setPanel('home')}/>
       : panel==='home' ? <DemoHome snapshot={snapshot} onChat={()=>snapshot?setPanel('chat'):requestBusiness('chat')} onReport={openReport} onClaim={()=>requestBusiness('claim')}/>
       : !snapshot ? <main className="original-chat-start"><OriginalChatWelcome/><div className="nuan-message"><span className="nuan-avatar" aria-hidden="true">✦</span><div className="nuan-message-body"><p>你好，我是暖暖。你现在有什么想说的，我愿意听。想聊聊身体上的不舒服、心里的牵挂，或一起看看材料，都可以按你的节奏来。</p></div></div>
         <button className="claim-entry-link" onClick={()=>requestBusiness('claim')}>整理理赔资料，开启专属关怀</button>
@@ -509,6 +531,7 @@ export default function App() {
           {members.map(member=><option key={member.subject_id} value={member.subject_id}>{member.name}{subjects.some(item=>item.subject_id===member.subject_id)?'':'（待授权）'}</option>)}</select></label>
           <button disabled={busy || !subjects.some(item=>item.subject_id===subject)} onClick={()=>void newChat()}>{busy?'正在打开…':'开始新的对话'}</button>
           {subject&&!subjects.some(item=>item.subject_id===subject)&&<><small>请先确认该人员的关怀资料授权。</small><button onClick={()=>setConsentMember(subject)}>确认资料用途</button></>}</div></main>
+      : panel==='overview' ? <EncounterOverview key={`${snapshot.conversation.case_id}:${snapshot.analysis.run_id}`} token={token} snapshot={snapshot} person={members.find(m=>m.subject_id===snapshot.conversation.subject_id)?.name||'当前人员'} onEvidence={id=>void showEvidence(id)} onAsk={text=>{setInput(text);setPanel('chat');}} onUpload={()=>{setPanel('chat');setInput('我需要补充本次就医材料。');}} onReplace={(documentId,file)=>setPhotoReview({files:[file],conversationId:snapshot.conversation.conversation_id,replaceId:documentId})} onReport={openReport} onRefresh={()=>{setPanel('chat');void startMaterialAnalysis([], '请重新分析本次材料，并为每条结论标明准确来源。',true);}}/>
       : panel==='report' ? <main className="chat-report"><h1>本次关怀指引</h1>
           {publishedCare(snapshot.report) ? <><p className="care-report-version">第 {snapshot.report.report_version} 版 · 已审核发布</p>
             <CareReport report={snapshot.report} initialSection={reportFocus} onEvidence={id=>void showEvidence(id)}/>
@@ -529,13 +552,13 @@ export default function App() {
             {t.input_kind==='analysis_ready' ? <p className="analysis-continuation">材料已整理 · 暖暖为你解读</p> : <div className="message-row user"><div className="message-bubble"><p>{t.question}</p>
             {t.attachments.map(a=><span className="attachment" key={a.document_id}>▤ {a.name}</span>)}</div></div>}
             <div className="message-row assistant"><span className="nuan-avatar" aria-hidden="true">✦</span><div className={`message-bubble ${t.input_kind==='analysis_ready'?'narrative-bubble':''}`}><div className="nuan-reply-label"><DemoIcon name="leaf"/>暖暖{t.input_kind==='analysis_ready' && <span>· 材料解读</span>}</div>{t.input_kind!=='analysis_ready' && <ToolActivity events={t.tool_events}/>}
-              {t.answer ? <>{t.input_kind==='analysis_ready'?<AnalysisNarrative turn={t} onEvidence={id=>void showEvidence(id)}/>:<><p><Emphasis text={t.answer.text}/></p><div className="citation-group">{t.answer.evidence_refs.map(id=><button className="citation" key={id} onClick={()=>void showEvidence(id)}>查看原始依据</button>)}</div></>}
-                {t.input_kind!=='analysis_ready' && <KnowledgeSources sources={t.answer.knowledge_sources}/>}
+              {t.answer ? <>{t.input_kind==='analysis_ready'?<AnalysisNarrative turn={t} onEvidence={id=>void showEvidence(id)}/>:<><p><CitedText text={t.answer.text} citations={t.answer.citations} sources={t.answer.knowledge_sources} onEvidence={id=>void showEvidence(id)}/></p></>}
+
                 {t.answer.history_refs.length>0 && <small className="history-reference">参考了 {t.answer.history_refs.length} 条你允许回忆的历史记录</small>}</>
                 : t.status==='failed' ? <><p>这次回答没有完成，你的消息已保存。</p><button disabled={working} onClick={()=>void send(t)}>重试这条消息</button></>
                 : <p role="status">{t.input_kind==='analysis_ready'?'材料已经整理好，暖暖正在结合你的资料写解读…':'暖暖正在认真看你说的话…'}</p>}
             </div></div></div>)}
-        </div><div ref={bottom}/></main>
+        </div>{narrative&&<button className="overview-entry" onClick={()=>setPanel('overview')}>查看本次资料详情<DemoIcon name="arrow"/></button>}<div ref={bottom}/></main>
         <footer className="chat-footer">
           <div className="upload-list">{attachments.map(a=><span className="attachment" key={a.document_id}>▤ {a.name} · 已上传</span>)}</div>
           {showClaimGuide && <div className="nuan-quick-actions">{[['summary','看病经过'],['cost','费用解读'],['action','下一步安排']].map(([id,label])=><button key={id} onClick={()=>{const target=document.getElementById('chat-topic-'+id);if(target?.tagName==='DETAILS')target.setAttribute('open','');target?.scrollIntoView({behavior:'smooth',block:'start'});}}><DemoIcon name={id==='summary'?'file':id==='cost'?'chat':'leaf'}/>{label}</button>)}</div>}<form className="composer" onSubmit={submit}>
@@ -554,7 +577,7 @@ export default function App() {
           </form>
         </footer></>}
       </PageBoundary>
-      {connected && snapshot && <AnalysisFlow open={analysisOpen && ['chat','report'].includes(panel)} snapshot={analysisSubmitting || uploadProgress?null:snapshot} upload={uploadProgress} submitting={analysisSubmitting} error={analysisError} onClose={()=>setAnalysisOpen(false)} onReport={openNarrative} onRetry={()=>{if(material?.status==='available' && snapshot.analysis.run_id)void completeNarrative(active.current,epoch.current,snapshot.analysis.run_id);else void startMaterialAnalysis();}}/>}
+      {connected && snapshot && <AnalysisFlow open={analysisOpen && ['chat','report','overview'].includes(panel)} snapshot={analysisSubmitting || uploadProgress?null:snapshot} upload={uploadProgress} submitting={analysisSubmitting} error={analysisError} onClose={()=>setAnalysisOpen(false)} onReport={openNarrative} onRetry={()=>{if(material?.status==='available' && snapshot.analysis.run_id)void completeNarrative(active.current,epoch.current,snapshot.analysis.run_id);else void startMaterialAnalysis();}}/>}
       {connected && !needsProfile && panel!=='claim' && <nav className="care-navigation" aria-label="关怀页面"><button aria-current={panel==='home'?'page':undefined} onClick={()=>setPanel('home')}><DemoIcon name="leaf"/>首页</button>
         <button aria-current={panel==='chat'?'page':undefined} onClick={()=>snapshot?setPanel('chat'):requestBusiness('chat')}><DemoIcon name="chat"/>问暖暖</button>
         <button aria-current={['account','records'].includes(panel)?'page':undefined} onClick={()=>setPanel('account')}><DemoIcon name="user"/>我的</button>
@@ -562,6 +585,7 @@ export default function App() {
     </section>
     {connected && consentMember && members.find(m=>m.subject_id===consentMember) && <MemberConsentDialog key={consentMember} token={token} member={members.find(m=>m.subject_id===consentMember)!} onClose={()=>setConsentMember(undefined)} onChanged={refreshAccess}/>}
     {connected && !needsProfile && memberPicker && <MemberPicker members={members} title={memberPicker==='claim'?'选择就医资料所属人员':'选择对话所属人员'} onSelect={chooseBusinessMember} onClose={()=>setMemberPicker(undefined)}/>}
-    {evidence && <EvidencePanel evidence={evidence} onClose={()=>setEvidence(null)}/>}
-  </div>;
+    {photoReview&&snapshot&&photoReview.conversationId===snapshot.conversation.conversation_id&&<PhotoReview key={photoReview.conversationId} token={token} subjectId={snapshot.conversation.subject_id} files={photoReview.files} onCancel={()=>setPhotoReview(null)} onContinue={files=>{const replaceId=photoReview.replaceId;setPhotoReview(null);setPanel('chat');void uploadAccepted(files,replaceId);}}/>}
+    {evidence && <EvidencePanel token={token} evidence={evidence} onClose={()=>setEvidence(null)}/>}
+  </div></SourceToken.Provider>;
 }
