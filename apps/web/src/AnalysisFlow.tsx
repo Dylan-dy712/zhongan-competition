@@ -23,11 +23,12 @@ function AnalysisIcon({kind}:{kind:string}) {
 }
 export type UploadProgress={done:number;total:number};
 export function analysisView(snapshot:ChatSnapshot|null,upload?:UploadProgress,submitting=false,error='') {
+  if(!upload && !submitting && currentNarrative(snapshot?.turns || [],snapshot?.analysis.run_id))return {kind:'ready',title:'暖暖的解读已准备好',detail:'解读已出现在对话中，可以接着聊',percent:100,index:6};
   if(error)return {kind:'failed',title:'这次分析没有完成',detail:error,percent:null,index:-1};
   if(upload)return {kind:'upload',title:'正在上传材料',detail:`已上传 ${upload.done} / ${upload.total} 份`,percent:Math.floor(upload.done/upload.total*100),index:-1};
   const material=snapshot?.material_report;
-  if(currentNarrative(snapshot?.turns || [],snapshot?.analysis.run_id))return {kind:'ready',title:'暖暖的解读已准备好',detail:'解读已出现在对话中，可以接着聊',percent:100,index:6};
   if(material?.status==='available')return {kind:'processing',title:'暖暖正在把情况讲清楚',detail:'正在写好解读并核对内容，准备好后会直接显示在对话里',percent:95,index:5};
+  if((snapshot?.analysis.error as {code?:string}|undefined)?.code==='REPORT_MODEL_BALANCE_EXHAUSTED')return {kind:'failed',title:'分析服务暂不可用',detail:'材料已保存，无需重新上传。服务恢复后可以重新分析。',percent:null,index:-1};
   if(material?.status==='failed' || snapshot?.analysis.status==='failed')return {kind:'failed',title:'报告生成没有完成',detail:'材料已保存，可以重新分析。',percent:null,index:-1};
   if(snapshot?.analysis.status==='cancelled')return {kind:'failed',title:'这次分析已取消',detail:'材料已保存，可以重新分析。',percent:null,index:-1};
   const status=snapshot?.analysis.status;
