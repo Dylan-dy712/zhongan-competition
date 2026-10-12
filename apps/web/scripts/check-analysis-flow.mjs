@@ -15,7 +15,7 @@ const realTimeout=globalThis.setTimeout;
 globalThis.setTimeout=(fn,ms,...args)=>realTimeout(fn,ms>=1500?20:ms,...args);
 const conversation={conversation_id:'analysis-ui',subject_id:'synthetic',case_id:'case-ui',title:'合成分析流程',recall_enabled:false,updated_at:'2026-10-08T00:00:00Z'};
 let phase='initial',run='run-1',uploads=0,submissions=[],turns=[],resolveSecond,resolveNarrative;
-let delayNarrative=false,failNarrative=false,continuations=0;
+let delayNarrative=false,failNarrative=false,continuations=0,polls=0;
 const section={section_type:'cost_explanation',pending_count:1,items:[{text:'医疗总费用：120元',kind:'checked',evidence_refs:['00000000-0000-4000-8000-000000000002']}]};
 const state=()=>({conversation,turns,analysis:{status:phase==='initial'?'not_started':phase==='ready'?'waiting_review':phase==='failed'?'failed':phase==='queued'?'queued':'running',run_id:phase==='initial'?undefined:run,stage:phase==='ready'?'validate':phase},
   report:{status:'not_released'},material_report:{status:phase==='ready'?'available':phase==='failed'?'failed':phase,run_id:run,report_id:'material-ui',document_count:2,source_report_version:1,pending_count:1,notice:'合成自动核对提示',sections:[section]}});
@@ -41,7 +41,7 @@ globalThis.fetch=async(url,options={})=>{
  }
  if(path==='/v1/evidence/00000000-0000-4000-8000-000000000002')return Response.json({evidence_id:'00000000-0000-4000-8000-000000000002',document_version:1,page_index:0,text_span:{text:'医疗总费用：120元'}});
  if(path.endsWith('/messages'))return Response.json({turn_id:'follow-ui'});
- if(path==='/v1/conversations/analysis-ui')return Response.json(state());
+ if(path==='/v1/conversations/analysis-ui'){polls++;return Response.json(state());}
  throw Error('Unexpected fixture request '+path);
 };
 sessionStorage.setItem('zhongan_chat_token','synthetic-test-only');
@@ -51,13 +51,13 @@ const click=async(text)=>{const node=[...document.querySelectorAll('button')].fi
 try{
  await act(async()=>root.render(React.createElement(modules.App)));await flush();
  const input=document.querySelector('[aria-label="选择文档文件"]');
- Object.defineProperty(input,'files',{value:[new File(['one'],'one.txt',{type:'text/plain'}),new File(['two'],'two.txt',{type:'text/plain'})]});
+ Object.defineProperty(input,'files',{value:Array.from({length:25},(_,i)=>new File(['synthetic'],`${i+1}.txt`,{type:'text/plain'}))});
  await act(async()=>input.dispatchEvent(new dom.window.Event('change',{bubbles:true})));await flush();
  assert.equal(document.querySelector('.chat-workspace > dialog.analysis-dialog').open,true);
- assert.equal(document.querySelector('.chat-workspace > dialog.analysis-dialog progress').value,50,'Only acknowledged uploads count');
+ assert.equal(document.querySelector('.chat-workspace > dialog.analysis-dialog progress').value,4,'Only acknowledged uploads count');
  assert.equal(submissions.length,0,'Analysis waits for all selected uploads');
  await act(async()=>resolveSecond());await flush();assert.equal(submissions.length,1);
- assert.deepEqual(submissions[0].document_ids,['doc-1','doc-2']);
+ assert.deepEqual(submissions[0].document_ids,Array.from({length:25},(_,i)=>'doc-'+(i+1)));
  assert.equal(document.querySelector('.chat-workspace > dialog.analysis-dialog progress').value,0);
  for(const [next,percent] of [['extract',20],['insights',40],['guidance',60],['validate',80]]){
   phase=next;await flush();const displayed=document.querySelector('.chat-workspace > dialog.analysis-dialog progress').value;
@@ -65,6 +65,7 @@ try{
   assert.match(document.querySelector('.chat-workspace > dialog.analysis-dialog').textContent,/预估进度/);
  }
  await click('收起进度，稍后查看');assert.equal(document.querySelector('.chat-workspace > dialog.analysis-dialog').open,false);
+ const pollsBeforeNarrative=polls;
  delayNarrative=true;phase='ready';await flush();await flush();
  await act(async()=>document.querySelector('.analysis-card').click());await flush();
  const waiting=document.querySelector('.chat-workspace > dialog.analysis-dialog');
@@ -72,6 +73,7 @@ try{
  assert.ok(waiting.querySelector('progress').value>=95 && waiting.querySelector('progress').value<100,'Narrative generation remains below 100%');
  assert.match(waiting.textContent,/写好解读|把情况讲清楚/);
  assert.equal(document.querySelector('.analysis-narrative'),null);
+ assert.ok(polls>pollsBeforeNarrative+1,'Progress polling continues while the narrative request waits');
  delayNarrative=false;await act(async()=>resolveNarrative());await flush();await flush();
  assert.equal(waiting.querySelector('progress').value,100,'100% requires the actual completed narrative');
  assert.equal(waiting.open,false,'Report arrival closes progress and immediately shows the text');
@@ -102,6 +104,18 @@ try{
  assert.equal(continuations,beforeRetry+1,'Narrative failure can be retried explicitly');
  assert.equal(document.querySelector('.chat-workspace > dialog.analysis-dialog progress').value,100);
  assert.equal(window.location.hash,'#/chat');assert.ok(document.querySelector('.analysis-narrative'));
+ // A failed HTTP request may finish successfully on the server later.
+ const savedNarrative=turns.find(t=>t.input_kind==='analysis_ready');
+ turns=turns.filter(t=>t.input_kind!=='analysis_ready');phase='failed';await flush();
+ await act(async()=>document.querySelector('.analysis-card').click());await flush();
+ await click('重新分析材料');failNarrative=true;phase='ready';await flush();await flush();
+ assert.match(document.querySelector('.chat-workspace > dialog.analysis-dialog').textContent,/解读暂时没能完成/);
+ const callsBeforeRecovery=continuations;
+ turns.push({...savedNarrative,answer:{...savedNarrative.answer,analysis_run_id:run}});await flush();await flush();
+ assert.equal(continuations,callsBeforeRecovery,'A saved narrative is recovered without another model call');
+ assert.ok(document.querySelector('.analysis-narrative'),'Late completion replaces the failure card with the saved report');
+ assert.equal(modules.analysisView(state(),undefined,false,'旧的接口错误').kind,'ready');
+ assert.equal(document.querySelector('.chat-workspace > dialog.analysis-dialog').open,false);
  console.log('PASS: uploads, real stages, conversational AI report, adaptive paragraphs, inline source links, legacy route redirect, failure retry and completion. Synthetic fixtures only.');
 }finally{await act(async()=>root.unmount());await modules.close();dom.window.close();globalThis.setTimeout=realTimeout;}
 

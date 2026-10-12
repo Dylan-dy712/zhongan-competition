@@ -155,6 +155,7 @@ export default function App() {
     }
     if (epoch.current === generation && active.current === id) {
       setSnapshot(state);
+      if(currentNarrative(state.turns,state.analysis.run_id))setAnalysisError('');
       setHasOlder(state.turns.length === 50 && !olderExhausted.current);
     }
     return state;
@@ -337,9 +338,19 @@ export default function App() {
   };
 
   const completeNarrative=useCallback(async(id:string,generation:number,runId:string)=>{
+    if(busyRef.current)return;
     busyRef.current=true;setBusy(true);setAnalysisError('');
     try {await continueAnalysis(token,id,runId);await refresh(id,token,generation);}
-    catch(e){if(epoch.current===generation){setError(errorText(e));setAnalysisError('解读暂时没能完成，你的材料已保存，可以重试。');}}
+    catch(e){
+      // A transport error or another tab's request is not a persisted failure.
+      let recovered:ChatSnapshot|undefined;
+      try{recovered=await refresh(id,token,generation);}catch{/* Keep the original request error. */}
+      if(epoch.current===generation){
+        if(recovered && (currentNarrative(recovered.turns,runId) || recovered.turns.some(t=>t.input_kind==='analysis_ready' && t.status==='running'))){
+          setError('');setAnalysisError('');
+        }else{setError(errorText(e));setAnalysisError('解读暂时没能完成，你的材料已保存，可以重试。');}
+      }
+    }
     finally{if(epoch.current===generation){busyRef.current=false;setBusy(false);}}
   },[token,refresh]);
 
@@ -359,7 +370,7 @@ export default function App() {
         const key=`${id}:${run.run_id}`;
         if(shouldContinue && !busyRef.current && !uploadingRef.current && !state.turns.some(t=>t.status==='running') && !resumed.current.has(key)) {
           resumed.current.add(key);
-          await completeNarrative(id,generation,run.run_id!);
+          void completeNarrative(id,generation,run.run_id!);
         }
       } catch(e) {if(!stopped && epoch.current===generation)setError(errorText(e));}
       if(!stopped)timer=setTimeout(tick,3500);

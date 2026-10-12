@@ -33,6 +33,23 @@ class FrontendKrContracts(unittest.TestCase):
         self.assertEqual(result['status'],'warning')
         self.assertIn('部分文字',result['issues'][-1])
 
+    def test_readable_text_with_large_white_margin_is_not_called_blurry(self):
+        image=Image.new('RGB',(1200,1600),'white')
+        out=io.BytesIO();image.save(out,format='PNG')
+        text='医疗发票 金额123.00元 就医日期2026年10月12日'
+        factory=lambda:SimpleNamespace(recognize=lambda *args:{'text':text,'blocks':[
+            {'text':text,'metadata':{'confidence_score':.99}}]})
+        result=inspect_photo(out.getvalue(),factory)
+        self.assertEqual(result['status'],'checked')
+        self.assertEqual(result['issues'],[])
+
+    def test_no_ocr_cannot_infer_blur_from_blank_margins(self):
+        image=Image.new('RGB',(1200,1600),'white')
+        out=io.BytesIO();image.save(out,format='PNG')
+        result=inspect_photo(out.getvalue())
+        self.assertEqual(result['status'],'partial')
+        self.assertEqual(result['issues'],[])
+
     def test_ocr_failure_does_not_claim_readable(self):
         result=inspect_photo(self.photo())
         self.assertEqual(result['ocr_status'],'unavailable')
