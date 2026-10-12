@@ -197,6 +197,7 @@ def main():
     parser.add_argument('--limit', type=int)
     parser.add_argument('--workers', type=int, default=4)
     parser.add_argument('--ocr-layout', choices=['plain', 'bbox'], default='plain')
+    parser.add_argument('--vision', action='store_true', help='read original image with OCR as optional context')
     args = parser.parse_args()
     repo = Path(__file__).resolve().parents[1]
     for output in (args.output, args.predictions_dir):
@@ -236,20 +237,28 @@ def main():
                 raise ValueError('runner changed; use a new predictions directory')
             if previous.get('ocr_layout_method') != args.ocr_layout:
                 raise ValueError('OCR layout changed; use a new predictions directory')
+            if previous.get('vision') != args.vision:
+                raise ValueError('vision mode changed; use a new predictions directory')
             if previous.get('status') == 'completed':
                 return previous['status']
         run = {k: row[k] for k in ('document_id', 'image_sha256', 'ocr_sha256')}
         run.update(model_id=provider.model_id, prompt_version=PROMPT_VERSION, code_revision=revision,
-                   extraction_mode='live', ocr_mode='replay', implementation_sha256=implementation_hashes)
+                   extraction_mode='live', ocr_mode='replay', vision=args.vision,
+                   implementation_sha256=implementation_hashes)
         start = time.monotonic()
         try:
             if not row['ocr'] or sha(row['ocr']) != row['ocr_sha256']:
                 raise ValueError('missing or changed OCR source')
             cache = load(row['ocr'])
-            if not cache.get('text', '').strip():
+            if not cache.get('text', '').strip() and not args.vision:
                 raise ValueError('OCR source is empty')
             run['ocr_layout_method'] = args.ocr_layout
-            run['result'] = extract_document(provider, layout_text(cache) if args.ocr_layout == 'bbox' else cache['text'])
+            image_bytes = None
+            if args.vision:
+                if sha(row['image']) != row['image_sha256']:
+                    raise ValueError('image changed after manifest freeze')
+                image_bytes = Path(row['image']).read_bytes()
+            run['result'] = extract_document(provider, layout_text(cache) if args.ocr_layout == 'bbox' else cache['text'], image_bytes)
             run['status'] = 'completed'
         except Exception as exc:
             run.update(status='failed', error_code=type(exc).__name__)
