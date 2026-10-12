@@ -15,7 +15,7 @@ const realTimeout=globalThis.setTimeout;
 globalThis.setTimeout=(fn,ms,...args)=>realTimeout(fn,ms>=1500?20:ms,...args);
 const conversation={conversation_id:'analysis-ui',subject_id:'synthetic',case_id:'case-ui',title:'合成分析流程',recall_enabled:false,updated_at:'2026-10-08T00:00:00Z'};
 let phase='initial',run='run-1',uploads=0,submissions=[],turns=[],resolveSecond,resolveNarrative;
-let delayNarrative=false,failNarrative=false,continuations=0,polls=0;
+let delayNarrative=false,failNarrative=false,continuations=0,polls=0,pollOutage=false;
 const section={section_type:'cost_explanation',pending_count:1,items:[{text:'医疗总费用：120元',kind:'checked',evidence_refs:['00000000-0000-4000-8000-000000000002']}]};
 const state=()=>({conversation,turns,analysis:{status:phase==='initial'?'not_started':phase==='ready'?'waiting_review':phase==='failed'?'failed':phase==='queued'?'queued':'running',run_id:phase==='initial'?undefined:run,stage:phase==='ready'?'validate':phase},
   report:{status:'not_released'},material_report:{status:phase==='ready'?'available':phase==='failed'?'failed':phase,run_id:run,report_id:'material-ui',document_count:2,source_report_version:1,pending_count:1,notice:'合成自动核对提示',sections:[section]}});
@@ -41,7 +41,7 @@ globalThis.fetch=async(url,options={})=>{
  }
  if(path==='/v1/evidence/00000000-0000-4000-8000-000000000002')return Response.json({evidence_id:'00000000-0000-4000-8000-000000000002',document_version:1,page_index:0,text_span:{text:'医疗总费用：120元'}});
  if(path.endsWith('/messages'))return Response.json({turn_id:'follow-ui'});
- if(path==='/v1/conversations/analysis-ui'){polls++;return Response.json(state());}
+ if(path==='/v1/conversations/analysis-ui'){polls++;if(pollOutage)return new Response('Bad gateway',{status:502});return Response.json(state());}
  throw Error('Unexpected fixture request '+path);
 };
 sessionStorage.setItem('zhongan_chat_token','synthetic-test-only');
@@ -116,6 +116,15 @@ try{
  assert.ok(document.querySelector('.analysis-narrative'),'Late completion replaces the failure card with the saved report');
  assert.equal(modules.analysisView(state(),undefined,false,'旧的接口错误').kind,'ready');
  assert.equal(document.querySelector('.chat-workspace > dialog.analysis-dialog').open,false);
+ // Background connection errors disappear after successful recovery, without resubmitting AI work.
+ const modelsBeforeOutage=continuations,analysesBeforeOutage=submissions.length;
+ pollOutage=true;await act(async()=>new Promise(r=>realTimeout(r,900)));
+ assert.match(document.body.textContent,/连接暂时中断，正在自动恢复/);
+ assert.ok(document.querySelector('.analysis-narrative'),'Connection failure preserves the saved report');
+ pollOutage=false;await act(async()=>new Promise(r=>realTimeout(r,900)));
+ assert.doesNotMatch(document.body.textContent,/连接暂时中断，正在自动恢复/);
+ assert.equal(continuations,modelsBeforeOutage);assert.equal(submissions.length,analysesBeforeOutage);
+ assert.doesNotMatch(document.body.textContent,/服务暂时不可用/,'Saved report recovery clears its earlier generation failure');
  console.log('PASS: uploads, real stages, conversational AI report, adaptive paragraphs, inline source links, legacy route redirect, failure retry and completion. Synthetic fixtures only.');
 }finally{await act(async()=>root.unmount());await modules.close();dom.window.close();globalThis.setTimeout=realTimeout;}
 

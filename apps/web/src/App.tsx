@@ -102,6 +102,7 @@ export default function App() {
   const observedAnalysis=useRef('');
   const analysisRequest=useRef<{id:string;message:string;docs:string[]}|null>(null);
   const [error,setError] = useState('');
+  const [pollError,setPollError] = useState('');
   const [evidence,setEvidence] = useState<Evidence|null>(null);
   const evidenceRequest=useRef(0);
   const [panel,setPanel] = useCareNavigation();
@@ -135,7 +136,7 @@ export default function App() {
   const invalidateAccess = useCallback((e:unknown,id:string,generation:number,auth=token) => {
     if(!(e instanceof ApiError) || ![401,403,404].includes(e.status) || epoch.current!==generation || active.current!==id)return false;
     const fresh=++epoch.current;active.current='';busyRef.current=false;
-    setLoadingConversation(false);
+    setLoadingConversation(false);setPollError('');
     setSnapshot(null);setOlder([]);setEvidence(null);setAttachments([]);setPhotoReview(null);setInput('');setDelivery(null);
     setConversations([]);setSubjects([]);setSubject('');setCaseInput('');setFeedbackNotice('');setBusy(false);setUploading(false);
     localStorage.removeItem('zhongan_last_conversation');
@@ -157,6 +158,7 @@ export default function App() {
     }
     if (epoch.current === generation && active.current === id) {
       setSnapshot(state);
+      setPollError('');
       if(currentNarrative(state.turns,state.analysis.run_id))setAnalysisError('');
       setHasOlder(state.turns.length === 50 && !olderExhausted.current);
     }
@@ -169,7 +171,7 @@ export default function App() {
     analysisRequest.current=null;uploadingRef.current=false;
     setClaimGuideConversation(fromClaim ? id : '');
     olderExhausted.current = false;
-    setSnapshot(null); setOlder([]); setAttachments([]);setPhotoReview(null); setInput(''); setEvidence(null); setError('');
+    setSnapshot(null); setOlder([]); setAttachments([]);setPhotoReview(null); setInput(''); setEvidence(null); setError('');setPollError('');
     busyRef.current=false;setBusy(false);setUploading(false);
     setLoadingConversation(true);setHasOlder(false);setDelivery(null);setFeedbackNotice('');
     setPanel(destination);setReportFocus(undefined); setHistoryOpen(false); pendingSend.current = null;
@@ -349,8 +351,8 @@ export default function App() {
       try{recovered=await refresh(id,token,generation);}catch{/* Keep the original request error. */}
       if(epoch.current===generation){
         if(recovered && (currentNarrative(recovered.turns,runId) || recovered.turns.some(t=>t.input_kind==='analysis_ready' && t.status==='running'))){
-          setError('');setAnalysisError('');
-        }else{setError(errorText(e));setAnalysisError('解读暂时没能完成，你的材料已保存，可以重试。');}
+          setAnalysisError('');
+        }else{setAnalysisError('解读暂时没能完成，你的材料已保存，可以重试。'+errorText(e));}
       }
     }
     finally{if(epoch.current===generation){busyRef.current=false;setBusy(false);}}
@@ -374,7 +376,7 @@ export default function App() {
           resumed.current.add(key);
           void completeNarrative(id,generation,run.run_id!);
         }
-      } catch(e) {if(!stopped && epoch.current===generation)setError(errorText(e));}
+      } catch(e) {if(!stopped && epoch.current===generation && active.current===id)setPollError('连接暂时中断，正在自动恢复。已保存的材料和解读不会受影响。');}
       if(!stopped)timer=setTimeout(tick,3500);
     };
     timer=setTimeout(tick,1500);
@@ -474,7 +476,7 @@ export default function App() {
     ++epoch.current;active.current='';sessionStorage.removeItem('zhongan_chat_token');
     sessionStorage.removeItem('zhongan_account_name');
     setToken('');setConnected(false);setConversations([]);setSnapshot(null);
-    setOlder([]);setAttachments([]);setPhotoReview(null);setEvidence(null);setError('');setHistoryOpen(false);pendingSend.current=null;
+    setOlder([]);setAttachments([]);setPhotoReview(null);setEvidence(null);setError('');setPollError('');setHistoryOpen(false);pendingSend.current=null;
     setSubjects([]);setSubject('');setCaseInput('');setInput('');localStorage.removeItem('zhongan_last_conversation');
     ++memberEpoch.current;setClaimSubject('');setClaimDirty(false);setMembers([]);setViewSubject('');setMemberPicker(undefined);setRecordCase(undefined);
     if(memberCacheKey.current)localStorage.removeItem(memberCacheKey.current);memberCacheKey.current='';
@@ -522,7 +524,7 @@ export default function App() {
       {connected && !needsProfile && ['chat','report','overview'].includes(panel) && snapshot && <div className="member-identity">当前对话所属：{members.find(member=>member.subject_id===snapshot.conversation.subject_id)?.name||'当前人员'}</div>}
       {delivery && snapshot?.report.report_id===delivery.report_id && <div className="analysis-status care-notice" role="status">{delivery.message}
         {delivery.receipt_state==='read' ? <span>已查看</span> : <button onClick={()=>openReport()}>查看指引</button>}</div>}
-      {error && <div role="alert" className="chat-error persistent-error">{error}<button aria-label="关闭提示" onClick={()=>setError('')}>×</button></div>}
+      {(error || pollError) && <div role="alert" className="chat-error persistent-error">{error || pollError}<button aria-label="关闭提示" onClick={()=>{setError('');setPollError('');}}>×</button></div>}
       <PageBoundary resetKey={`${panel}:${snapshot?.conversation.conversation_id || ''}`}>
       {connected && !needsProfile && claimSubject && <div className="claim-panel" hidden={panel!=='claim'}><ClaimIntake key={`${token}:${claimSubject}`} token={token} onDirty={setClaimDirty} subject={subjects.some(item=>item.subject_id===claimSubject)?claimSubject:''} visible={panel==='claim'} onExit={()=>setPanel('home')} onAuthorize={()=>setConsentMember(claimSubject)} onOpen={async (id,report=false)=>{
           const generation=epoch.current;const items=await listConversations(token);
