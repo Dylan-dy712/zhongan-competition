@@ -4,7 +4,7 @@ import tempfile
 import unittest
 
 from pydantic import ValidationError
-from services.api.app.document_fields import DocumentPrediction, parse_prediction
+from services.api.app.document_fields import DocumentPrediction, original_quote, parse_prediction
 from scripts.preliminary_kr1 import atoms, layout_text, mapping, normalize, repair_name, score, write
 
 
@@ -56,6 +56,8 @@ class PreliminaryKR1Tests(unittest.TestCase):
             self.assertFalse(result['five_core_categories_fully_annotated'])
 
     def test_field_confidence_and_evidence_required(self):
+        self.assertEqual(original_quote('诊断：\n肺炎（疑似）', '诊断:肺炎(疑似)'), '诊断：\n肺炎（疑似）')
+        self.assertIsNone(original_quote('诊断：肺炎（疑似）', '诊断：肺癌'))
         with self.assertRaises(ValidationError):
             DocumentPrediction(fields={'diagnosis': ['肺炎']})
         self.assertEqual(DocumentPrediction(fields={'diagnosis': ['肺炎']}, confidence={'diagnosis': .8},
