@@ -7,12 +7,13 @@ const diseaseNames:Record<string,string>={FY:'肺炎',FX:'骨折',TN:'糖尿病'
 const needs=[['cost_level','费用水平'],['self_paid_burden','自付负担'],['medication_conformity','用药规范记录'],['treatment_conformity','治疗规范记录'],['guidance_completeness','出院指引完整度'],['readmission_rate','非计划再入院率'],['patient_feedback','患者反馈']];
 export function metricValue(metric:ProfileMetric){if(metric.value===null)return '暂无数据';return metric.metric_name==='cost_level'?`${metric.value.toFixed(2)} 倍同组中位数`:metric.unit==='1-5'?`${metric.value.toFixed(1)} / 5`:`${(metric.value*100).toFixed(1)}%`;}
 export function CareRecommendations({token,initialDisease='',demo=false}:{token:string;initialDisease?:string;demo?:boolean}){
+ const [noProfiles,setNoProfiles]=useState(false);
  const [snapshot,setSnapshot]=useState<QualitySnapshot|null>(null),[error,setError]=useState(''),[loading,setLoading]=useState(true),[retry,setRetry]=useState(0);
  const [group,setGroup]=useState(''),[picked,setPicked]=useState<string[]>(['cost_level','guidance_completeness']),[result,setResult]=useState<RecommendationResponse|null>(null),[busy,setBusy]=useState(false),[compare,setCompare]=useState<string[]>([]);
  const revision=useRef(0);
- useEffect(()=>{let active=true;++revision.current;setSnapshot(null);setResult(null);setCompare([]);setLoading(true);setError('');
-  void (async()=>{try{const value=demo?await getDemoQuality(token):await (async()=>{const items=await listQualitySnapshots(token);if(!items.length)throw new Error('尚未生成机构画像快照。可在演示入口查看明确标识的合成示例。');return getQualitySnapshot(token,items[0].snapshot_id);})();
-   if(active){setSnapshot(value);setGroup(demo&&value.profiles[0]?JSON.stringify(value.profiles[0].cohort_filters):'');}
+ useEffect(()=>{let active=true;++revision.current;setSnapshot(null);setResult(null);setCompare([]);setLoading(true);setError('');setNoProfiles(false);
+  void (async()=>{try{const value=demo?await getDemoQuality(token):await (async()=>{const items=await listQualitySnapshots(token);if(!items.length)return null;return getQualitySnapshot(token,items[0].snapshot_id);})();
+   if(active){setSnapshot(value);setNoProfiles(!value||!value.profiles.length);setGroup(demo&&value?.profiles[0]?JSON.stringify(value.profiles[0].cohort_filters):'');}
   }catch(e){if(active)setError(e instanceof Error?e.message:'画像暂不可用');}finally{if(active)setLoading(false);}})();return()=>{active=false;++revision.current;};
  },[token,demo,retry,initialDisease]);
  const change=()=>{++revision.current;setResult(null);setCompare([]);setBusy(false);setError('');};
@@ -48,6 +49,7 @@ export function CareRecommendations({token,initialDisease='',demo=false}:{token:
    {group&&!profiles.length&&<p>该分组暂无机构画像。</p>}
    {selected.length>0&&<section className="profile-comparison"><h3>机构对比（{selected.length}/3）</h3>{needs.map(([name,label])=><div key={name}><h4>{label}</h4>{selected.map(profile=>{const metric=profile.metrics.find(m=>m.metric_name===name);return <p key={profile.entity_id}><span>{profile.display_name}</span><strong>{metric?metricValue(metric):'暂无数据'}</strong></p>;})}</div>)}</section>}
   </>}
+  {!loading&&noProfiles&&<section className="overview-note"><h3>当前没有可用于机构比较的数据</h3><p>本次材料不能证明医院之间的品质差异，因此暂不生成机构排名或推荐名单。已有的就诊提醒与参考资料可在上方查看。</p></section>}
   {error&&<div role="alert"><p>{error}</p><button onClick={()=>setRetry(n=>n+1)}>重新加载画像</button></div>}
  </section>;
 }
