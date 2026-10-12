@@ -23,6 +23,7 @@ import OriginalChatGuide,{OriginalChatWelcome} from './OriginalChatGuide';
 import {prepareChatFiles} from './chatFiles';
 import PhotoReview from './PhotoReview';
 import EncounterOverview from './EncounterOverview';
+import {overviewTabs,type OverviewTab} from './encounterPresentation';
 import DemoShowcase from './DemoShowcase';
 import {SourceToken,CitedText} from './SourceCitations';
 import './chat.css';
@@ -97,6 +98,7 @@ export default function App() {
   const [uploadProgress,setUploadProgress]=useState<UploadProgress>();
   const [analysisSubmitting,setAnalysisSubmitting]=useState(false);
   const [analysisError,setAnalysisError]=useState('');
+  const [overviewTab,setOverviewTab]=useState<OverviewTab>('facts');
   const observedAnalysis=useRef('');
   const analysisRequest=useRef<{id:string;message:string;docs:string[]}|null>(null);
   const [error,setError] = useState('');
@@ -495,6 +497,7 @@ export default function App() {
   const openReport=(section?:ReportSection['section_type'])=>{
     if(!snapshot || !publishedCare(snapshot.report)){openNarrative();return;}
     setAnalysisOpen(false);setReportFocus(section);setPanel('report');};
+  const openOverview=(tab:OverviewTab='facts')=>{setOverviewTab(tab);setPanel('overview');};
   const material=snapshot?.material_report;
   const progressView=analysisView(snapshot,uploadProgress,analysisSubmitting,analysisError);
   const historyPanel=<aside className="chat-sidebar" aria-label="历史对话列表">
@@ -535,14 +538,14 @@ export default function App() {
           currentCase={snapshot?.conversation.case_id} busy={working} onOpen={id=>void openConversation(id,token,'chat')}
           onNew={()=>requestBusiness('claim',viewMember.subject_id)} onAccount={()=>setPanel('account')}/>
       : panel==='demo' ? <DemoShowcase token={token} busy={working} canRun={subjects.some(s=>s.subject_id===viewMember?.subject_id)} onRun={file=>void runDemo(file)} onBack={()=>setPanel('home')}/>
-      : panel==='home' ? <DemoHome snapshot={snapshot} onChat={()=>snapshot?setPanel('chat'):requestBusiness('chat')} onReport={openReport} onClaim={()=>requestBusiness('claim')}/>
+      : panel==='home' ? <DemoHome snapshot={snapshot} onOverview={openOverview} onChat={()=>snapshot?setPanel('chat'):requestBusiness('chat')} onReport={openReport} onClaim={()=>requestBusiness('claim')}/>
       : !snapshot ? <main className="original-chat-start"><OriginalChatWelcome/><div className="nuan-message"><span className="nuan-avatar" aria-hidden="true">✦</span><div className="nuan-message-body"><p>你好，我是暖暖。你现在有什么想说的，我愿意听。想聊聊身体上的不舒服、心里的牵挂，或一起看看材料，都可以按你的节奏来。</p></div></div>
         <button className="claim-entry-link" onClick={()=>requestBusiness('claim')}>整理理赔资料，开启专属关怀</button>
         <div className="connect-form member-start-card"><label>关怀对象<select value={subject} onChange={e=>setSubject(e.target.value)}><option value="">请选择人员</option>
           {members.map(member=><option key={member.subject_id} value={member.subject_id}>{member.name}{subjects.some(item=>item.subject_id===member.subject_id)?'':'（待授权）'}</option>)}</select></label>
           <button disabled={busy || !subjects.some(item=>item.subject_id===subject)} onClick={()=>void newChat()}>{busy?'正在打开…':'开始新的对话'}</button>
           {subject&&!subjects.some(item=>item.subject_id===subject)&&<><small>请先确认该人员的关怀资料授权。</small><button onClick={()=>setConsentMember(subject)}>确认资料用途</button></>}</div></main>
-      : panel==='overview' ? <EncounterOverview key={`${snapshot.conversation.case_id}:${snapshot.analysis.run_id}`} token={token} snapshot={snapshot} person={members.find(m=>m.subject_id===snapshot.conversation.subject_id)?.name||'当前人员'} onEvidence={id=>void showEvidence(id)} onAsk={text=>{setInput(text);setPanel('chat');}} onUpload={()=>{setPanel('chat');setInput('我需要补充本次就医材料。');}} onReplace={(documentId,file)=>setPhotoReview({files:[file],conversationId:snapshot.conversation.conversation_id,replaceId:documentId})} onReport={openReport} onRefresh={()=>{setPanel('chat');void startMaterialAnalysis([], '请重新分析本次材料，并为每条结论标明准确来源。',true);}}/>
+      : panel==='overview' ? <EncounterOverview key={`${snapshot.conversation.case_id}:${snapshot.analysis.run_id}:${overviewTab}`} initialTab={overviewTab} onBack={openNarrative} token={token} snapshot={snapshot} person={members.find(m=>m.subject_id===snapshot.conversation.subject_id)?.name||'当前人员'} onEvidence={id=>void showEvidence(id)} onAsk={text=>{setInput(text);setPanel('chat');}} onUpload={()=>{setPanel('chat');setInput('我需要补充本次就医材料。');}} onReplace={(documentId,file)=>setPhotoReview({files:[file],conversationId:snapshot.conversation.conversation_id,replaceId:documentId})} onReport={openReport} onRefresh={()=>{setPanel('chat');void startMaterialAnalysis([], '请重新分析本次材料，并为每条结论标明准确来源。',true);}}/>
       : panel==='report' ? <main className="chat-report"><h1>本次关怀指引</h1>
           {publishedCare(snapshot.report) ? <><p className="care-report-version">第 {snapshot.report.report_version} 版 · 已审核发布</p>
             <CareReport report={snapshot.report} initialSection={reportFocus} onEvidence={id=>void showEvidence(id)}/>
@@ -554,7 +557,7 @@ export default function App() {
               {feedbackNotice && <p role="status">{feedbackNotice}</p>}</div>}</>
           : <div className="empty-report"><p>暖暖会在对话里结合材料为你解释。</p>
             <button onClick={()=>setPanel('chat')}>回到对话</button></div>}</main>
-      : <><main className="chat-scroll inline-report-thread">{showClaimGuide ? <OriginalChatGuide snapshot={snapshot} onEvidence={id=>void showEvidence(id)}/> : <OriginalChatWelcome/>}
+      : <>{(narrative||material?.status==='available')&&<nav className="chat-analysis-nav" aria-label="本次分析内容"><div><strong>本次分析</strong><small>摘要、提醒与后续安排</small></div><div>{overviewTabs.map(([key,label])=><button key={key} onClick={()=>openOverview(key)}>{label}<DemoIcon name="arrow"/></button>)}</div></nav>}<main className="chat-scroll inline-report-thread">{showClaimGuide ? <OriginalChatGuide snapshot={snapshot} onEvidence={id=>void showEvidence(id)}/> : <OriginalChatWelcome/>}
         {(snapshot.analysis.run_id || analysisSubmitting || uploadProgress || analysisError) && !narrative && <button className="analysis-card" onClick={()=>setAnalysisOpen(true)}><span className="analysis-card-icon" aria-hidden="true">✦</span><span className="analysis-card-copy"><strong>{progressView.title}</strong><small>{`${progressView.detail}${progressView.percent!==null?` · ${progressView.percent}%`:''}`}</small></span><span className="analysis-card-arrow" aria-hidden="true">›</span></button>}
         {hasOlder && turns.length>0 && <button className="load-history" onClick={()=>void loadOlder()}>查看更早的聊天</button>}
         <div className="nuan-chat-heading"><span><DemoIcon name="chat"/>和暖暖聊聊</span><small>有疑问，接着问</small></div>
@@ -569,7 +572,7 @@ export default function App() {
                 : t.status==='failed' ? <><p>这次回答没有完成，你的消息已保存。</p><button disabled={working} onClick={()=>void send(t)}>重试这条消息</button></>
                 : <p role="status">{t.input_kind==='analysis_ready'?'材料已经整理好，暖暖正在结合你的资料写解读…':'暖暖正在认真看你说的话…'}</p>}
             </div></div></div>)}
-        </div>{narrative&&<button className="overview-entry" onClick={()=>setPanel('overview')}>查看本次资料详情<DemoIcon name="arrow"/></button>}<div ref={bottom}/></main>
+        </div><div ref={bottom}/></main>
         <footer className="chat-footer">
           <div className="upload-list">{attachments.map(a=><span className="attachment" key={a.document_id}>▤ {a.name} · 已上传</span>)}</div>
           {showClaimGuide && <div className="nuan-quick-actions">{[['summary','看病经过'],['cost','费用解读'],['action','下一步安排']].map(([id,label])=><button key={id} onClick={()=>{const target=document.getElementById('chat-topic-'+id);if(target?.tagName==='DETAILS')target.setAttribute('open','');target?.scrollIntoView({behavior:'smooth',block:'start'});}}><DemoIcon name={id==='summary'?'file':id==='cost'?'chat':'leaf'}/>{label}</button>)}</div>}<form className="composer" onSubmit={submit}>
