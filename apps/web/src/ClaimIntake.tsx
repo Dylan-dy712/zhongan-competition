@@ -4,6 +4,7 @@ import AnalysisFlow,{type UploadProgress} from './AnalysisFlow';
 import {claimTemplate,initialClaimForm,validateClaimInfo,type ClaimFile,type ClaimForm} from './claimTemplate';
 import './claim-original.css';
 import {syncClaimMarkup} from './claimDom';
+import PhotoReview from './PhotoReview';
 
 function uuid() {
   const bytes=crypto.getRandomValues(new Uint8Array(16));bytes[6]=(bytes[6]&15)|64;bytes[8]=(bytes[8]&63)|128;
@@ -34,6 +35,8 @@ export default function ClaimIntake({token,subject,visible,onOpen,onAuthorize,on
   const pending=useRef<{id:string;requestId:string;uploaded:Map<File,string>;analysisStarted?:boolean} | null>(null);
   const [finished,setFinished]=useState(false);
   const [locked,setLocked]=useState(false);
+  const [reviewPhotos,setReviewPhotos]=useState(false);
+  useEffect(()=>{if(!visible)setReviewPhotos(false);},[visible]);
   const mounted=useRef(true);
   const running=useRef(false);
   const wasVisible=useRef(visible);
@@ -63,11 +66,13 @@ export default function ClaimIntake({token,subject,visible,onOpen,onAuthorize,on
     finally{running.current=false;if(mounted.current){setBusy(false);setSubmission(false);}}
   };
   useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;};},[]);
-  const submit=async()=>{
+  const submit=async(checkedFiles?:ClaimFile[])=>{
     if(running.current || !confirmed || !subject)return;
     const invalid=validateClaimInfo(form.current);if(invalid){setError(invalid);setStep(0);return;}
     const missing=claimTemplate(form.current,files,step).groups.filter(g=>g.required&&!files.some(f=>f.category===g.id));
     if(missing.length){setError('请补充：'+missing.map(g=>g.title).join('、'));setStep(1);return;}
+    if(!checkedFiles&&!pending.current&&files.some(entry=>entry.url)){setReviewPhotos(true);return;}
+    const selectedFiles=checkedFiles||files;
     running.current=true;
     setBusy(true);setError('');setLocked(true);
     pending.current ??= {id:uuid(),requestId:uuid(),uploaded:new Map()};
@@ -76,9 +81,9 @@ export default function ClaimIntake({token,subject,visible,onOpen,onAuthorize,on
       await createConversation(token,attempt.id,subject);
       if(!mounted.current)return;
       const activeGroups=claimTemplate(form.current,files,step).groups;
-      const entries=files.filter(f=>activeGroups.some(g=>g.id===f.category));
+      const entries=selectedFiles.filter(f=>activeGroups.some(g=>g.id===f.category));
       setProgress({done:attempt.uploaded.size,total:entries.length});
-      for(const entry of files.filter(f=>activeGroups.some(g=>g.id===f.category))){
+      for(const entry of entries){
         const file=entry.file;if(attempt.uploaded.has(file))continue;
         const result=await uploadChatDocument(token,attempt.id,file);attempt.uploaded.set(file,result.document_id);
         setProgress({done:attempt.uploaded.size,total:entries.length});
@@ -99,6 +104,11 @@ export default function ClaimIntake({token,subject,visible,onOpen,onAuthorize,on
     setError('');setStep(step+1);shell.current?.querySelector('.claim-main')?.scrollTo?.(0,0);
   };
   return <main className="claim-react">
+    {reviewPhotos&&<PhotoReview token={token} subjectId={subject} files={files.map(f=>f.file)} onCancel={()=>setReviewPhotos(false)} onContinue={checked=>{
+      const updated=files.map((entry,index)=>entry.file===checked[index]?entry:{...entry,file:checked[index],name:checked[index].name,size:checked[index].size,url:URL.createObjectURL(checked[index])});
+      files.forEach((entry,index)=>{if(entry!==updated[index]&&entry.url)URL.revokeObjectURL(entry.url);});
+      setFiles(updated);setReviewPhotos(false);void submit(updated);
+    }}/>}
     <AnalysisFlow open={visible && progressOpen} snapshot={null} submitting={submission} error={error} onClose={()=>setProgressOpen(false)} onReport={()=>void viewReport()} onRetry={()=>void viewReport()}/>
     {progress && <p className="claim-text" role="status">正在上传材料：{progress.done} / {progress.total} 份</p>}
     <div className="claim-shell" ref={shell} onInput={e=>{
@@ -127,7 +137,7 @@ export default function ClaimIntake({token,subject,visible,onOpen,onAuthorize,on
       <button className="claim-primary" disabled={busy||(!finished&&step===2&&(!confirmed||!subject))} onClick={()=>{if(finished)void viewReport();else if(step<2)next();else void submit();}}>{busy?(finished?'正在开始分析…':'正在上传材料…'):finished?'查看相关报告':step===0?'下一步，上传材料':step===1?'下一步，核对申请':locked?'重试提交':'确认提交材料'}</button>
     </footer>
     <input ref={picker} hidden aria-label="添加就医材料" type="file" multiple accept=".pdf,.jpg,.jpeg,.png" onChange={e=>{
-      const added=Array.from(e.target.files||[]);e.target.value='';
+      const added=Array.from(e.target.files||[]).map(file=>file.type?file:new File([file],file.name,{type:/\.pdf$/i.test(file.name)?'application/pdf':/\.png$/i.test(file.name)?'image/png':'image/jpeg',lastModified:file.lastModified}));e.target.value='';
       if(added.some(f=>!f.size||f.size>10*1024*1024||!/\.(pdf|jpe?g|png)$/i.test(f.name))){setError('请选择有效 PDF 或图片，每份不超过 10 MB。');return;}
       setFiles([...files,...added.map(file=>({id:uuid(),name:file.name,size:file.size,category:category.current,sample:false,url:/\.(jpe?g|png)$/i.test(file.name)?URL.createObjectURL(file):null,file}))]);setError('');setConfirmed(false);
     }}/>

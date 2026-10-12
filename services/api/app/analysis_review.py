@@ -43,14 +43,16 @@ source_kind为general_knowledge的来源是用户授权的专业参考知识，�
 category仅限unsupported、qualifier、phase、payment、emphasis、omission、scope。意见只指出问题，不编造替代事实。
 """
 
-def review_analysis(config,packed,text):
+def review_analysis(config,packed,text,citations=None):
     # This is source comparison, not diagnostic reasoning. Keep every original word
     # while removing citation identifiers that the reviewer does not need.
     originals=[{'document':page['document'],'page':page['page'],
                 **({'source_kind':page['source_kind']} if page.get('source_kind') else {}),
                 'text':'\n'.join(span[1] for span in page['spans'])} for page in packed]
-    messages=[{'role':'system','content':INSTRUCTION},
-              {'role':'user','content':json.dumps({'original_material_pages':originals,'draft':text},ensure_ascii=False,separators=(',',':'))}]
+    citation_sources={span[0]:span[1] for page in packed for span in page['spans']}
+    audit=[{'quote':c['quote'],'cited_sources':[citation_sources.get(ref,'来源不存在') for ref in c['source_refs']]} for c in (citations or [])]
+    messages=[{'role':'system','content':INSTRUCTION+'另核对citation_links：引用的原文必须支持对应quote；其他未引用的页面不能替错误引用辩护。错误关联按unsupported指出。'},
+              {'role':'user','content':json.dumps({'original_material_pages':originals,'draft':text,'citation_links':audit},ensure_ascii=False,separators=(',',':'))}]
     literal_issues=literal_scope_issues([page for page in packed if page.get('source_kind')!='general_knowledge'],text)
     compact=lambda value:re.sub(r'[\s，,；;：:（）()“”\"。*]','',value)
     draft=compact(text)

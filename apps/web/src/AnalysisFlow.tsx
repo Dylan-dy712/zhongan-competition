@@ -5,6 +5,7 @@ import {careSectionLabels} from './carePresentation';
 import {currentNarrative} from './AnalysisNarrative';
 import mascot from '../../../output_dir/product-design/assets/reference-mascot.webp';
 import './analysis-flow.css';
+import {SourceRefs} from './SourceCitations';
 
 const steps=[['parse','识别材料'],['extract','提取信息'],['insights','核对疑点'],['guidance','整理重点'],['validate','校验来源'],['narrative','写好解读']];
 function AnalysisIcon({kind}:{kind:string}) {
@@ -44,8 +45,8 @@ export function MaterialReportContent({report,onEvidence,onAsk}:{report:Material
     {(report.sections || []).map(section=><section className="material-report-section" key={section.section_type}>
       <h3>{careSectionLabels[section.section_type]}<span>{section.items.length?'已核对材料':'资料待补充'}</span></h3>
       {section.items.map((item,i)=><div className="material-report-item" key={i}>
-        {item.kind==='source' && <small>材料原文 · 保留原文限定</small>}<p>{item.text}</p>
-        {item.evidence_refs.map(id=><button className="material-evidence" key={id} onClick={()=>onEvidence(id)}>查看原始依据 ↗</button>)}
+        {item.kind==='source' && <small>材料原文 · 保留原文限定</small>}<p>{item.text}<SourceRefs refs={item.evidence_refs} onEvidence={onEvidence}/></p>
+
       </div>)}
       {!section.items.length && <p className="material-report-empty">当前没有通过自动核对的内容。可以补充相关材料或向暖暖核实。</p>}
       {section.pending_count>0 && <p className="material-pending">{section.pending_count} 项解释或结论需要核实，暂未作为确认结果展示。</p>}

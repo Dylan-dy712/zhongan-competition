@@ -59,6 +59,9 @@ class Evidence(Contract):
     case_id: UUID
     document_id: UUID
     document_version: int = Field(ge=1)
+    source_name: str | None = None
+    document_type: str | None = None
+    media_type: str | None = None
     page_index: int | None = Field(default=None, ge=0)
     text_span: TextSpan | None = None
     bbox: tuple[float, float, float, float] | None = None

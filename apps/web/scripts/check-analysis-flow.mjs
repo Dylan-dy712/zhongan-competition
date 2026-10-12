@@ -16,7 +16,7 @@ globalThis.setTimeout=(fn,ms,...args)=>realTimeout(fn,ms>=1500?20:ms,...args);
 const conversation={conversation_id:'analysis-ui',subject_id:'synthetic',case_id:'case-ui',title:'合成分析流程',recall_enabled:false,updated_at:'2026-10-08T00:00:00Z'};
 let phase='initial',run='run-1',uploads=0,submissions=[],turns=[],resolveSecond,resolveNarrative;
 let delayNarrative=false,failNarrative=false,continuations=0;
-const section={section_type:'cost_explanation',pending_count:1,items:[{text:'医疗总费用：120元',kind:'checked',evidence_refs:['source-ui']}]};
+const section={section_type:'cost_explanation',pending_count:1,items:[{text:'医疗总费用：120元',kind:'checked',evidence_refs:['00000000-0000-4000-8000-000000000002']}]};
 const state=()=>({conversation,turns,analysis:{status:phase==='initial'?'not_started':phase==='ready'?'waiting_review':phase==='failed'?'failed':phase==='queued'?'queued':'running',run_id:phase==='initial'?undefined:run,stage:phase==='ready'?'validate':phase},
   report:{status:'not_released'},material_report:{status:phase==='ready'?'available':phase==='failed'?'failed':phase,run_id:run,report_id:'material-ui',document_count:2,source_report_version:1,pending_count:1,notice:'合成自动核对提示',sections:[section]}});
 globalThis.fetch=async(url,options={})=>{
@@ -36,10 +36,10 @@ globalThis.fetch=async(url,options={})=>{
   if(delayNarrative)await new Promise(r=>resolveNarrative=r);
   if(failNarrative){failNarrative=false;return Response.json({detail:'合成解读失败'},{status:503});}
   turns=[...turns.filter(t=>t.input_kind!=='analysis_ready'),{turn_id:'continue-ui',input_kind:'analysis_ready',status:'completed',question:'解释材料',attachments:[],tool_events:[],
-   answer:{text:'我先帮你把这张票据理清楚。材料记载医疗总费用：120元。\n\n这张票据没有说明保险赔付金额，我们先把它与票据上的费用区分开。你最想先核对哪一项？',evidence_refs:['source-ui'],history_refs:[],analysis_run_id:run}}];
+   answer:{text:'我先帮你把这张票据理清楚。材料记载医疗总费用：120元。\n\n这张票据没有说明保险赔付金额，我们先把它与票据上的费用区分开。你最想先核对哪一项？',evidence_refs:['00000000-0000-4000-8000-000000000002'],history_refs:[],citations:[{quote:'材料记载医疗总费用：120元。',source_refs:['00000000-0000-4000-8000-000000000002']}],analysis_run_id:run}}];
   return Response.json({turn_id:'continue-ui'});
  }
- if(path==='/v1/evidence/source-ui')return Response.json({evidence_id:'source-ui',document_version:1,page_index:0,text_span:{text:'医疗总费用：120元'}});
+ if(path==='/v1/evidence/00000000-0000-4000-8000-000000000002')return Response.json({evidence_id:'00000000-0000-4000-8000-000000000002',document_version:1,page_index:0,text_span:{text:'医疗总费用：120元'}});
  if(path.endsWith('/messages'))return Response.json({turn_id:'follow-ui'});
  if(path==='/v1/conversations/analysis-ui')return Response.json(state());
  throw Error('Unexpected fixture request '+path);
@@ -81,10 +81,11 @@ try{
  assert.equal(document.querySelectorAll('.analysis-narrative-copy p').length,2,'Paragraphs follow the model text, not six fixed sections');
  assert.equal(document.querySelector('.material-report-content'),null);
  assert.doesNotMatch(document.body.textContent,/几项解释|当前没有通过自动核对|治疗经过资料待补充/);
- const sources=document.querySelector('.analysis-narrative-sources');assert.equal(sources.open,false);
- await act(async()=>sources.querySelector('summary').click());assert.equal(sources.open,true);
- await click('依据 1 ↗');assert.ok(document.querySelector('dialog.evidence-overlay'));
- await click('关闭');assert.equal(document.querySelector('dialog.evidence-overlay'),null);
+ assert.equal(document.querySelector('.analysis-narrative-sources'),null,'Sources are attached to the supported sentence');
+ const source=document.querySelector('.analysis-narrative .source-ref');assert.ok(source);
+ await act(async()=>source.click());await flush();assert.ok(document.querySelector('dialog.source-sheet'));
+ assert.match(document.querySelector('dialog.source-sheet').textContent,/医疗总费用：120元/);
+ await click('关闭原始依据');assert.equal(document.querySelector('dialog.source-sheet'),null);
  await act(async()=>{window.location.hash='/report';});await flush();
  assert.equal(window.location.hash,'#/chat','Legacy material report route returns to the conversational analysis');
  await click('材料解读');assert.equal(window.location.hash,'#/chat');
@@ -101,6 +102,6 @@ try{
  assert.equal(continuations,beforeRetry+1,'Narrative failure can be retried explicitly');
  assert.equal(document.querySelector('.chat-workspace > dialog.analysis-dialog progress').value,100);
  assert.equal(window.location.hash,'#/chat');assert.ok(document.querySelector('.analysis-narrative'));
- console.log('PASS: uploads, real stages, conversational AI report, adaptive paragraphs, collapsed source links, legacy route redirect, failure retry and completion. Synthetic fixtures only.');
+ console.log('PASS: uploads, real stages, conversational AI report, adaptive paragraphs, inline source links, legacy route redirect, failure retry and completion. Synthetic fixtures only.');
 }finally{await act(async()=>root.unmount());await modules.close();dom.window.close();globalThis.setTimeout=realTimeout;}
 

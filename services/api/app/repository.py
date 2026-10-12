@@ -124,7 +124,7 @@ def register_document(conn, *, actor_id: UUID, case_id: UUID,
                       byte_size: int, page_count: int | None,
                       source_hash: str, source_ref: str,
                       policy_version: str, temp_path: Path,
-                      storage_root: Path) -> tuple[Document, bool]:
+                      storage_root: Path, replaces_document_id: UUID | None = None) -> tuple[Document, bool]:
     final_path: Path | None = None
     try:
         with conn.transaction():
@@ -139,16 +139,38 @@ def register_document(conn, *, actor_id: UUID, case_id: UUID,
                    JOIN consent_purposes p ON p.consent_id = c.consent_id
                      AND p.purpose = 'case_guidance' AND p.status = 'active'
                      AND (p.expires_at IS NULL OR p.expires_at > now())
-                   WHERE c.case_id = %s FOR SHARE OF c, a, p""",
+                   WHERE c.case_id = %s FOR UPDATE OF c FOR SHARE OF a, p""",
                 (actor_id, case_id),
             ).fetchone()
             if not allowed:
                 raise AccessDenied()
+            if replaces_document_id is not None:
+                original = conn.execute('''SELECT * FROM documents WHERE case_id=%s AND document_id=%s''',
+                    (case_id,replaces_document_id)).fetchone()
+                if not original:
+                    raise AccessDenied()
+                replacement = conn.execute('''SELECT d.* FROM document_replacements r
+                    JOIN documents d ON d.document_id=r.new_document_id WHERE r.old_document_id=%s''',
+                    (replaces_document_id,)).fetchone()
+                if replacement:
+                    still_current = conn.execute('SELECT 1 FROM document_replacements WHERE old_document_id=%s',
+                        (replacement['document_id'],)).fetchone() is None
+                    if replacement['source_hash']==source_hash and still_current:
+                        return _to_document(replacement),False
+                    raise IdempotencyConflict('该材料已被替换，请刷新后再操作。')
             old = conn.execute(
                 "SELECT * FROM documents WHERE case_id = %s AND source_hash = %s",
                 (case_id, source_hash),
             ).fetchone()
             if old:
+                superseded = conn.execute(
+                    'SELECT 1 FROM document_replacements WHERE old_document_id=%s',
+                    (old['document_id'],),
+                ).fetchone()
+                if superseded:
+                    raise IdempotencyConflict('这份材料已被替换，请使用最新照片。')
+                if replaces_document_id is not None and old['document_id'] != replaces_document_id:
+                    raise IdempotencyConflict('这张照片已经属于本次材料，请选择新的清晰照片。')
                 return _to_document(old), False
             document_id = uuid4()
             final_path = storage_root / str(case_id) / str(document_id) / "1.bin"
@@ -164,6 +186,9 @@ def register_document(conn, *, actor_id: UUID, case_id: UUID,
                 (document_id, case_id, document_type, media_type, byte_size,
                  page_count, source_hash, source_ref, str(final_path), policy_version),
             ).fetchone()
+            if replaces_document_id is not None:
+                conn.execute('''INSERT INTO document_replacements(old_document_id,new_document_id,case_id,actor_id)
+                    VALUES (%s,%s,%s,%s)''',(replaces_document_id,document_id,case_id,actor_id))
         return _to_document(row), True
     except Exception:
         if final_path is not None and final_path.exists():
@@ -217,7 +242,8 @@ def create_analysis_run(conn, *, actor_id: UUID, case_id: UUID,
             row = conn.execute(
                 """SELECT document_id, document_version, source_hash
                    FROM documents WHERE case_id = %s AND document_id = %s
-                     AND document_version = %s""",
+                     AND document_version = %s
+                     AND NOT EXISTS (SELECT 1 FROM document_replacements replacement WHERE replacement.old_document_id=documents.document_id)""",
                 (case_id, reference.document_id, reference.document_version),
             ).fetchone()
             if row is None:
@@ -235,12 +261,14 @@ def create_analysis_run(conn, *, actor_id: UUID, case_id: UUID,
             "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
             (f"run:{case_id}:{input_hash}",),
         )
-        if not force_new:
+        if not force_new or turn_id is not None:
             old = conn.execute(
                 """SELECT * FROM analysis_runs WHERE case_id = %s AND input_hash = %s
                    AND status NOT IN ('failed', 'cancelled')
+                   AND (%s = false OR created_at >=
+                       (SELECT created_at FROM conversation_turns WHERE turn_id=%s))
                    ORDER BY created_at DESC LIMIT 1""",
-                (case_id, input_hash),
+                (case_id, input_hash, force_new, turn_id),
             ).fetchone()
             if old:
                 return _to_run(old), False
@@ -279,7 +307,9 @@ def get_analysis_run(conn, *, actor_id: UUID, run_id: UUID) -> AnalysisRun | Non
 
 def get_evidence(conn, *, actor_id: UUID, evidence_id: UUID) -> Evidence | None:
     row = conn.execute(
-        """SELECT e.* FROM evidence e JOIN cases c ON c.case_id = e.case_id
+        """SELECT e.*, d.source_ref AS source_name, d.document_type, d.media_type
+           FROM evidence e JOIN documents d ON d.document_id=e.document_id
+           JOIN cases c ON c.case_id = e.case_id
            JOIN actor_subject_access a ON a.subject_id = c.subject_id
              AND a.actor_id = %s AND a.can_read_case = true
            JOIN consent_purposes p ON p.consent_id = c.consent_id
@@ -301,6 +331,7 @@ def get_evidence(conn, *, actor_id: UUID, evidence_id: UUID) -> Evidence | None:
         page_index=row["page_index"], text_span=span, bbox=bbox,
         extraction_method=row["extraction_method"], source_hash=row["source_hash"],
         parser_version=row["parser_version"],
+        source_name=row.get('source_name'), document_type=row.get('document_type'), media_type=row.get('media_type'),
     )
 
 

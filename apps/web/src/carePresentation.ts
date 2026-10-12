@@ -4,7 +4,7 @@ export const careSectionLabels: Record<ReportSection['section_type'],string> = {
   diagnosis_explanation:'这次看病怎么回事', treatment_review:'治疗经过', cost_explanation:'这次看病的费用',
   recovery_plan:'回家后的安排', emotional_support:'也照顾一下自己的心情', next_visit_advice:'下次就医准备',
 };
-export type CarePanel = 'home'|'chat'|'report'|'records'|'claim'|'account';
+export type CarePanel = 'home'|'chat'|'report'|'records'|'claim'|'account'|'overview'|'demo';
 export function publishedCare(report: ChatSnapshot['report']) {
   return report.status==='published' && !!report.report_id && Number.isInteger(report.report_version)
     && report.report_version!>0 && Array.isArray(report.sections);

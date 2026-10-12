@@ -69,7 +69,7 @@ def get_material_report(conn, actor_id, conversation_id):
             or refs[0]['consent_id'] != str(consent['consent_id']) or refs[0]['version'] != consent['version']
             or refs[0]['purpose'] != 'case_guidance'):
         return {'status': 'outdated'}
-    documents = conn.execute('SELECT document_id,document_version,source_hash FROM documents WHERE case_id=%s ORDER BY document_id',
+    documents = conn.execute('SELECT document_id,document_version,source_hash FROM documents WHERE case_id=%s AND NOT EXISTS (SELECT 1 FROM document_replacements replacement WHERE replacement.old_document_id=documents.document_id) ORDER BY document_id',
                              (case_id,)).fetchall()
     snapshot = [{**d, 'document_id': str(d['document_id'])} for d in documents]
     if (snapshot != sorted(run['document_versions'], key=lambda d: (d['document_id'], d['document_version']))
