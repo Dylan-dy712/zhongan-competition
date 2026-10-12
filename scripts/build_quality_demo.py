@@ -87,9 +87,18 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', default='apps/web/src/quality-demo.json')
     parser.add_argument('--input-output', help='optional synthetic feature input for independent reproduction')
+    parser.add_argument('--full-output', help='optional full metric provenance report outside the web bundle')
     args = parser.parse_args()
     result = build()
-    Path(args.output).write_text(json.dumps(result, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+    # The patient bundle needs display fields and provenance IDs, not repeated policy metadata per metric.
+    public = {**result, 'snapshot': {**result['snapshot'], 'profiles': [
+        {**profile, 'metrics': [{key: metric[key] for key in
+            ('metric_name', 'value', 'sample_count', 'missing_rate', 'metric_ref')}
+            for metric in profile['metrics'] if metric['metric_name'] in METRICS]}
+        for profile in result['snapshot']['profiles']]}}
+    Path(args.output).write_text(json.dumps(public, ensure_ascii=False, separators=(',', ':')) + '\n', encoding='utf-8')
+    if args.full_output:
+        Path(args.full_output).write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding='utf-8')
     if args.input_output:
         Path(args.input_output).write_text(json.dumps(demo_input(), ensure_ascii=False, indent=2), encoding='utf-8')
     print(json.dumps({'origin': result['snapshot']['data_origin'],

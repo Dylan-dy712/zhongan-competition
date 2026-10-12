@@ -196,6 +196,7 @@ def main():
     parser.add_argument('--config', help='private server configuration; never copied into outputs')
     parser.add_argument('--limit', type=int)
     parser.add_argument('--workers', type=int, default=4)
+    parser.add_argument('--ocr-layout', choices=['plain', 'bbox'], default='plain')
     args = parser.parse_args()
     repo = Path(__file__).resolve().parents[1]
     for output in (args.output, args.predictions_dir):
@@ -233,6 +234,8 @@ def main():
                 raise ValueError('use a new predictions directory for a new model or prompt')
             if previous.get('implementation_sha256') != implementation_hashes:
                 raise ValueError('runner changed; use a new predictions directory')
+            if previous.get('ocr_layout_method') != args.ocr_layout:
+                raise ValueError('OCR layout changed; use a new predictions directory')
             if previous.get('status') == 'completed':
                 return previous['status']
         run = {k: row[k] for k in ('document_id', 'image_sha256', 'ocr_sha256')}
@@ -245,8 +248,8 @@ def main():
             cache = load(row['ocr'])
             if not cache.get('text', '').strip():
                 raise ValueError('OCR source is empty')
-            run['result'] = extract_document(provider, layout_text(cache))
-            run['ocr_layout_method'] = 'bbox-row-reconstruction-v1'
+            run['ocr_layout_method'] = args.ocr_layout
+            run['result'] = extract_document(provider, layout_text(cache) if args.ocr_layout == 'bbox' else cache['text'])
             run['status'] = 'completed'
         except Exception as exc:
             run.update(status='failed', error_code=type(exc).__name__)
