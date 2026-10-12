@@ -35,6 +35,7 @@ export function CareRecommendations({token}: {token: string}) {
 
   return <section className="care-recommend" aria-labelledby="care-recommend-title">
     <h2 id="care-recommend-title">下次就医，想参考什么？</h2>
+    <p><a href="/#/quality-demo" target="_blank" rel="noopener noreferrer">查看初赛模拟品质方案（虚构数据）</a></p>
     <p className="care-recommend-note">选两到三项你最在意的方面，我们用历史理赔记录的统计给出参考。
       这是记录统计，<strong>不是医疗质量排名</strong>；当前环境为合成演示数据。</p>
     <div className="care-recommend-chips">
