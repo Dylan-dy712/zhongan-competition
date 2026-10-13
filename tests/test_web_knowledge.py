@@ -116,3 +116,11 @@ class WebKnowledgeTests(unittest.TestCase):
                 post=Mock();service=WebKnowledge(post=post)
                 self.assertEqual(service.search({'term':'胆囊结石','slot':'S1'})['status'],'not_configured')
                 post.assert_not_called()
+
+    def test_malformed_provider_payload_does_not_interrupt_report(self):
+        for payload in [[],{'Result':[]},{'Result':{'WebResults':['invalid',{'Title':123}]}}]:
+            with self.subTest(payload=payload),tempfile.TemporaryDirectory(dir=Path(self.tmp.name)) as d:
+                post=Mock(return_value=Mock(json=lambda:payload,raise_for_status=lambda:None))
+                result=WebKnowledge(path=Path(d)/'cache.db',post=post).search({'term':'胆囊结石','slot':'S1'})
+                self.assertEqual(result['results'],[])
+                self.assertEqual(post.call_count,1)

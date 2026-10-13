@@ -152,9 +152,12 @@ class WebKnowledge:
                 with requests.Session() as session:
                     session.trust_env=False;response=session.post(ENDPOINT,**kwargs)
             response.raise_for_status();data=response.json()
+            if not isinstance(data,dict) or not isinstance(data.get('ResponseMetadata') or {},dict):raise ValueError('INVALID_SEARCH_RESPONSE')
             error=(data.get('ResponseMetadata') or {}).get('Error')
             if error:return {'status':'provider_error','error_code':str(error.get('Code','unknown'))[:20],'results':[],'calls':1}
-            docs=self.references((data.get('Result') or {}).get('WebResults',[]),concept,now)
+            result=data.get('Result') or {}
+            if not isinstance(result,dict):raise ValueError('INVALID_SEARCH_RESPONSE')
+            docs=self.references(result.get('WebResults',[]),concept,now)
             expiry=now+(30*86400 if docs else 3600)
             with self.db() as conn:
                 for doc in docs:
@@ -165,9 +168,12 @@ class WebKnowledge:
             return {'status':'unavailable','results':[],'calls':1 if 'payload' in locals() else 0}
 
     def references(self,rows,concept,now):
+        if not isinstance(rows,list):return []
         docs=[];seen=set();term=concept['term'];slot=concept['slot'];terms=[term,*ALIASES.get(term,())]
         for item in rows:
+            if not isinstance(item,dict):continue
             url=item.get('Url');title=item.get('Title') or ''
+            if not isinstance(title,str):continue
             if not approved_url(url) or url in seen or not any(t.lower() in title.lower() for t in terms):continue
             content=select_excerpt(item.get('Content'),terms)
             if not content:continue

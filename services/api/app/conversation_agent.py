@@ -361,9 +361,13 @@ class CareTools:
             raise ValueError('UNKNOWN_KNOWLEDGE_REFERENCE')
         if reply.knowledge_refs:
             current=KnowledgeRetriever()
-            resolved={d['entry_id']:d for d in current.resolve_references(reply.knowledge_refs,case_text='')['results']}
-            if any(ref not in resolved or resolved[ref]['version']!=self.knowledge_sources[ref]['version'] for ref in reply.knowledge_refs):
-                raise ValueError('STALE_KNOWLEDGE_REFERENCE')
+            for ref in reply.knowledge_refs:
+                if ref.startswith('WEB-VOLC-'):
+                    from .web_knowledge import WebKnowledge
+                    doc=WebKnowledge().resolve(ref)
+                    valid=doc is not None and doc['version']==self.knowledge_sources[ref]['version']
+                else:valid=ref in current.by_id and current.version==self.knowledge_sources[ref]['version']
+                if not valid:raise ValueError('STALE_KNOWLEDGE_REFERENCE')
         if any(str(x) not in self.evidence_ids for x in reply.evidence_refs):
             raise ValueError('UNKNOWN_EVIDENCE_REFERENCE')
         if any(str(x) not in self.history_ids for x in reply.history_refs):
