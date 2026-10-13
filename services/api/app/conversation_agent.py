@@ -24,18 +24,18 @@ from .inline_citations import InlineCitation, bind_citations, canonical_analysis
 from .care_voice import CARE_VOICE
 from .knowledge_retrieval import KnowledgeRetriever
 from .knowledge_assembler import KnowledgeAssemblerError
-from .guidance_quality import GUIDANCE_INSTRUCTION, review_guidance_quality
+from .guidance_quality import GUIDANCE_INSTRUCTION, review_guidance_quality, guidance_requirements, enforce_guidance_requirements, GuidanceQuality
 from .model_workloads import is_qianfan
 from .contracts.knowledge import DiseaseCode
 
 
 PROMPT_VERSION = 'conversation-agent-v3'
-ANALYSIS_PROMPT_VERSION = 'patient-analysis-narrative-v10-explanatory-guidance'
+ANALYSIS_PROMPT_VERSION = 'patient-analysis-narrative-v11-reading-depth'
 ANALYSIS_INSTRUCTION = """
 本轮是暖暖看完资料后，对用户讲清这次就医情况。遵循上面的对话语气，读起来要像人在耐心讲解。
 表达顺序：开头两三句抓住这次就医的整体情况；然后用编号分主题解释；最后单独写“**接下来，可以这样做**”。
-总述讲用户的情况，不列文件目录，不提前重复各点。每点以“1. **贴合这次情况的短标题**”起行，下面两三句说清一个实际问题；各点空一行。
-短资料通常200到400字、1到3点，复杂资料通常500到800字、3到5点。篇幅跟有用信息走，不跟文件数量走。
+总述讲用户的情况，不列文件目录，不提前重复各点。每点以“1. **贴合这次情况的短标题**”起行，用独立段落讲清记录中的事实、通俗含义和这对用户意味着什么；各点空一行。
+这是完整指引，不能写成压缩摘要。少量单主题资料按实际信息解释；含诊断、治疗、费用和出院安排的充分资料通常900到1500字、5到6个主题，按reading_requirements展开。主题缺乏依据时说明具体缺口及核对方式，不补造内容或凑字数。
 直接对用户说“你这次”“医生交代的”“这句话的意思是”，不用每句都先报“材料显示、记录记载”。医嘱可以说“医生在出院时交代了”，明确来自原有安排即可，无需固定说“出院记录写到”。
 只在影响当前问题时说明缺口，一次说清。不逐项盘点没写的检查、用药、明细，不把缺少记录说成事情没发生，不在每点重复限制说明。
 下一步优先转述原有医嘱，或给一两件具体核对方向；不用反复问用户“最想聊哪块”，也不新增检查、停换药、复诊时间或赔付承诺。
@@ -482,6 +482,10 @@ def run_agent(history, question, attachments, tools, model=None, on_event=None, 
                 model.authorized_user_context={'question':question,'user_context':guidance_context.get('user_context'),
                                               'user_sources':guidance_context.get('user_sources')}
             messages.append({'role':'user','content':json.dumps(guidance_context,ensure_ascii=False)})
+        case_text='\n'.join(span[1] for page in packed for span in page['spans'])
+        guidance_context['reading_requirements']=guidance_requirements(case_text,
+            list(tools.knowledge_sources.values()) if isinstance(tools,CareTools) else [])
+        messages.append({'role':'user','content':json.dumps({'reading_requirements':guidance_context['reading_requirements']},ensure_ascii=False)})
         if offset is not None or truncated:
             messages.append({'role': 'user', 'content':
                 '材料读取尚未覆盖全部页。必须说明本轮只解读已读取的部分；不得把未读取的内容说成缺资料。'})
@@ -506,6 +510,10 @@ def run_agent(history, question, attachments, tools, model=None, on_event=None, 
             bound = normalized['citations']
             if not bound:
                 raise ValueError('CACHED_CITATIONS_REQUIRED')
+            presentation=enforce_guidance_requirements(GuidanceQuality(**{
+                key:True for key in GuidanceQuality.model_fields if key!='issues'}),
+                {'patient_analysis':normalized},guidance_context)
+            if not presentation.accepted:raise ValueError('CACHED_GUIDANCE_TOO_BRIEF')
             tools.validate_reply(AgentReply.model_validate(normalized))
             seed = {'content':json.dumps(normalized,ensure_ascii=False)}
         except (ValueError,TypeError):
@@ -620,7 +628,7 @@ def run_agent(history, question, attachments, tools, model=None, on_event=None, 
                         {'role':'user','content':('费用有错时，删掉有问题的次要明细；只保留能直接核对的原文总额，不再列起付线、乙类费用等容易错配的项目。不要把错误数字换成新的推断。' if any(issue.category=='payment' for issue in verdict.issues) else '')+'原文复核未通过。仅修正这些有依据的具体问题，其他正确表述保持简短，不新增项目或解释。重新输出完整解读；原文才是依据，复核意见不是新增事实：'+
                          json.dumps([issue.model_dump() for issue in verdict.issues],ensure_ascii=False)}])
                     continue
-        if (analysis_mode and not reused_draft and getattr(type(model),'review_guidance',None) is not None
+        if (analysis_mode and (not reused_draft or partial_delivery) and getattr(type(model),'review_guidance',None) is not None
                 and is_qianfan(getattr(getattr(model,'config',None),'base_url',None))):
             if on_event:on_event(events)
             quality=model.review_guidance(reply.model_dump(mode='json'),

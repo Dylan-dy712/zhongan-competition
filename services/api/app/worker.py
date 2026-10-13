@@ -29,6 +29,7 @@ from .knowledge_assembler import KnowledgeAssembler, PackExcludedError
 from .report_builder import POLICY_VERSION as REPORT_POLICY_VERSION, map_report_sources, validate_and_complete
 from .report_llm import PROMPT_VERSION as REPORT_PROMPT_VERSION, draft_report
 from .contracts.core import Action
+from .contracts.knowledge import DiseaseCode
 from .llm_extractor import PROMPT_VERSION, SCHEMA_VERSION as MODEL_SCHEMA_VERSION, OpenAiCompatibleExtractor, validate_evidence_quotes
 from .tencent_ocr import OCR_METHOD, OCR_VERSION, TencentOcr
 from .document_quality import classify_material
@@ -409,13 +410,14 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
         knowledge_entries = []
         knowledge_version = None
         knowledge_excluded = False
+        assembler = KnowledgeAssembler()
+        knowledge_version = assembler.knowledge_version
+        knowledge_entries = assembler.select(DiseaseCode.ty,patient_visible=False).allowed
         disease_code = infer_disease_code(material)
         if disease_code is not None:
-            assembler = KnowledgeAssembler()
-            knowledge_version = assembler.knowledge_version
             try:
                 assembler.check_exclusions(disease_code, material)
-                knowledge_entries = assembler.select(
+                knowledge_entries += assembler.select(
                     disease_code, patient_visible=False,
                 ).allowed
             except PackExcludedError:

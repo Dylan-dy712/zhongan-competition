@@ -26,10 +26,11 @@ class AgentTests(unittest.TestCase):
         model.complete.return_value = answer('票据记载120元。\n\n检查记录写到不能排除肺炎。',[ref1,ref2])
         reply, events = run_agent([], '解释资料', [], tools, model=model, analysis_mode=True)
         sent = model.complete.call_args.args[0]
-        payloads = json.loads(sent[-1]['content'])['authorized_material_pages']
+        payloads = next(json.loads(m['content'])['authorized_material_pages'] for m in sent
+                        if 'authorized_material_pages' in m['content'])
         self.assertEqual(len(payloads), 1)
         self.assertIn('不能排除肺炎', str(payloads))
-        self.assertEqual(reply['prompt_version'], 'patient-analysis-narrative-v10-explanatory-guidance')
+        self.assertEqual(reply['prompt_version'], 'patient-analysis-narrative-v11-reading-depth')
         self.assertEqual(reply['text'], '票据记载120元。\n\n检查记录写到不能排除肺炎。')
         self.assertEqual(len(events), 2)
         self.assertEqual(json.loads(tools.execute.call_args_list[1].args[1]),
@@ -43,7 +44,8 @@ class AgentTests(unittest.TestCase):
         model.complete.return_value=answer('本轮只解读已读取的部分。',[ref])
         run_agent([], '解释资料', [], tools, model=model, analysis_mode=True)
         messages=model.complete.call_args.args[0]
-        data=json.loads(messages[-2]['content'])['authorized_material_pages'][0]['spans']
+        data=next(json.loads(m['content'])['authorized_material_pages'][0]['spans'] for m in messages
+                  if 'authorized_material_pages' in m['content'])
         self.assertEqual(len(data),1)
         self.assertIn('未覆盖全部页',messages[-1]['content'])
 

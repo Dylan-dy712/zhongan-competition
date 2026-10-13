@@ -16,6 +16,7 @@ LABEL_CATEGORY = {
     "EXP_DISCHARGE_GUIDANCE_GAP": "experience",
 }
 DISEASE_TERMS = {
+    DiseaseCode.hj: ("股骨头缺血性坏死", "股骨头坏死", "髋关节置换"),
     DiseaseCode.fx: ("骨折",), DiseaseCode.fy: ("肺炎", "CAP"),
     DiseaseCode.gx: ("冠心病", "心肌梗死", "心绞痛", "PCI"),
     DiseaseCode.yz: ("腰椎间盘突出",), DiseaseCode.tn: ("2型糖尿病", "Ⅱ型糖尿病"),

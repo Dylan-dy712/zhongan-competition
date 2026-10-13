@@ -20,6 +20,7 @@ class DiseaseCode(str, Enum):
     gx = "GX"  # 冠心病
     yz = "YZ"  # 腰椎间盘突出症
     tn = "TN"  # 2型糖尿病
+    hj = "HJ"  # 成人股骨头坏死与髋关节置换的一般解释
     ty = "TY"  # 通用（跨病种）
 
 
@@ -32,10 +33,10 @@ class KnowledgeEntry(Contract):
     """One machine-readable knowledge entry compiled from a pack slot file."""
 
     entry_id: str = Field(
-        pattern=r"^(FX|FY|GX|YZ|TN)-S\d{1,2}-\d{2}$|^TY-COST-\d{2}$",
+        pattern=r"^(FX|FY|GX|YZ|TN|HJ)-S\d{1,2}-\d{2}$|^TY-COST-\d{2}$",
         description="稳定引用 ID，如 FX-S4-01 / TY-COST-03；knowledge_refs 的定位依据",
     )
-    pack_id: str = Field(pattern=r"^KP-(FX|FY|GX|YZ|TN|TY)$")
+    pack_id: str = Field(pattern=r"^KP-(FX|FY|GX|YZ|TN|HJ|TY)$")
     disease_code: DiseaseCode
     slot: str = Field(
         pattern=r"^S\d{1,2}$|^TY$",

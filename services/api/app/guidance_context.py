@@ -19,7 +19,10 @@ def select_guidance_knowledge(entries,fields,material,user_context):
         for e in entries if not e.numeric_pending_review]
     clinical=' '.join(str(item.get('raw_value','')) for item in fields.get('candidates',{}).get('candidates',[]))[:260]
     clinical=clinical or material[:260]
-    groups=[({'S1'},'诊断 通俗 含义'),({'S2','S3','S4','S5','S7','S11'},'治疗 检查 目的'),
+    groups=[({'S1'},'诊断 通俗 含义')]
+    if any(term in material for term in ('手术','置换','内固定')):
+        groups.append(({'S11'},'手术 置换 治疗 目的'))
+    groups += [({'S2','S3','S4','S5','S7','S11'},'治疗 检查 目的'),
             ({'S5','S6','S7'},'康复 出院 医嘱'),({'S8','TY'},'费用 自费 支付'),
             ({'S10'},'担心 生活 准备'),({'S9','S7'},'复诊 就医 准备')]
     selected={}
