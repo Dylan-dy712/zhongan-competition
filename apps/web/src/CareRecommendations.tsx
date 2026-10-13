@@ -27,6 +27,7 @@ export function CareRecommendations({token,initialDisease='',demo=false}:{token:
  const selected=profiles.filter(p=>compare.includes(p.entity_id));
  return <section className="quality-panel" aria-label="机构品质画像与参考">
   <header><small>就医参考</small><h2>从你关心的方面，看懂机构记录</h2><p>选择病种与适用分组，再选择两到三项关注点。第一项是首要关注点。</p></header>
+  <p><a href="/#/quality-demo" target="_blank" rel="noopener noreferrer">查看三病种关怀与模拟品质方案（虚构数据）</a></p>
   {demo&&<p className="demo-notice">合成演示 · 3 个病种 × 每病种 5 家机构 · 不代表真实机构或真实医学质量排名</p>}
   {loading?<p role="status">正在加载机构画像…</p>:snapshot&&<>
    {initialDisease&&<p className="muted">本次诊断字段对应：{diseaseNames[initialDisease]}。请进一步确认下方统计分组适用。</p>}
