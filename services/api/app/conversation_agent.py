@@ -16,7 +16,7 @@ from .llm_extractor import OpenAiCompatibleExtractor
 from .repository import AccessDenied, create_analysis_run, get_analysis_run, get_evidence, get_report
 from .report_builder import _unsafe
 from .analysis_sources import pack_sources
-from .model_workloads import workload_options
+from .model_workloads import workload_options, model_post, uses_deepseek_strict
 from .analysis_format import strict_analysis_tool, decode_analysis_tool
 from .analysis_review import review_analysis
 from .analysis_partial import verified_partial
@@ -155,6 +155,7 @@ class AgentModel:
         body = {'model': self.config.model_id, 'messages': messages, 'temperature': 0.2,
                 'response_format': {'type': 'json_object'},
                 'max_tokens': 16000 if self.analysis_mode else 2200}
+        body.update(workload_options(self.config.base_url,self.config.model_id,'chat'))
         if self.analysis_mode:
             options=workload_options(self.config.base_url,self.config.model_id,'narrative')
             body.update(options)
@@ -162,13 +163,13 @@ class AgentModel:
                 body['max_tokens']=8000
         if not self.analysis_mode:
             body.update(tools=TOOLS, tool_choice='auto' if allow_tools else 'none')
-        strict_format = self.analysis_mode and bool(options)
+        strict_format = self.analysis_mode and uses_deepseek_strict(self.config.base_url,self.config.model_id)
         url = f'{self.config.base_url}/chat/completions'
         if strict_format:
             url='https://api.deepseek.com/beta/chat/completions'
             body.pop('response_format',None)
             body.update(tools=[strict_analysis_tool()],tool_choice={'type':'function','function':{'name':'deliver_analysis'}})
-        response = requests.post(url,
+        response = model_post(url, post=requests.post,
             headers={'Authorization': f'Bearer {self.config.api_key}', 'Content-Type': 'application/json'},
             json=body, timeout=(10, 180) if self.analysis_mode else (5, 20))
         response.raise_for_status()

@@ -1,13 +1,33 @@
 import unittest
 import json
 from unittest.mock import patch
-from services.api.app.model_workloads import workload_options
+from services.api.app.model_workloads import workload_options, uses_deepseek_strict
 from services.api.app.conversation_agent import AgentModel
 from services.api.app.llm_extractor import OpenAiCompatibleExtractor
 from services.api.app.analysis_format import strict_analysis_tool,decode_analysis_tool
 
 
 class ModelWorkloadTests(unittest.TestCase):
+    def test_qianfan_all_workloads_use_low_thinking_budget(self):
+        for workload in ['chat','extraction','narrative','review','fidelity']:
+            options=workload_options('https://qianfan.baidubce.com/v2','glm-5.3-flash',workload)
+            self.assertEqual(options,{'thinking':{'type':'enabled'},'reasoning_effort':'low','max_tokens':32768})
+        self.assertFalse(uses_deepseek_strict('https://qianfan.baidubce.com/v2','glm-5.3-flash'))
+
+    def test_qianfan_chat_and_analysis_never_use_deepseek_endpoint(self):
+        with patch('services.api.app.conversation_agent.OpenAiCompatibleExtractor') as config, \
+             patch('services.api.app.model_workloads.requests.Session') as session:
+            config.return_value.base_url='https://qianfan.baidubce.com/v2'
+            config.return_value.model_id='glm-5.3-flash'
+            post=session.return_value.__enter__.return_value.post
+            post.return_value.json.return_value={'choices':[{'message':{'content':'{}'}}]}
+            for analysis in [False,True]:
+                AgentModel(analysis_mode=analysis).complete([])
+                self.assertEqual(post.call_args.args[0],'https://qianfan.baidubce.com/v2/chat/completions')
+                self.assertEqual(post.call_args.kwargs['json']['reasoning_effort'],'low')
+                self.assertEqual(post.call_args.kwargs['json']['max_tokens'],32768)
+                self.assertEqual(post.call_args.kwargs['timeout'],(10,180))
+
     def test_only_documented_official_model_receives_workload_settings(self):
         self.assertEqual(workload_options('https://api.deepseek.com/v1','deepseek-flash','narrative'),
                          {'thinking':{'type':'disabled'}})
