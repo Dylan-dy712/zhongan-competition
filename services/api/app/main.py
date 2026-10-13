@@ -329,6 +329,11 @@ async def inspect_material(file: Annotated[UploadFile, File()], subject_id: Anno
 @app.get('/v1/knowledge/{entry_id}')
 def read_knowledge_source(entry_id: str, actor_id: UUID = Depends(current_actor)):
     from .knowledge_retrieval import KnowledgeRetriever
+    if entry_id.startswith('WEB-VOLC-'):
+        from .web_knowledge import WebKnowledge
+        item=WebKnowledge().resolve(entry_id)
+        if not item:raise HTTPException(status_code=404,detail='该网络参考资料已过期或暂不可用。')
+        return item
     retriever = KnowledgeRetriever()
     item = retriever.by_id.get(entry_id)
     if not item:

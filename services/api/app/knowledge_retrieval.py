@@ -155,6 +155,11 @@ class KnowledgeRetriever:
         """Read exact cached references, with current scope and version checks."""
         hits=[]
         for ref in list(dict.fromkeys(refs))[:8]:
+            if ref.startswith('WEB-VOLC-'):
+                from .web_knowledge import WebKnowledge
+                doc=WebKnowledge().resolve(ref)
+                if doc:hits.append(doc)
+                continue
             doc=self.by_id.get(ref)
             if not doc or doc.get('numeric_pending_review'):continue
             if self.assembler and doc['disease_code']!='TY':

@@ -30,7 +30,7 @@ class AgentTests(unittest.TestCase):
                         if 'authorized_material_pages' in m['content'])
         self.assertEqual(len(payloads), 1)
         self.assertIn('不能排除肺炎', str(payloads))
-        self.assertEqual(reply['prompt_version'], 'patient-analysis-narrative-v11-reading-depth')
+        self.assertEqual(reply['prompt_version'], 'patient-analysis-narrative-v12-web-references')
         self.assertEqual(reply['text'], '票据记载120元。\n\n检查记录写到不能排除肺炎。')
         self.assertEqual(len(events), 2)
         self.assertEqual(json.loads(tools.execute.call_args_list[1].args[1]),

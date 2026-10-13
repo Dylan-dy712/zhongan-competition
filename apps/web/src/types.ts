@@ -68,7 +68,7 @@ export interface Conversation {
 export interface ChatAnswer {text: string; evidence_refs: string[]; history_refs: string[];
   prompt_version?:string; analysis_run_id?:string; knowledge_refs?:string[]; knowledge_sources?:KnowledgeSource[]; citations?:InlineCitation[]}
 export interface InlineCitation {quote:string;source_refs:string[]}
-export interface KnowledgeSource {entry_id:string;title:string;source:string;source_path?:string;scope:string;version:string;reference_policy?:string;content?:string}
+export interface KnowledgeSource {entry_id:string;title:string;source:string;source_path?:string;scope:string;version:string;reference_policy?:string;content?:string;retrieval_provider?:string;retrieved_at?:string;published_at?:string}
 export interface ToolEvent {tool: string; status: string; run_id?: string}
 export interface ChatTurn {
   turn_id: string; request_id: string; question: string;
