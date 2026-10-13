@@ -15,6 +15,7 @@ import re
 import subprocess
 import time
 import unicodedata
+import ast
 from statistics import median
 from pydantic import ValidationError
 
@@ -97,6 +98,41 @@ def normalize(value):
     return text
 
 
+def explicit_entities(value):
+    """Normalize explicitly delimited reference lists, preserving brackets inside names.
+
+    This is format conversion, not clinical entity inference from free prose.
+    """
+    if isinstance(value, list):
+        return value
+    if not isinstance(value, str):
+        return [value]
+    text = unicodedata.normalize('NFKC', value).strip()
+    if text.startswith('[') and text.endswith(']'):
+        try:
+            parsed = ast.literal_eval(text)
+            if isinstance(parsed, list):
+                return parsed
+        except (ValueError, SyntaxError):
+            pass
+        text = text[1:-1]
+    result, chars, depth = [], [], 0
+    for char in text:
+        if char in '([':
+            depth += 1
+        elif char in ')]':
+            depth = max(0, depth - 1)
+        if char in ',;、' and depth == 0:
+            if ''.join(chars).strip():
+                result.append(''.join(chars).strip())
+            chars = []
+        else:
+            chars.append(char)
+    if ''.join(chars).strip():
+        result.append(''.join(chars).strip())
+    return result
+
+
 def layout_text(cache):
     """Reconstruct OCR rows from boxes without using reference labels or values."""
     lines = cache.get('lines', [])
@@ -121,7 +157,7 @@ def atoms(fields):
         value = fields.get(key)
         if value is None or value == '' or value == []:
             continue
-        values = value if isinstance(value, list) else [value]
+        values = explicit_entities(value) if key in DIAGNOSES + ('medication',) else value if isinstance(value, list) else [value]
         result[key].update(normalize(v) for v in values if v is not None and v != '')
     for block in fields.get('blocks', []):
         for line in block.get('costDetailList', []):
@@ -174,7 +210,7 @@ def score(manifest, predictions_dir):
     combined = Counter()
     for count in totals.values():
         combined.update(count)
-    return {'policy': 'document-annotated-opportunities-exact-v1', 'official_metric_verified': False,
+    return {'policy': 'document-explicit-list-opportunities-exact-v2', 'official_metric_verified': False,
             'five_core_categories_fully_annotated': False,
             'limits': ['surgery/drug entities inside prose lack an independent normalized gold',
                        'absent reference fields are unannotated; inferred cost categories scored separately later',

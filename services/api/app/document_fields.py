@@ -6,7 +6,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-PROMPT_VERSION = 'document-fields-evidence-v4'
+PROMPT_VERSION = 'document-fields-evidence-v5'
 SCHEMA_VERSION = 'document-fields-v1'
 DIAGNOSES = ('diagnosis', 'admissionDiagnosis', 'dischargeDiagnosis', 'primaryDiagnosis', 'secondaryDiagnosis')
 NUMBERS = ('inpatientDays', 'totalMedicalExpense', 'personnelExpense', 'selfPaymentByClass',
@@ -76,7 +76,7 @@ def extract_document(provider, text, image_bytes=None):
 输出fields、confidence、evidence三个对象。未记载或无法读清的字段省略，不补零。
 医院名称hospitalName用数组；所有诊断字段用数组，保留疑似/否定/既往限定，分别保留入院与出院诊断，不从检查结果推断确诊。
 日期归一化为YYYY-MM-DD，原文缺年/月/日不能补造。inpatientDays仅取明确住院天数，不自行计算。
-medication为处方中原文药物及剂量用法的完整转述字符串，不把费用药品行当作临床用药。
+medication为处方中原文药品名数组，保留原图名称中的规格、浓度、剂型和商品名，不扩写剂量用法；不把费用药品行当作临床用药。
 金额为人民币元数值，不把个人现金支付、个人账户、自费、乙类先行自付、个人总负担混用；不同标签不求和。
 医保字段名称对应：totalMedicalExpense总费用；personnelExpense个人自费；selfPaymentByClass分类自负；amountSelfTotal自付总额；deductible_std起付线；insuranceRange医保范围；exceededPriceLimitment超限价；otherPayment其他支付；reductionsExemptions减免；insurancePayment医保支付；poolingPaymentTotal统筹支付；personalAccountPayment个人账户支付；personalCashPayment个人现金支付；reSiSi二次报销；medicalRescue医疗救助；civilServantSubsidy公务员补助；teacherPositionSubsidy教师补助；supplementaryFundPayment补充基金；totalPersonalBurden个人总负担；mutualAidAccountPayment共济账户；publicEntMedicalSubsidy公企补助；medicalWalletPayment医保钱包。
 费用明细放blocks数组，block含block_index、costDetailList、settlementDate、printTotal，只有明确记载的后两字段才输出。每行含detailName，按原文可选quantity、unit、feeAmount、itemCategoryCode、itemCategoryName、remark。保留逐行关系，不把单价当金额，不把每页印刷总额相加。分类只取原文明示，不自行推断。
@@ -102,7 +102,7 @@ medication为处方中原文药物及剂量用法的完整转述字符串，不�
             continue
         actual = original_quote(text, quote)
         if actual is None:
-            if image_bytes is not None and key in result.image_boxes:
+            if image_bytes is not None:
                 vision_only.append(key)
             else:
                 unsupported.append(key)
@@ -114,6 +114,9 @@ medication为处方中原文药物及剂量用法的完整转述字符串，不�
         result.evidence.pop(key, None)
     return {**result.model_dump(mode='json'), 'rejected_evidence_fields': unsupported,
             'vision_only_evidence_fields': vision_only,
+            'evidence_verification': {key: ('visual_transcription_requires_independent_review'
+                if key in vision_only else 'literal_ocr_span') for key in result.fields},
+            'release_eligible': False,
             'confidence_method': 'model_self_report_uncalibrated',
             'prompt_version': PROMPT_VERSION, 'schema_version': SCHEMA_VERSION,
             'requires_review': True, 'raw_response': content,
