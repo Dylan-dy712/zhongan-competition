@@ -100,7 +100,7 @@ class ReportEfficiencyTests(unittest.TestCase):
         packed=[{'document':'D1','page':0,'spans':[['S1',text]]}]
         review_analysis(config,packed,'请核对这个判断',citations=[{'quote':'请核对这个判断','source_refs':['S1']}])
         body=json.loads(config._call.call_args.args[0][1]['content'])
-        self.assertEqual(body['original_material_pages'],packed)
+        self.assertEqual(body['original_material_pages'],[{'document':'D1','page':0,'text':'[来源:S1]'+text}])
         self.assertEqual(body['citation_links'][0]['source_refs'],['S1'])
         self.assertEqual(config._call.call_args.args[0][1]['content'].count(text),1)
 
