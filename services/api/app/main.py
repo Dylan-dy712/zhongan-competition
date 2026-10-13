@@ -865,7 +865,8 @@ def process_chat_message(conversation_id, body, actor_id, conn, input_kind='user
 
     try:
         answer, events = run_agent(history, question, turn['attachments'], tools, on_event=progress,
-                                  analysis_mode=input_kind == 'analysis_ready')
+                                  analysis_mode=input_kind == 'analysis_ready',
+                                  initial_analysis=tools.reusable_analysis() if input_kind == 'analysis_ready' else None)
         if analysis_run_id is not None:
             # Recheck the actual current case and run after slow model generation.
             current = chats.require_conversation(conn, actor_id, conversation_id)
@@ -918,6 +919,14 @@ def continue_analysis(conversation_id: UUID, run_id: UUID,
         ORDER BY created_at DESC,run_id DESC LIMIT 1''', (run.case_id,)).fetchone()
     if latest['run_id'] != run_id:
         raise HTTPException(409, '已有更新的分析任务')
+    documents = conn.execute('''SELECT document_id,document_version,source_hash FROM documents
+        WHERE case_id=%s AND NOT EXISTS (SELECT 1 FROM document_replacements replacement
+        WHERE replacement.old_document_id=documents.document_id) ORDER BY document_id''',
+        (run.case_id,)).fetchall()
+    frozen = conn.execute('SELECT document_versions FROM analysis_runs WHERE run_id=%s',(run_id,)).fetchone()
+    actual = [{**d,'document_id':str(d['document_id'])} for d in documents]
+    if actual != sorted(frozen['document_versions'],key=lambda d:d['document_id']):
+        raise HTTPException(409,'材料已更新，请先分析最新材料。')
     request_id = uuid5(NAMESPACE_URL, f'zhongan:{ANALYSIS_PROMPT_VERSION}:{conversation_id}:{run_id}')
     return process_chat_message(conversation_id, ChatMessage(request_id=request_id,
         message='请结合本次实际材料和我关注的问题，写一份温和清楚、连贯自然的文字分析，直接在对话里解释；内容重点由材料决定，有不确定的地方就说明。'),

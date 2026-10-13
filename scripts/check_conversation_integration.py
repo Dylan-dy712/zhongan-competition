@@ -249,7 +249,7 @@ def main():
                 completed=client.post(base+f'/analyses/{run_id}/continue',headers=headers)
             check(completed.status_code==200,'analysis completion continues with real evidence')
             check(completed.json()['answer']['analysis_run_id']==str(run_id) and
-                  completed.json()['answer']['prompt_version']=='patient-analysis-narrative-v7-inline-citations',
+                  completed.json()['answer']['prompt_version']=='patient-analysis-narrative-v8-shared-draft',
                   'personal narrative is model-generated and bound to the exact analysis run')
             with patch('services.api.app.conversation_agent.AgentModel',side_effect=AssertionError('replay')):
                 replay=client.post(base+f'/analyses/{run_id}/continue',headers=headers)
@@ -266,6 +266,9 @@ def main():
 
             supplement=client.post(base+'/documents',headers=headers,files={'file':('detail.txt','合成费用明细：检查费80元，药费40元。\n医疗总费用：130元。\n医疗总费用：140元。'.encode(),'text/plain')})
             check(supplement.status_code==201,'supplemental document accepted')
+            with patch('services.api.app.conversation_agent.AgentModel',side_effect=AssertionError('stale cache must not invoke a model')):
+                stale=client.post(base+f'/analyses/{run_id}/continue',headers=headers)
+            check(stale.status_code==409,'new material invalidates cached continuation before another analysis is queued')
             with connection() as conn:
                 tools=CareTools(conn,actor,conversation_id,sent.json()['turn_id'])
                 second_run=tools.execute('start_analysis','{}')

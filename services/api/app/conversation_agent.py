@@ -1,6 +1,7 @@
 """Bounded model/tool loop over authenticated, durable conversations."""
 
 import json
+import os
 import time
 from datetime import datetime, timezone
 from typing import Literal
@@ -27,7 +28,7 @@ from .contracts.knowledge import DiseaseCode
 
 
 PROMPT_VERSION = 'conversation-agent-v3'
-ANALYSIS_PROMPT_VERSION = 'patient-analysis-narrative-v7-inline-citations'
+ANALYSIS_PROMPT_VERSION = 'patient-analysis-narrative-v8-shared-draft'
 ANALYSIS_INSTRUCTION = """
 本轮是暖暖看完资料后，对用户讲清这次就医情况。遵循上面的对话语气，读起来要像人在耐心讲解。
 表达顺序：开头两三句抓住这次就医的整体情况；然后用编号分主题解释；最后单独写“**接下来，可以这样做**”。
@@ -184,6 +185,21 @@ class AgentModel:
 
 
 class CareTools:
+    def reusable_analysis(self):
+        # This read rechecks consent, current document versions, frozen context
+        # and report policy. Cached model prose is never treated as approved.
+        from .material_report import get_material_report
+        from .report_llm import PROMPT_VERSION as report_prompt
+        report = get_material_report(self.conn,self.actor_id,self.conversation_id)
+        if report.get('status') != 'available':
+            return None
+        row = self.conn.execute('''SELECT candidates->'patient_analysis' AS draft
+            FROM model_extractions WHERE run_id=%s AND prompt_version=%s
+            AND model_id=%s AND provider=%s AND status='completed' ORDER BY created_at DESC LIMIT 1''',
+            (report['run_id'],report_prompt,os.environ.get('LLM_MODEL_ID',''),
+             os.environ.get('LLM_PROVIDER','openai_compatible'))).fetchone()
+        return row['draft'] if row else None
+
     def __init__(self, conn, actor_id, conversation_id,turn_id=None,force_analysis=False):
         self.conn, self.actor_id, self.conversation_id = conn, actor_id, conversation_id
         self.evidence_ids, self.history_ids, self.history_cases = set(), set(), set()
@@ -337,7 +353,8 @@ class CareTools:
                 raise AccessDenied()
 
 
-def run_agent(history, question, attachments, tools, model=None, on_event=None, analysis_mode=False):
+def run_agent(history, question, attachments, tools, model=None, on_event=None, analysis_mode=False,
+              initial_analysis=None):
     started = time.monotonic()
     model = model or (AgentModel(analysis_mode=True) if analysis_mode else AgentModel())
     messages = [{'role': 'system', 'content': SYSTEM +
@@ -414,11 +431,33 @@ def run_agent(history, question, attachments, tools, model=None, on_event=None, 
         if offset is not None or truncated:
             messages.append({'role': 'user', 'content':
                 '材料读取尚未覆盖全部页。必须说明本轮只解读已读取的部分；不得把未读取的内容说成缺资料。'})
+    seed = None
+    if (analysis_mode and initial_analysis and offset is None and not truncated
+            and getattr(type(model),'review_analysis',None) is not None
+            and not any(batch.get('quality_warnings') for batch in source_batches)):
+        try:
+            wire = AnalysisWireReply.model_validate(initial_analysis)
+            if wire.history_refs or not wire.evidence_refs or _unsafe(wire.text.replace('**','')):
+                raise ValueError('UNSAFE_CACHED_ANALYSIS')
+            if not set(wire.evidence_refs).issubset(set(aliases.values())):
+                raise ValueError('STALE_CACHED_SOURCES')
+            bound = bind_citations(wire.text,wire.citations,{},wire.evidence_refs,wire.knowledge_refs)
+            if not bound:
+                raise ValueError('CACHED_CITATIONS_REQUIRED')
+            tools.validate_reply(AgentReply.model_validate({**wire.model_dump(),'citations':bound}))
+            seed = {'content':json.dumps(wire.model_dump(),ensure_ascii=False)}
+        except (ValueError,TypeError):
+            seed = None
+    reused_draft = seed is not None
     for round_index in range(2 if analysis_mode else 5):
         if analysis_mode and on_event:
             on_event(events)
         model_started = time.monotonic()
-        message = model.complete(messages, allow_tools=not analysis_mode and round_index < 4 and budget > 0)
+        if seed is not None and round_index == 0:
+            message = seed
+        else:
+            reused_draft = False
+            message = model.complete(messages, allow_tools=not analysis_mode and round_index < 4 and budget > 0)
         model_seconds += time.monotonic() - model_started
         calls = message.get('tool_calls') or []
         if calls:
@@ -526,6 +565,7 @@ def run_agent(history, question, attachments, tools, model=None, on_event=None, 
                 'model_input_characters':sum(len(m.get('content') or '') for m in messages),
                 'model_calls':len(model.usage) if isinstance(getattr(model,'usage',None),list) else round_index+1+review_calls, 'model_seconds':round(model_seconds+review_seconds,3),
                 'partial_delivery':partial_delivery, 'review_calls':review_calls, 'review_seconds':round(review_seconds,3),
+                'draft_reused':reused_draft,
                 'total_seconds':round(time.monotonic()-started,3)}
         model_id = getattr(getattr(model, 'config', None), 'model_id', None)
         if isinstance(model_id, str):
