@@ -4,6 +4,7 @@ import json
 import os
 import re
 import time
+from urllib.parse import urlparse
 from typing import Literal
 
 import requests
@@ -92,6 +93,8 @@ class OpenAiCompatibleExtractor:
         self.provider = os.environ.get("LLM_PROVIDER", "openai_compatible")
         if not self.base_url or not self.api_key or not self.model_id:
             raise RuntimeError("LLM_NOT_CONFIGURED")
+        if self.provider == 'mock' and urlparse(self.base_url).hostname not in {'localhost', '127.0.0.1', '::1'}:
+            raise RuntimeError('MOCK_PROVIDER_MUST_BE_LOCAL')
 
     def _call(self, messages, *, timeout=45, workload='review'):
         response = requests.post(
@@ -104,6 +107,8 @@ class OpenAiCompatibleExtractor:
         )
         response.raise_for_status()
         payload = response.json()
+        if getattr(self, 'provider', 'openai_compatible') == 'mock' and payload.get('execution_mode') != 'mock':
+            raise RuntimeError('MOCK_RESPONSE_MODE_MISMATCH')
         return payload, payload["choices"][0]["message"]["content"]
 
     def extract(self, material: str):

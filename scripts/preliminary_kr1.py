@@ -191,6 +191,8 @@ def score(manifest, predictions_dir, include_inferred_categories=False):
             if run['status'] != 'missing':
                 raise ValueError('prediction source does not match manifest')
         valid = run.get('status') == 'completed'
+        if run.get('extraction_mode') == 'mock':
+            raise ValueError('mock predictions are for plumbing only and cannot be scored as effect evidence')
         failed += int(not valid)
         predicted = atoms(run.get('result', {}).get('fields', {}), include_inferred_categories) if valid else {}
         # Missing reference keys are unannotated, not verified negatives.
@@ -281,11 +283,13 @@ def main():
                 raise ValueError('OCR layout changed; use a new predictions directory')
             if previous.get('vision') != args.vision:
                 raise ValueError('vision mode changed; use a new predictions directory')
+            if previous.get('extraction_mode') != ('mock' if provider.provider == 'mock' else 'live'):
+                raise ValueError('execution mode changed; use a new predictions directory')
             if previous.get('status') == 'completed':
                 return previous['status']
         run = {k: row[k] for k in ('document_id', 'image_sha256', 'ocr_sha256')}
         run.update(model_id=provider.model_id, prompt_version=PROMPT_VERSION, code_revision=revision,
-                   extraction_mode='live', ocr_mode='replay', vision=args.vision,
+                   extraction_mode='mock' if provider.provider == 'mock' else 'live', ocr_mode='replay', vision=args.vision,
                    implementation_sha256=implementation_hashes)
         start = time.monotonic()
         try:
