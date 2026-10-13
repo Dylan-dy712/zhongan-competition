@@ -9,7 +9,8 @@ import tarfile
 import zipfile
 
 
-SOURCE_ROOTS = ('apps/web/', 'services/', 'scripts/', 'contracts/', 'docs/', 'deploy/', 'README.md')
+SOURCE_ROOTS = ('apps/web/', 'services/', 'scripts/', 'contracts/', 'docs/', 'deploy/',
+                'output_dir/product-design/assets/', 'README.md')
 
 
 def main():

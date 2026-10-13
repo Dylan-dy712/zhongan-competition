@@ -12,7 +12,8 @@ export default function CareScenarioDemo(){
   const record=cases[selected];
   const labels=new Set(cases.flatMap(c=>c.insights.map(i=>i.label)));
   return <section aria-label="三病种关怀生成示例">
-    <p>以下为真实模型调用后保存的结果，当前页面不实时调用模型。</p>
+    <p>{record.execution_mode==='mock'?'当前为Mock接口回放，不是新的模型调用，也不用于效果评分。':
+      '以下为真实模型调用后保存的结果，当前页面不实时调用模型。'}</p>
     <p>覆盖骨折、肺炎、冠心病；两份骨折材料展示不同就医过程和照护需求。模型：{record.model_id} · 提示词：{record.prompt_version}。</p>
     <div className="quality-demo-options">{cases.map((c,i)=><button key={c.id} aria-pressed={selected===i}
       onClick={()=>setSelected(i)}>{c.disease}{c.id.includes('caregiver')?' · 家人陪同':c.id.includes('independent')?' · 独居门诊':''}</button>)}</div>

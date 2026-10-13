@@ -58,6 +58,7 @@ def main():
             parser.error('live generation requires private model configuration')
         os.environ.update({k:str(v) for k,v in load(args.config).items() if k.startswith('LLM_')})
     output = Path(args.output_dir)
+    mode = 'mock' if os.environ.get('LLM_PROVIDER') == 'mock' else 'live'
     if output.resolve().is_relative_to(Path(__file__).resolve().parents[1]):
         parser.error('model drafts must remain outside the public repository')
     if args.export_only:
@@ -84,7 +85,8 @@ def main():
         if path.exists():
             previous = load(path)
             if previous.get('prompt_version') == PROMPT_VERSION and previous.get('status') == 'completed' and \
-               previous.get('input_sha256') == input_hash and previous.get('model_id') == os.environ['LLM_MODEL_ID']:
+               previous.get('input_sha256') == input_hash and previous.get('model_id') == os.environ['LLM_MODEL_ID'] and \
+               previous.get('execution_mode') == mode:
                 return previous
         start = time.monotonic()
         report = draft_report(case['material'], [], {'concern':case['user']},
@@ -106,7 +108,7 @@ def main():
             errors.append('no_report')
         candidates = [c for c in insights.get('candidates', []) if c.get('evidence_quote') in case['material']]
         result = {'id':case['id'], 'disease':case['disease'], 'data_origin':'synthetic',
-                  'execution_mode':'live', 'model_id':os.environ['LLM_MODEL_ID'],
+                  'execution_mode':mode, 'model_id':os.environ['LLM_MODEL_ID'],
                   'prompt_version':PROMPT_VERSION, 'material':case['material'], 'user_input':case['user'],
                   'input_sha256':input_hash,
                   'draft':draft, 'insights':candidates, 'source_check_errors':errors,
@@ -118,7 +120,7 @@ def main():
         return result
     with ThreadPoolExecutor(max_workers=2) as pool:
         results=list(pool.map(run,CASES))
-    summary={'data_origin':'synthetic','execution_mode':'live', 'medical_approval':False,
+    summary={'data_origin':'synthetic','execution_mode':mode, 'medical_approval':False,
              'diseases':sorted({r['disease'] for r in results}),
              'complete_cases':sum(r['status']=='completed' for r in results), 'cases':len(results),
              'pain_labels':sorted({c['label'] for r in results for c in r['insights']}),
