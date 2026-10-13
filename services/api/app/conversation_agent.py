@@ -20,7 +20,7 @@ from .model_workloads import workload_options, model_post, uses_deepseek_strict
 from .analysis_format import strict_analysis_tool, decode_analysis_tool
 from .analysis_review import review_analysis
 from .analysis_partial import verified_partial
-from .inline_citations import InlineCitation, bind_citations
+from .inline_citations import InlineCitation, bind_citations, canonical_analysis_citations, MAX_ANALYSIS_REFERENCES
 from .care_voice import CARE_VOICE
 from .knowledge_retrieval import KnowledgeRetriever
 from .knowledge_assembler import KnowledgeAssemblerError
@@ -28,7 +28,7 @@ from .contracts.knowledge import DiseaseCode
 
 
 PROMPT_VERSION = 'conversation-agent-v3'
-ANALYSIS_PROMPT_VERSION = 'patient-analysis-narrative-v8-shared-draft'
+ANALYSIS_PROMPT_VERSION = 'patient-analysis-narrative-v9-canonical-citations'
 ANALYSIS_INSTRUCTION = """
 本轮是暖暖看完资料后，对用户讲清这次就医情况。遵循上面的对话语气，读起来要像人在耐心讲解。
 表达顺序：开头两三句抓住这次就医的整体情况；然后用编号分主题解释；最后单独写“**接下来，可以这样做**”。
@@ -42,7 +42,7 @@ ANALYSIS_INSTRUCTION = """
 检验值没有原文评价或参考范围时，不自行判正常异常；难断句的“暂未回报异常”等表述保留限定，不擅自改写含义。
 检索知识可补充一般的疾病、术语、康复或费用解释，须注明是一般知识并引用knowledge_refs；不得把指南当成这个人的诊断、适应证或新处方，须满足知识的适用范围。
 只用编号和**少量关键加粗**；不使用HTML、表格、链接或其他Markdown。加粗包含完整的“疑似、不能排除、未见、既往”等限定。
-本轮材料原文以S1等短编号提供；evidence_refs只填这些短编号，最多20个；知识引用填检索返回的entry_id，最多4个。正文不写来源编号，text最多6000字符，history_refs最多12个。
+本轮材料原文以S1等短编号提供；evidence_refs只填这些短编号，最多80个；知识引用填检索返回的entry_id，最多4个。正文不写来源编号，text最多6000字符，history_refs最多12个。
 另返回citations数组，每项为quote和source_refs。quote逐字复制正文中唯一的一句话（去掉**，不跨行）；source_refs仅列支持该句的S编号或知识entry_id，并同时列入evidence_refs或knowledge_refs。每条病例事实、金额、医嘱和一般知识解释都要就近关联真正支持它的来源；纯关怀话语无需引用。禁止将全部来源复制给每句话。
 旧回答不能替代本次材料。没有知识命中时按材料解释，不编造背景知识。
 下面是口述风格示范，不是本轮事实，实际诊断、时间和金额必须来自本轮资料：
@@ -86,14 +86,14 @@ SYSTEM = """你是暖暖，一个能持续对话的医护关怀助手。自然�
 class AgentReply(BaseModel):
     model_config = ConfigDict(extra='forbid')
     text: str = Field(min_length=1, max_length=6000)
-    evidence_refs: list[UUID] = Field(default_factory=list, max_length=20)
+    evidence_refs: list[UUID] = Field(default_factory=list, max_length=MAX_ANALYSIS_REFERENCES)
     history_refs: list[UUID] = Field(default_factory=list, max_length=12)
     knowledge_refs: list[str] = Field(default_factory=list, max_length=4)
     citations: list[InlineCitation] = Field(default_factory=list, max_length=40)
 
 
 class AnalysisWireReply(AgentReply):
-    evidence_refs: list[str] = Field(default_factory=list, max_length=20)
+    evidence_refs: list[str] = Field(default_factory=list, max_length=MAX_ANALYSIS_REFERENCES)
 
     @field_validator('evidence_refs',mode='before')
     @classmethod
@@ -195,9 +195,9 @@ class CareTools:
         if report.get('status') != 'available':
             return None
         row = self.conn.execute('''SELECT candidates->'patient_analysis' AS draft
-            FROM model_extractions WHERE run_id=%s AND prompt_version=%s
+            FROM model_extractions WHERE run_id=%s AND prompt_version=ANY(%s)
             AND model_id=%s AND provider=%s AND status='completed' ORDER BY created_at DESC LIMIT 1''',
-            (report['run_id'],report_prompt,os.environ.get('LLM_MODEL_ID',''),
+            (report['run_id'],[report_prompt,'six-section-care-report-v8-shared-analysis'],os.environ.get('LLM_MODEL_ID',''),
              os.environ.get('LLM_PROVIDER','openai_compatible'))).fetchone()
         return row['draft'] if row else None
 
@@ -392,7 +392,10 @@ def run_agent(history, question, attachments, tools, model=None, on_event=None, 
         # treatment facts and is not a suitable outline for a personal explanation.
         offset, size = 0, 0
         source_batches, truncated = [], False
-        while budget > 0 and size < 28000:
+        # Database paging is independent of model tool rounds. Bound both the
+        # full source packet and the number of rows without stopping at 1200.
+        source_rows = 0
+        while source_rows < 10000 and size < 28000:
             result = tools.execute('read_materials', json.dumps({'offset': offset, 'page_size': 200, 'balanced': True}))
             if result.get('status') != 'available':
                 raise RuntimeError('ANALYSIS_SOURCES_UNAVAILABLE')
@@ -407,13 +410,18 @@ def run_agent(history, question, attachments, tools, model=None, on_event=None, 
             result = {**result, 'evidence': included}
             source_batches.append(result)
             events.append({'tool': 'read_materials', 'status': 'available'})
-            budget -= 1
+            source_rows += len(result.get('evidence', []))
             analysis_has_evidence |= bool(result.get('evidence'))
             if on_event:
                 on_event(events)
-            offset = result.get('next_offset')
+            next_offset = result.get('next_offset')
+            if next_offset is not None and (not isinstance(next_offset,int) or next_offset <= offset):
+                raise RuntimeError('ANALYSIS_SOURCE_PAGING_INVALID')
+            offset = next_offset
             if offset is None or truncated:
                 break
+            if not result.get('evidence'):
+                raise RuntimeError('ANALYSIS_SOURCE_PAGING_INVALID')
         packed, aliases = pack_sources(source_batches)
         messages.append({'role': 'user', 'content': json.dumps(
             {'authorized_material_pages': packed,
@@ -442,11 +450,13 @@ def run_agent(history, question, attachments, tools, model=None, on_event=None, 
                 raise ValueError('UNSAFE_CACHED_ANALYSIS')
             if not set(wire.evidence_refs).issubset(set(aliases.values())):
                 raise ValueError('STALE_CACHED_SOURCES')
-            bound = bind_citations(wire.text,wire.citations,{},wire.evidence_refs,wire.knowledge_refs)
+            normalized = canonical_analysis_citations(wire.model_dump(mode='json'),aliases,
+                [page['document'] for page in knowledge_pages])
+            bound = normalized['citations']
             if not bound:
                 raise ValueError('CACHED_CITATIONS_REQUIRED')
-            tools.validate_reply(AgentReply.model_validate({**wire.model_dump(),'citations':bound}))
-            seed = {'content':json.dumps(wire.model_dump(),ensure_ascii=False)}
+            tools.validate_reply(AgentReply.model_validate(normalized))
+            seed = {'content':json.dumps(normalized,ensure_ascii=False)}
         except (ValueError,TypeError):
             seed = None
     reused_draft = seed is not None
@@ -497,8 +507,12 @@ def run_agent(history, question, attachments, tools, model=None, on_event=None, 
                         raise ValueError('UNKNOWN_EVIDENCE_REFERENCE')
                 if getattr(type(model), 'supports_inline_citations', False) and wire.evidence_refs and not wire.citations:
                     raise ValueError('INLINE_CITATIONS_REQUIRED')
-                bound = bind_citations(wire.text, wire.citations, aliases, refs, wire.knowledge_refs)
-                reply = AgentReply.model_validate({**wire.model_dump(mode='json'), 'evidence_refs':list(dict.fromkeys(refs)), 'citations':bound})
+                if wire.citations:
+                    normalized = canonical_analysis_citations(wire.model_dump(mode='json'),aliases,
+                        [page['document'] for page in knowledge_pages])
+                else:
+                    normalized = {**wire.model_dump(mode='json'),'evidence_refs':list(dict.fromkeys(refs))}
+                reply = AgentReply.model_validate(normalized)
             else:
                 reply = AgentReply.model_validate_json(content)
         except (ValidationError, ValueError) as exc:
@@ -511,7 +525,7 @@ def run_agent(history, question, attachments, tools, model=None, on_event=None, 
             messages.extend([
                 {'role': 'assistant', 'content': content},
                 {'role': 'user', 'content': '格式错误项：' + (errors or 'JSON结构') +
-                 '。只修复回答格式，不添加新事实。必须是JSON对象，且仅包含text（非空字符串，最多6000字符）、evidence_refs（最多20个' +
+                 '。只修复回答格式，不添加新事实。必须是JSON对象，且仅包含text（非空字符串，最多6000字符）、evidence_refs（最多80个' +
                  ('材料中S1等短编号' if analysis_mode else '实际来源UUID字符串') +
                  '）、history_refs（最多12个历史UUID字符串）、knowledge_refs（最多4个真实检索条目ID）、citations（逐条quote原句与source_refs数组，quote在正文中须唯一且不跨行）。只选择支持正文关键事实的少量直接来源，绝对不要复制整个材料编号集合；没有引用时用空数组。text可保留编号与**加粗**，保留citations中的逐条来源绑定，不要输出其他字段。'},
             ])
@@ -563,6 +577,7 @@ def run_agent(history, question, attachments, tools, model=None, on_event=None, 
                 for ref in dict.fromkeys(reply.knowledge_refs)]
         if analysis_mode:
             result['performance'] = {'source_fragments':len(aliases), 'source_characters':size,
+                'source_read_complete':offset is None and not truncated,
                 'model_input_characters':sum(len(m.get('content') or '') for m in messages),
                 'model_calls':len(model.usage) if isinstance(getattr(model,'usage',None),list) else round_index+1+review_calls, 'model_seconds':round(model_seconds+review_seconds,3),
                 'partial_delivery':partial_delivery, 'review_calls':review_calls, 'review_seconds':round(review_seconds,3),

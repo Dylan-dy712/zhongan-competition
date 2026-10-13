@@ -1,6 +1,8 @@
 """Validate explicit claim-to-source links. Never infer a link from a report-wide list."""
 from pydantic import BaseModel, ConfigDict, Field
 
+MAX_ANALYSIS_REFERENCES = 80
+
 
 class InlineCitation(BaseModel):
     model_config = ConfigDict(extra='forbid')
@@ -22,3 +24,16 @@ def bind_citations(text, citations, aliases, evidence_refs, knowledge_refs):
             raise ValueError('CITATION_SOURCE_NOT_AUTHORIZED')
         bound.append({'quote': quote, 'source_refs': refs})
     return bound
+
+
+def canonical_analysis_citations(data, aliases, knowledge_ids):
+    """Derive metadata from explicit links, checked against actual read sources."""
+    evidence = set(aliases.values())
+    knowledge = set(knowledge_ids)
+    bound = bind_citations(data['text'],data.get('citations',[]),aliases,evidence,knowledge)
+    refs = list(dict.fromkeys(ref for citation in bound for ref in citation['source_refs']))
+    evidence_refs = [ref for ref in refs if ref in evidence]
+    knowledge_refs = [ref for ref in refs if ref in knowledge]
+    if len(evidence_refs)>MAX_ANALYSIS_REFERENCES or len(knowledge_refs)>4:
+        raise ValueError('ANALYSIS_CITATION_LIMIT')
+    return {**data,'citations':bound,'evidence_refs':evidence_refs,'knowledge_refs':knowledge_refs}

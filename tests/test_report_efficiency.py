@@ -68,8 +68,11 @@ class ReportEfficiencyTests(unittest.TestCase):
         self.assertFalse(reply['performance']['draft_reused'])
 
     def test_partial_or_low_confidence_sources_do_not_reuse_draft(self):
-        for extra in [{'next_offset':200},{'quality_warnings':[{'name':'模糊照片'}]}]:
+        for extra in [{'next_offset':200,'evidence':[{'evidence_id':str(uuid4()),'text':'长'*28001}]},
+                      {'quality_warnings':[{'name':'模糊照片'}]}]:
             _,draft,tools,model=self.fixture()
+            if 'evidence' in extra:
+                extra={**extra,'evidence':tools.execute.return_value['evidence']+extra['evidence']}
             tools.execute.return_value.update(extra)
             run_agent([], '解释', [], tools,model=model,analysis_mode=True,initial_analysis=draft)
             model.complete.assert_called_once()

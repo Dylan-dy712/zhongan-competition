@@ -894,9 +894,11 @@ def process_chat_message(conversation_id, body, actor_id, conn, input_kind='user
         # Log only safe classifications, never provider bodies, prompts or credentials.
         import logging
         provider_response = getattr(exc, 'response', None)
-        logging.getLogger(__name__).warning('Chat generation failed: type=%s provider_status=%s',
-            type(exc).__name__, getattr(provider_response, 'status_code', None))
-        chats.finish_turn(conn, actor_id, conversation_id, turn, events=events, error='AGENT_UNAVAILABLE')
+        from .generation_errors import generation_error_code
+        code = generation_error_code(exc)
+        logging.getLogger(__name__).warning('Chat generation failed: type=%s code=%s provider_status=%s',
+            type(exc).__name__, code, getattr(provider_response, 'status_code', None))
+        chats.finish_turn(conn, actor_id, conversation_id, turn, events=events, error=code)
         conn.commit()
         raise HTTPException(503, '暂时无法完成回答，消息已保存，可以重试。') from None
 

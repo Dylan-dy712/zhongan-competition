@@ -17,7 +17,7 @@ from psycopg import sql
 
 from services.api.app import main as api
 from services.api.app import conversation_repository as chats
-from services.api.app.conversation_agent import CareTools
+from services.api.app.conversation_agent import CareTools, ANALYSIS_PROMPT_VERSION
 from services.api.app.repository import AccessDenied, connect, token_digest
 from services.api.app.worker import claim_run, process_run
 from services.api.app.report_builder import SECTION_TYPES
@@ -249,7 +249,7 @@ def main():
                 completed=client.post(base+f'/analyses/{run_id}/continue',headers=headers)
             check(completed.status_code==200,'analysis completion continues with real evidence')
             check(completed.json()['answer']['analysis_run_id']==str(run_id) and
-                  completed.json()['answer']['prompt_version']=='patient-analysis-narrative-v8-shared-draft',
+                  completed.json()['answer']['prompt_version']==ANALYSIS_PROMPT_VERSION,
                   'personal narrative is model-generated and bound to the exact analysis run')
             with patch('services.api.app.conversation_agent.AgentModel',side_effect=AssertionError('replay')):
                 replay=client.post(base+f'/analyses/{run_id}/continue',headers=headers)
