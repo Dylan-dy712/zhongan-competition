@@ -17,7 +17,7 @@ class ReviewTests(unittest.TestCase):
         verdict,usage=review_analysis(config,source,'1. **未见肺炎**')
         self.assertTrue(verdict.accepted)
         messages=config._call.call_args.args[0]
-        self.assertEqual(json.loads(messages[1]['content'])['original_material_pages'],source)
+        self.assertEqual(json.loads(messages[1]['content'])['original_material_pages'],[{'document':'D1','page':0,'text':'未见肺炎；不能排除感染'}])
         self.assertIn('住院用药',messages[0]['content'])
         self.assertEqual(config._call.call_args.kwargs['workload'],'fidelity')
 

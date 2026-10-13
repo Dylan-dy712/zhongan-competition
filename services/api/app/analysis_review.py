@@ -49,9 +49,13 @@ def review_analysis(config,packed,text,citations=None):
     originals=[{'document':page['document'],'page':page['page'],
                 **({'source_kind':page['source_kind']} if page.get('source_kind') else {}),
                 'text':'\n'.join(span[1] for span in page['spans'])} for page in packed]
+    cited={ref for citation in (citations or []) for ref in citation['source_refs']}
+    marked=[{**original,'text':'\n'.join(
+        (f'[来源:{ref}]' if ref in cited else '')+source for ref,source in page['spans'])}
+        for original,page in zip(originals,packed)]
     audit=[{'quote':c['quote'],'source_refs':c['source_refs']} for c in (citations or [])]
-    messages=[{'role':'system','content':INSTRUCTION+'原文spans每项为[来源编号,原文]。citation_links的source_refs只指向这些编号。另核对citation_links：引用的原文必须支持对应quote；其他未引用的页面不能替错误引用辩护。错误关联按unsupported指出。'},
-              {'role':'user','content':json.dumps({'original_material_pages':packed,'draft':text,'citation_links':audit},ensure_ascii=False,separators=(',',':'))}]
+    messages=[{'role':'system','content':INSTRUCTION+'原文只提供一次，仅被引用片段前有[来源:编号]标记；标记不属于原文，不得写入source_quote。citation_links的source_refs必须对应这些标记后的同一片段。其他片段不能替错误引用辩护；错误关联按unsupported指出。'},
+              {'role':'user','content':json.dumps({'original_material_pages':marked,'draft':text,'citation_links':audit},ensure_ascii=False,separators=(',',':'))}]
     literal_issues=literal_scope_issues([page for page in packed if page.get('source_kind')!='general_knowledge'],text)
     compact=lambda value:re.sub(r'[\s，,；;：:（）()“”\"。*]','',value)
     draft=compact(text)
