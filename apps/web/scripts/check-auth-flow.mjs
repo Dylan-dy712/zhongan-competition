@@ -126,7 +126,12 @@ try{
   assert.ok(document.querySelector('.claim-form-shell'),'Reentering completed intake starts a fresh form');
   assert.equal(document.querySelector('[data-claim-field="diagnosis"]').value,'');
   await click('返回首页');await click('问暖暖');
-  await click('新的关怀对话');await click('年龄未填写');await click('开始新的对话');
+  await click('新的关怀对话');
+  assert.equal(document.querySelector('dialog'),null,'New chat skips the preliminary member picker');
+  assert.equal(button('开始新的对话').disabled,true);
+  await act(async()=>{const select=document.querySelector('.connect-form select');select.value='synthetic-subject';select.dispatchEvent(new dom.window.Event('change',{bubbles:true}));});
+  await click('开始新的对话');
+  assert.equal(conversation.subject_id,'synthetic-subject');
   assert.ok(document.querySelector('.composer'),'Ordinary new chat must still support messages');
   assert.equal(document.querySelector('.nuan-conversation-caption'),null);
   assert.equal(document.querySelector('.nuan-topic-grid'),null,'Ordinary new chat must not show claim cards');
