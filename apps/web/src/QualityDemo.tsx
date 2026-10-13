@@ -1,6 +1,7 @@
 import {useState} from 'react';
 import data from './quality-demo.json';
 import './quality-demo.css';
+import CareScenarioDemo from './CareScenarioDemo';
 
 const needs = ['cost_level','self_paid_burden','medication_conformity','treatment_conformity','guidance_completeness'];
 const labels:Record<string,string> = {cost_level:'费用水平',self_paid_burden:'个人承担',
@@ -8,6 +9,7 @@ const labels:Record<string,string> = {cost_level:'费用水平',self_paid_burden
 const entityNames:Record<string,string> = {hospital:'医疗机构',doctor:'医生',treatment_plan:'治疗方案'};
 
 export default function QualityDemo() {
+  const [view,setView]=useState<'quality'|'care'>('quality');
   const [disease,setDisease] = useState('FX');
   const [kind,setKind] = useState('hospital');
   const [picked,setPicked] = useState(['cost_level','guidance_completeness']);
@@ -17,7 +19,13 @@ export default function QualityDemo() {
   return <main className="quality-demo">
     <a href="/#/home">返回应用</a>
     <header><p>暖愈智护 · 初赛产品方案</p><h1>下一次就医，把依据看清楚</h1>
-      <p className="quality-demo-warning" role="note">{data.disclaimer}</p></header>
+      <p className="quality-demo-warning" role="note">{view==='quality'?data.disclaimer:
+        '合成材料上的模型生成草稿，未获医学批准；当前查看保存结果，不是对真实患者的诊疗指引。'}</p></header>
+    <nav className="quality-demo-options" aria-label="初赛方案演示">
+      <button aria-pressed={view==='care'} onClick={()=>setView('care')}>痛点与三病种关怀</button>
+      <button aria-pressed={view==='quality'} onClick={()=>setView('quality')}>品质画像与匹配理由</button>
+    </nav>
+    {view==='care'?<CareScenarioDemo />:<>
     <section aria-label="选择参考范围"><h2>选择病种与参考对象</h2>
       <div className="quality-demo-options">{Object.entries(data.diseases).map(([code,name])=><button key={code}
         aria-pressed={disease===code} onClick={()=>setDisease(code)}>{name}</button>)}</div>
@@ -53,5 +61,6 @@ export default function QualityDemo() {
       <pre>{JSON.stringify(Object.entries(data.diseases).map(([code,name])=>({病种:name,
         有效机构: data.matches.find(m=>m.request.disease_group===code)?.coverage.valid_two_reason_hospitals})),null,2)}</pre>
     </details>
+    </>}
   </main>;
 }

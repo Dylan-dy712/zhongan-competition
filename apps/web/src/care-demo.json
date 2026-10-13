@@ -1,0 +1,998 @@
+[
+  {
+    "id": "synthetic-fracture-caregiver",
+    "disease": "骨折",
+    "data_origin": "synthetic",
+    "execution_mode": "live",
+    "model_id": "deepseek-flash",
+    "prompt_version": "six-section-care-report-v7",
+    "material": "【完全虚构的初赛测试材料】出院诊断：左踝骨折术后。医生解释：骨折是骨头受损，本次做了固定治疗。治疗经过：2026-09-18住院，9月19日行切开复位内固定（ORIF），9月23日出院。住院用药明细与出院小结对后续用药安排记载不完整，未注明哪些药继续使用。医患沟通记录：患者表示看不懂ORIF，现有材料没有针对这个术语的通俗说明。检查记录：两次X线检查，未记载各次检查目的。出院医嘱：按主管医生确认的负重方案活动；复诊时间需联系主管医生确认；当前记录未给具体训练动作。同张收费单：医疗总费用12000元，明细合计11800元，差额原因未说明。个人现金支付3000元，不等同于个人自费。",
+    "user_input": "我担心照顾不好自己，现在由家人陪同。我想知道复诊前要问清哪些事情，也不明白账单差额。",
+    "input_sha256": "7989471cedbba5f653b53f29797f6f9f3e23ef5d9016fa9f5201c520a7bfe521",
+    "draft": {
+      "sections": [
+        {
+          "section_type": "diagnosis_explanation",
+          "claims": [
+            {
+              "text": "您的出院诊断写的是左踝骨折术后。",
+              "claim_type": "case_fact",
+              "evidence_quote": "出院诊断：左踝骨折术后。",
+              "source_quote": null,
+              "knowledge_refs": [],
+              "source_refs": []
+            },
+            {
+              "text": "医患沟通记录里写到，您表示看不懂ORIF，而现有材料没有针对这个术语的通俗说明。",
+              "claim_type": "case_fact",
+              "evidence_quote": "医患沟通记录：患者表示看不懂ORIF，现有材料没有针对这个术语的通俗说明。",
+              "source_quote": null,
+              "knowledge_refs": [],
+              "source_refs": []
+            }
+          ]
+        },
+        {
+          "section_type": "treatment_review",
+          "claims": [
+            {
+              "text": "医生向您解释过：骨折是骨头受损，本次做了固定治疗。",
+              "claim_type": "case_fact",
+              "evidence_quote": "医生解释：骨折是骨头受损，本次做了固定治疗。",
+              "source_quote": null,
+              "knowledge_refs": [],
+              "source_refs": []
+            },
+            {
+              "text": "住院用药明细和出院小结对后续用药安排记载不完整，没有注明哪些药继续使用。",
+              "claim_type": "case_fact",
+              "evidence_quote": "住院用药明细与出院小结对后续用药安排记载不完整，未注明哪些药继续使用。",
+              "source_quote": null,
+              "knowledge_refs": [],
+              "source_refs": []
+            },
+            {
+              "text": "检查记录显示做过两次X线检查，但没有记载每次检查的目的。",
+              "claim_type": "case_fact",
+              "evidence_quote": "检查记录：两次X线检查，未记载各次检查目的。",
+              "source_quote": null,
+              "knowledge_refs": [],
+              "source_refs": []
+            }
+          ]
+        },
+        {
+          "section_type": "cost_explanation",
+          "claims": [
+            {
+              "text": "同一张收费单上，医疗总费用写的是12000元，明细合计是11800元，差额原因没有说明。",
+              "claim_type": "case_fact",
+              "evidence_quote": "同张收费单：医疗总费用12000元，明细合计11800元，差额原因未说明。",
+              "source_quote": null,
+              "knowledge_refs": [],
+              "source_refs": []
+            },
+            {
+              "text": "这张收费单还写了个人现金支付3000元，材料明确说明这不等于个人自费。",
+              "claim_type": "case_fact",
+              "evidence_quote": "个人现金支付3000元，不等同于个人自费。",
+              "source_quote": null,
+              "knowledge_refs": [],
+              "source_refs": []
+            },
+            {
+              "text": "差额为什么存在、这张单的项目是否完整、各个支付口径分别是什么，材料没有说明，需要向医院收费窗口确认。",
+              "claim_type": "to_confirm",
+              "evidence_quote": null,
+              "source_quote": "同张收费单：医疗总费用12000元，明细合计11800元，差额原因未说明。",
+              "knowledge_refs": [],
+              "source_refs": []
+            }
+          ]
+        },
+        {
+          "section_type": "recovery_plan",
+          "claims": [
+            {
+              "text": "出院医嘱要求按主管医生确认的负重方案活动。",
+              "claim_type": "case_fact",
+              "evidence_quote": "出院医嘱：按主管医生确认的负重方案活动；复诊时间需联系主管医生确认；当前记录未给具体训练动作。",
+              "source_quote": null,
+              "knowledge_refs": [],
+              "source_refs": []
+            },
+            {
+              "text": "当前记录没有给具体训练动作，也没有写频率和时长；这些需要您的诊疗团队给出指导，不能自己按一般经验练。",
+              "claim_type": "to_confirm",
+              "evidence_quote": null,
+              "source_quote": "当前记录未给具体训练动作。",
+              "knowledge_refs": [],
+              "source_refs": []
+            }
+          ]
+        },
+        {
+          "section_type": "emotional_support",
+          "claims": [
+            {
+              "text": "您说“我担心照顾不好自己，现在由家人陪同。”这种担心很实在：您怕自己一个人应付不来，而家人已经在身边帮您。",
+              "claim_type": "patient_statement",
+              "evidence_quote": null,
+              "source_quote": "我担心照顾不好自己，现在由家人陪同。",
+              "knowledge_refs": [],
+              "source_refs": [
+                "demo:user"
+              ]
+            },
+            {
+              "text": "您还问“我想知道复诊前要问清哪些事情，也不明白账单差额。”这两件事都可以变成很具体的提问，不用一个人闷着猜。",
+              "claim_type": "patient_statement",
+              "evidence_quote": null,
+              "source_quote": "我想知道复诊前要问清哪些事情，也不明白账单差额。",
+              "knowledge_refs": [],
+              "source_refs": [
+                "demo:user"
+              ]
+            },
+            {
+              "text": "有家人陪同时，可以让陪同的人帮您把问题记下来，复诊时逐条问；您只负责听和确认，不必当场全记住。",
+              "claim_type": "service_suggestion",
+              "evidence_quote": null,
+              "source_quote": "现在由家人陪同。",
+              "knowledge_refs": [],
+              "source_refs": [
+                "demo:user"
+              ]
+            }
+          ]
+        },
+        {
+          "section_type": "next_visit_advice",
+          "claims": [
+            {
+              "text": "复诊时间：材料只写了要联系主管医生确认，没有给具体日期；您需要向主管医生或您的诊疗团队确认下一次复诊的日期和挂号方式。",
+              "claim_type": "to_confirm",
+              "evidence_quote": null,
+              "source_quote": "复诊时间需联系主管医生确认",
+              "knowledge_refs": [],
+              "source_refs": []
+            },
+            {
+              "text": "复诊前建议按顺序问这几件事：ORIF是什么意思；哪些药继续用；两次X线检查各自是为了看什么；具体训练动作怎么做；账单差额为什么存在。",
+              "claim_type": "to_confirm",
+              "evidence_quote": null,
+              "source_quote": null,
+              "knowledge_refs": [],
+              "source_refs": []
+            }
+          ]
+        }
+      ],
+      "actions": [
+        {
+          "action_text": "复诊时逐条问清：ORIF的含义、哪些药继续用、具体训练动作、账单差额原因。",
+          "source_quote": "我想知道复诊前要问清哪些事情，也不明白账单差额。",
+          "source_refs": [
+            "demo:user"
+          ],
+          "owner_role": "patient",
+          "due_at": null,
+          "due_source": "user_request",
+          "rationale": "用户明确说想知道复诊前要问清哪些事情，也想知道账单差额；材料里这些信息缺失。"
+        },
+        {
+          "action_text": "联系主管医生确认下一次复诊的日期和挂号方式。",
+          "source_quote": "复诊时间需联系主管医生确认",
+          "source_refs": [],
+          "owner_role": "patient",
+          "due_at": null,
+          "due_source": "medical_order",
+          "rationale": "出院医嘱写明复诊时间需联系主管医生确认，但没有给具体日期。"
+        },
+        {
+          "action_text": "向医院收费窗口询问账单差额原因，并确认这张单的项目是否完整。",
+          "source_quote": "差额原因未说明",
+          "source_refs": [],
+          "owner_role": "patient",
+          "due_at": null,
+          "due_source": "unknown",
+          "rationale": "同一张收费单上总费用与明细合计不一致，且材料未说明原因。"
+        }
+      ]
+    },
+    "insights": [
+      {
+        "label": "EXP_TERMINOLOGY_BARRIER",
+        "evidence_quote": "患者表示看不懂ORIF，现有材料没有针对这个术语的通俗说明。",
+        "rationale": "患者明确表示不理解医学术语ORIF，且材料中缺乏通俗解释，提示可能存在医学术语沟通障碍，需进一步核实患者是否获得易懂的术语说明。",
+        "suggested_action": "建议核实是否已向患者提供ORIF的通俗解释，并考虑补充书面或口头说明。",
+        "knowledge_refs": [],
+        "confidence": 0.95,
+        "category": "experience",
+        "severity": "undetermined",
+        "judgment_status": "candidate",
+        "review_status": "pending"
+      },
+      {
+        "label": "EXP_DISCHARGE_GUIDANCE_GAP",
+        "evidence_quote": "出院医嘱：按主管医生确认的负重方案活动；复诊时间需联系主管医生确认；当前记录未给具体训练动作。",
+        "rationale": "出院医嘱中负重方案、复诊时间均需再次联系主管医生确认，且未提供具体训练动作，提示出院指导信息不完整，需核实患者是否获得明确可执行的出院计划。",
+        "suggested_action": "建议核实出院指导的完整性，补充具体的负重方案、复诊时间和训练动作说明。",
+        "knowledge_refs": [],
+        "confidence": 0.9,
+        "category": "experience",
+        "severity": "undetermined",
+        "judgment_status": "candidate",
+        "review_status": "pending"
+      },
+      {
+        "label": "CLIN_MEDICATION_CONTEXT_REVIEW",
+        "evidence_quote": "住院用药明细与出院小结对后续用药安排记载不完整，未注明哪些药继续使用。",
+        "rationale": "住院用药明细与出院小结未明确后续用药安排，未注明继续使用的药物，提示用药连续性记录不完整，需核实患者出院后用药方案。",
+        "suggested_action": "建议核对住院用药与出院小结，明确出院后继续使用的药物及用法。",
+        "knowledge_refs": [],
+        "confidence": 0.9,
+        "category": "clinical",
+        "severity": "undetermined",
+        "judgment_status": "candidate",
+        "review_status": "pending"
+      },
+      {
+        "label": "CLIN_EXAM_JUSTIFICATION_REVIEW",
+        "evidence_quote": "两次X线检查，未记载各次检查目的。",
+        "rationale": "两次X线检查未记载各自检查目的，提示检查目的记录不完整，需核实检查必要性及是否与临床需求匹配。",
+        "suggested_action": "建议核实两次X线检查的临床目的，并补充记录。",
+        "knowledge_refs": [],
+        "confidence": 0.85,
+        "category": "clinical",
+        "severity": "undetermined",
+        "judgment_status": "candidate",
+        "review_status": "pending"
+      },
+      {
+        "label": "COST_AMOUNT_RECONCILIATION",
+        "evidence_quote": "医疗总费用12000元，明细合计11800元，差额原因未说明。",
+        "rationale": "收费单显示总费用与明细合计存在200元差额，且未说明原因，提示费用明细可能需要核对。",
+        "suggested_action": "建议核对费用明细，查明差额原因并向患者说明。",
+        "knowledge_refs": [],
+        "confidence": 0.9,
+        "category": "cost",
+        "severity": "undetermined",
+        "judgment_status": "candidate",
+        "review_status": "pending"
+      }
+    ],
+    "source_check_errors": [],
+    "status": "completed",
+    "medical_approval": false,
+    "publication_status": "unpublished_demo_draft"
+  },
+  {
+    "id": "synthetic-pneumonia-work",
+    "disease": "肺炎",
+    "data_origin": "synthetic",
+    "execution_mode": "live",
+    "model_id": "deepseek-flash",
+    "prompt_version": "six-section-care-report-v7",
+    "material": "【完全虚构的初赛测试材料】出院诊断：肺炎。医生解释：肺炎指肺部炎症，本次诊断以这份记录为准。治疗经过：住院期间接受抗感染治疗，出院时症状较前改善。出院医嘱：遵医嘱继续治疗，休息；复诊日期未记载，不自行调整药物。医疗总费用6500元，药品费2000元，检查费1500元；其余分类未提供，不能将两项合计当总额。医保支付4000元，个人总负担2500元。",
+    "user_input": "我急着回去上班，但怕休息不够。想先整理要向医生确认的事项，不希望你替医生决定我哪天能上班。",
+    "input_sha256": "6fefc2d0148a43bdd48931a225f1597fd9e27e0bf7cc515d6fe1a021b71f9447",
+    "draft": {
+      "sections": [
+        {
+          "section_type": "emotional_support",
+          "claims": [
+            {
+              "text": "您说“我急着回去上班，但怕休息不够”，这份担心很实在。",
+              "claim_type": "patient_statement",
+              "evidence_quote": null,
+              "source_quote": "我急着回去上班，但怕休息不够。",
+              "knowledge_refs": [],
+              "source_refs": [
+                "demo:user"
+              ]
+            },
+            {
+              "text": "您也说“想先整理要向医生确认的事项，不希望你替医生决定我哪天能上班”。我们不会替您或医生决定上班日期。",
+              "claim_type": "patient_statement",
+              "evidence_quote": null,
+              "source_quote": "想先整理要向医生确认的事项，不希望你替医生决定我哪天能上班。",
+              "knowledge_refs": [],
+              "source_refs": [
+                "demo:user"
+              ]
+            },
+            {
+              "text": "您可以把上班安排和休息时长作为问题带去问诊疗团队，由他们结合您的工作节奏和恢复情况来回答。",
+              "claim_type": "service_suggestion",
+              "evidence_quote": null,
+              "source_quote": null,
+              "knowledge_refs": [],
+              "source_refs": []
+            }
+          ]
+        },
+        {
+          "section_type": "diagnosis_explanation",
+          "claims": [
+            {
+              "text": "这次出院诊断是肺炎。",
+              "claim_type": "case_fact",
+              "evidence_quote": "出院诊断：肺炎",
+              "source_quote": null,
+              "knowledge_refs": [],
+              "source_refs": []
+            },
+            {
+              "text": "记录里提到，医生向您解释过肺炎的含义，并说明这次诊断以这份记录为准。",
+              "claim_type": "case_fact",
+              "evidence_quote": "医生解释：肺炎指肺部炎症，本次诊断以这份记录为准",
+              "source_quote": null,
+              "knowledge_refs": [],
+              "source_refs": []
+            },
+            {
+              "text": "至于这次肺炎对您来说严重到什么程度、大概需要多久恢复，现有记录没有写明，您可以问诊疗团队。",
+              "claim_type": "to_confirm",
+              "evidence_quote": null,
+              "source_quote": null,
+              "knowledge_refs": [],
+              "source_refs": []
+            }
+          ]
+        },
+        {
+          "section_type": "treatment_review",
+          "claims": [
+            {
+              "text": "住院期间您接受了抗感染治疗，出院时症状比之前有所改善。",
+              "claim_type": "case_fact",
+              "evidence_quote": "住院期间接受抗感染治疗，出院时症状较前改善",
+              "source_quote": null,
+              "knowledge_refs": [],
+              "source_refs": []
+            },
+            {
+              "text": "出院医嘱是继续治疗、休息，并特别注明复诊日期没有记载、不要自己调整药物。",
+              "claim_type": "case_fact",
+              "evidence_quote": "出院医嘱：遵医嘱继续治疗，休息；复诊日期未记载，不自行调整药物",
+              "source_quote": null,
+              "knowledge_refs": [],
+              "source_refs": []
+            },
+            {
+              "text": "出院后是否还需要吃药、具体药名和用多久，记录里没有写，需要您问诊疗团队。",
+              "claim_type": "to_confirm",
+              "evidence_quote": null,
+              "source_quote": null,
+              "knowledge_refs": [],
+              "source_refs": []
+            }
+          ]
+        },
+        {
+          "section_type": "cost_explanation",
+          "claims": [
+            {
+              "text": "这次医疗总费用是6500元，其中药品费2000元、检查费1500元；其他分类没有提供，所以不能把这两项加起来当成总费用。",
+              "claim_type": "case_fact",
+              "evidence_quote": "医疗总费用6500元，药品费2000元，检查费1500元；其余分类未提供，不能将两项合计当总额。",
+              "source_quote": null,
+              "knowledge_refs": [],
+              "source_refs": []
+            },
+            {
+              "text": "医保支付了4000元，个人总负担2500元。",
+              "claim_type": "case_fact",
+              "evidence_quote": "医保支付4000元，个人总负担2500元",
+              "source_quote": null,
+              "knowledge_refs": [],
+              "source_refs": []
+            },
+            {
+              "text": "这2500元里个人自费、个人账户、现金各是多少，商业保险后还要出多少，以及明细单是否完整，现在看不到，可以去结算窗口问清楚。",
+              "claim_type": "to_confirm",
+              "evidence_quote": null,
+              "source_quote": null,
+              "knowledge_refs": [],
+              "source_refs": []
+            }
+          ]
+        },
+        {
+          "section_type": "recovery_plan",
+          "claims": [
+            {
+              "text": "每天休息多久、能不能做体力活或久坐、通勤会不会影响恢复，这些没有固定答案，建议您带着具体工作内容去问诊疗团队。",
+              "claim_type": "to_confirm",
+              "evidence_quote": null,
+              "source_quote": null,
+              "knowledge_refs": [],
+              "source_refs": []
+            },
+            {
+              "text": "您可以先记录自己平时的作息和工作节奏，方便就诊时和医生沟通。",
+              "claim_type": "service_suggestion",
+              "evidence_quote": null,
+              "source_quote": null,
+              "knowledge_refs": [],
+              "source_refs": []
+            }
+          ]
+        },
+        {
+          "section_type": "next_visit_advice",
+          "claims": [
+            {
+              "text": "复诊的具体日期和挂哪个科，出院记录里没有写，需要您联系医院或诊疗团队确认。",
+              "claim_type": "to_confirm",
+              "evidence_quote": null,
+              "source_quote": null,
+              "knowledge_refs": [],
+              "source_refs": []
+            },
+            {
+              "text": "把想问的问题写在纸上或手机备忘录里，就诊时逐条问，这样不容易漏掉。",
+              "claim_type": "service_suggestion",
+              "evidence_quote": null,
+              "source_quote": null,
+              "knowledge_refs": [],
+              "source_refs": []
+            }
+          ]
+        }
+      ],
+      "actions": [
+        {
+          "action_text": "把您想确认的问题写下来，带去问诊疗团队，尤其是上班时间、每天休息多久和能否通勤。",
+          "source_quote": "想先整理要向医生确认的事项，不希望你替医生决定我哪天能上班。",
+          "source_refs": [
+            "demo:user"
+          ],
+          "owner_role": "patient",
+          "due_at": null,
+          "due_source": "user_request",
+          "rationale": "您明确希望整理要向医生确认的事项，并希望由医生决定上班日期。"
+        },
+        {
+          "action_text": "联系医院或诊疗团队，问清楚复诊日期和挂哪个科。",
+          "source_quote": "复诊日期未记载",
+          "source_refs": [],
+          "owner_role": "patient",
+          "due_at": null,
+          "due_source": "unknown",
+          "rationale": "复诊日期没有记录，需要向医院确认，不能凭经验指定。"
+        },
+        {
+          "action_text": "去费用结算窗口，问清楚个人总负担2500元里各支付方式分别是多少，以及明细单是否完整。",
+          "source_quote": "个人总负担2500元",
+          "source_refs": [],
+          "owner_role": "patient",
+          "due_at": null,
+          "due_source": "unknown",
+          "rationale": "费用分类和支付口径没有完整提供，需要向结算窗口核实。"
+        }
+      ]
+    },
+    "insights": [
+      {
+        "label": "COST_AMOUNT_RECONCILIATION",
+        "evidence_quote": "医疗总费用6500元，药品费2000元，检查费1500元；其余分类未提供，不能将两项合计当总额。医保支付4000元，个人总负担2500元。",
+        "rationale": "材料显示总费用与部分分类费用及支付构成，但药品费与检查费合计3500元，与总费用6500元存在3000元未分类差额；同时医保支付4000元与个人负担2500元合计等于总费用。该差额提示费用分项构成可能不完整，需进一步核对。",
+        "suggested_action": "请核对费用明细中未列出的3000元具体构成，并确认各分类费用合计与总费用、医保支付及个人负担是否一致。",
+        "knowledge_refs": [],
+        "confidence": 0.8,
+        "category": "cost",
+        "severity": "undetermined",
+        "judgment_status": "candidate",
+        "review_status": "pending"
+      },
+      {
+        "label": "EXP_DISCHARGE_GUIDANCE_GAP",
+        "evidence_quote": "复诊日期未记载，不自行调整药物",
+        "rationale": "出院医嘱中复诊日期未记载，可能影响患者后续随访和用药调整的依从性，属于出院指导信息不完整待核实线索。",
+        "suggested_action": "建议补充明确复诊日期及用药调整指导，并确认患者已获得可理解的出院注意事项。",
+        "knowledge_refs": [],
+        "confidence": 0.7,
+        "category": "experience",
+        "severity": "undetermined",
+        "judgment_status": "candidate",
+        "review_status": "pending"
+      }
+    ],
+    "source_check_errors": [],
+    "status": "completed",
+    "medical_approval": false,
+    "publication_status": "unpublished_demo_draft"
+  },
+  {
+    "id": "synthetic-coronary-followup",
+    "disease": "冠心病",
+    "data_origin": "synthetic",
+    "execution_mode": "live",
+    "model_id": "deepseek-flash",
+    "prompt_version": "six-section-care-report-v7",
+    "material": "【完全虚构的初赛测试材料】出院诊断：冠心病。医生解释：本次诊断涉及心脏供血相关问题。治疗经过：本次住院完成检查和治疗，未提供手术记录，不能据此认定做了手术。出院医嘱：按原处方规律用药，不能自行停药；具体复诊时间待门诊医生确认。费用材料：仅有医疗总费用9800元，医保结算单和明细清单未提供，支付构成待核对。",
+    "user_input": "我担心出院以后忘记用药，想让家人帮忙核对原处方，并把需要带去复诊的资料列出来。",
+    "input_sha256": "5c2877b0f9f4aa245261fea7edbce677b68c69c3b6c694152b1b7542caf7de8c",
+    "draft": {
+      "sections": [
+        {
+          "section_type": "emotional_support",
+          "claims": [
+            {
+              "text": "您说想让家人帮忙核对原处方，这个想法本身就说明您在认真对待用药这件事。",
+              "claim_type": "patient_statement",
+              "evidence_quote": null,
+              "source_quote": "我担心出院以后忘记用药，想让家人帮忙核对原处方，并把需要带去复诊的资料列出来。",
+              "knowledge_refs": [],
+              "source_refs": [
+                "demo:user"
+              ]
+            },
+            {
+              "text": "您可以请家人在每天固定时间提醒您一次，这样您不用一直惦记着。",
+              "claim_type": "service_suggestion",
+              "evidence_quote": null,
+              "source_quote": "我担心出院以后忘记用药，想让家人帮忙核对原处方，并把需要带去复诊的资料列出来。",
+              "knowledge_refs": [],
+              "source_refs": [
+                "demo:user"
+              ]
+            }
+          ]
+        },
+        {
+          "section_type": "recovery_plan",
+          "claims": [
+            {
+              "text": "您担心出院后忘记用药，想让家人帮忙核对原处方，这个担心和每天的生活安排有关。",
+              "claim_type": "patient_statement",
+              "evidence_quote": null,
+              "source_quote": "我担心出院以后忘记用药，想让家人帮忙核对原处方，并把需要带去复诊的资料列出来。",
+              "knowledge_refs": [],
+              "source_refs": [
+                "demo:user"
+              ]
+            },
+            {
+              "text": "出院医嘱是按原处方规律用药，不能自己停药。",
+              "claim_type": "case_fact",
+              "evidence_quote": "按原处方规律用药，不能自行停药；具体复诊时间待门诊医生确认。",
+              "source_quote": null,
+              "knowledge_refs": [],
+              "source_refs": []
+            },
+            {
+              "text": "现有材料没有附上原处方的具体药名和用法，您可以请家人把原处方找出来，和您的诊疗团队一起核对。",
+              "claim_type": "to_confirm",
+              "evidence_quote": null,
+              "source_quote": null,
+              "knowledge_refs": [],
+              "source_refs": []
+            }
+          ]
+        },
+        {
+          "section_type": "next_visit_advice",
+          "claims": [
+            {
+              "text": "出院医嘱写的是具体复诊时间待门诊医生确认，所以现在还没有一个确定的复诊日期。",
+              "claim_type": "case_fact",
+              "evidence_quote": "具体复诊时间待门诊医生确认。",
+              "source_quote": null,
+              "knowledge_refs": [],
+              "source_refs": []
+            },
+            {
+              "text": "您可以联系您的诊疗团队或门诊医生，问清楚什么时候复诊、复诊需要带哪些资料。",
+              "claim_type": "to_confirm",
+              "evidence_quote": null,
+              "source_quote": null,
+              "knowledge_refs": [],
+              "source_refs": []
+            }
+          ]
+        },
+        {
+          "section_type": "diagnosis_explanation",
+          "claims": [
+            {
+              "text": "您的出院诊断是冠心病。",
+              "claim_type": "case_fact",
+              "evidence_quote": "出院诊断：冠心病。",
+              "source_quote": null,
+              "knowledge_refs": [],
+              "source_refs": []
+            },
+            {
+              "text": "医生向您解释过，这次诊断涉及心脏供血相关问题。",
+              "claim_type": "case_fact",
+              "evidence_quote": "医生解释：本次诊断涉及心脏供血相关问题。",
+              "source_quote": null,
+              "knowledge_refs": [],
+              "source_refs": []
+            },
+            {
+              "text": "关于心脏供血问题的具体原因和目前程度，现有材料没有更细的说明，您可以向您的诊疗团队问清楚。",
+              "claim_type": "to_confirm",
+              "evidence_quote": null,
+              "source_quote": null,
+              "knowledge_refs": [],
+              "source_refs": []
+            }
+          ]
+        },
+        {
+          "section_type": "treatment_review",
+          "claims": [
+            {
+              "text": "本次住院完成了检查和治疗，但没有手术记录，所以不能根据现有材料认为您做了手术。",
+              "claim_type": "case_fact",
+              "evidence_quote": "本次住院完成检查和治疗，未提供手术记录，不能据此认定做了手术。",
+              "source_quote": null,
+              "knowledge_refs": [],
+              "source_refs": []
+            },
+            {
+              "text": "如果您想确认住院期间具体做了哪些检查或治疗，可以联系您的诊疗团队核对；现有材料没有列出明细。",
+              "claim_type": "to_confirm",
+              "evidence_quote": null,
+              "source_quote": null,
+              "knowledge_refs": [],
+              "source_refs": []
+            }
+          ]
+        },
+        {
+          "section_type": "cost_explanation",
+          "claims": [
+            {
+              "text": "目前费用方面只看到医疗总费用9800元。",
+              "claim_type": "case_fact",
+              "evidence_quote": "费用材料：仅有医疗总费用9800元，医保结算单和明细清单未提供，支付构成待核对。",
+              "source_quote": null,
+              "knowledge_refs": [],
+              "source_refs": []
+            },
+            {
+              "text": "医保结算单和明细清单还没有提供，所以现在无法看出医保报销了多少、个人自费多少、现金支付多少。",
+              "claim_type": "to_confirm",
+              "evidence_quote": null,
+              "source_quote": null,
+              "knowledge_refs": [],
+              "source_refs": []
+            },
+            {
+              "text": "您可以向医院负责结算的窗口询问，拿到医保结算单和费用明细清单后再核对。",
+              "claim_type": "service_suggestion",
+              "evidence_quote": null,
+              "source_quote": "医保结算单和明细清单未提供，支付构成待核对。",
+              "knowledge_refs": [],
+              "source_refs": []
+            }
+          ]
+        }
+      ],
+      "actions": [
+        {
+          "action_text": "请家人帮忙把原处方找出来，和您正在按医嘱使用的药物逐一核对，并把核对结果记下来。",
+          "source_quote": "我担心出院以后忘记用药，想让家人帮忙核对原处方，并把需要带去复诊的资料列出来。",
+          "source_refs": [
+            "demo:user"
+          ],
+          "owner_role": "caregiver",
+          "due_at": null,
+          "due_source": "user_request",
+          "rationale": "用户明确想让家人帮忙核对原处方。"
+        },
+        {
+          "action_text": "向您的诊疗团队询问复诊需要带什么资料，然后把答案写成一份清单。",
+          "source_quote": "并把需要带去复诊的资料列出来",
+          "source_refs": [
+            "demo:user"
+          ],
+          "owner_role": "patient",
+          "due_at": null,
+          "due_source": "user_request",
+          "rationale": "用户想让复诊资料列成清单。"
+        },
+        {
+          "action_text": "联系您的诊疗团队或门诊医生，确认具体复诊时间。",
+          "source_quote": "具体复诊时间待门诊医生确认。",
+          "source_refs": [],
+          "owner_role": "patient",
+          "due_at": null,
+          "due_source": "unknown",
+          "rationale": "材料写明复诊时间待门诊医生确认，目前没有可验证的具体日期。"
+        }
+      ]
+    },
+    "insights": [
+      {
+        "label": "COST_AMOUNT_RECONCILIATION",
+        "evidence_quote": "费用材料：仅有医疗总费用9800元，医保结算单和明细清单未提供，支付构成待核对。",
+        "rationale": "医疗总费用已给出，但缺少医保结算单和明细清单，支付构成无法核对，存在费用待核对线索。",
+        "suggested_action": "补充医保结算单及费用明细清单，核对总费用与支付构成。",
+        "knowledge_refs": [],
+        "confidence": 0.9,
+        "category": "cost",
+        "severity": "undetermined",
+        "judgment_status": "candidate",
+        "review_status": "pending"
+      },
+      {
+        "label": "EXP_DISCHARGE_GUIDANCE_GAP",
+        "evidence_quote": "出院医嘱：按原处方规律用药，不能自行停药；具体复诊时间待门诊医生确认。",
+        "rationale": "出院医嘱未明确具体复诊时间，需门诊医生确认，可能存在出院指导不完整。",
+        "suggested_action": "明确复诊时间及随访安排，确保患者知晓。",
+        "knowledge_refs": [],
+        "confidence": 0.8,
+        "category": "experience",
+        "severity": "undetermined",
+        "judgment_status": "candidate",
+        "review_status": "pending"
+      },
+      {
+        "label": "CLIN_MEDICATION_CONTEXT_REVIEW",
+        "evidence_quote": "出院医嘱：按原处方规律用药，不能自行停药；",
+        "rationale": "医嘱提及按原处方规律用药，但原处方上下文未提供，需核对用药背景。",
+        "suggested_action": "核对原处方内容及用药适应症、禁忌等上下文。",
+        "knowledge_refs": [],
+        "confidence": 0.7,
+        "category": "clinical",
+        "severity": "undetermined",
+        "judgment_status": "candidate",
+        "review_status": "pending"
+      },
+      {
+        "label": "EXP_TERMINOLOGY_BARRIER",
+        "evidence_quote": "医生解释：本次诊断涉及心脏供血相关问题。",
+        "rationale": "医生解释较为笼统，未明确诊断术语的具体含义，可能存在术语理解障碍。",
+        "suggested_action": "用通俗语言进一步解释诊断含义及心脏供血问题的具体所指。",
+        "knowledge_refs": [],
+        "confidence": 0.6,
+        "category": "experience",
+        "severity": "undetermined",
+        "judgment_status": "candidate",
+        "review_status": "pending"
+      },
+      {
+        "label": "CLIN_EXAM_JUSTIFICATION_REVIEW",
+        "evidence_quote": "治疗经过：本次住院完成检查和治疗，未提供手术记录，不能据此认定做了手术。",
+        "rationale": "住院检查和治疗的具体项目及指征未提供，需核实检查必要性。",
+        "suggested_action": "补充检查项目及临床指征说明，以便审查检查合理性。",
+        "knowledge_refs": [],
+        "confidence": 0.5,
+        "category": "clinical",
+        "severity": "undetermined",
+        "judgment_status": "candidate",
+        "review_status": "pending"
+      }
+    ],
+    "source_check_errors": [],
+    "status": "completed",
+    "medical_approval": false,
+    "publication_status": "unpublished_demo_draft"
+  },
+  {
+    "id": "synthetic-fracture-independent",
+    "disease": "骨折",
+    "data_origin": "synthetic",
+    "execution_mode": "live",
+    "model_id": "deepseek-flash",
+    "prompt_version": "six-section-care-report-v7",
+    "material": "【完全虚构的初赛测试材料】诊断：右腕骨折。医生解释：右腕骨头受损。治疗经过：门诊固定治疗，未住院，未做手术。医嘱：固定装置不自行拆除；复诊时间以门诊安排为准，记录未给具体日期。医疗费用总额1200元，个人总负担1200元；没有其他分类明细。",
+    "user_input": "我一个人生活，担心洗漱和做饭不方便。我不想收到关于住院手术的指导，请帮我整理生活安排和需要向医生问的问题。",
+    "input_sha256": "09444b66b318a1789fc4caeb1eea5fe3bce8d5cab457f604518f6d59d0cee083",
+    "draft": {
+      "sections": [
+        {
+          "section_type": "emotional_support",
+          "claims": [
+            {
+              "text": "您一个人生活，担心洗漱和做饭不方便，这确实是很实际的困难。",
+              "claim_type": "patient_statement",
+              "evidence_quote": null,
+              "source_quote": "我一个人生活，担心洗漱和做饭不方便。",
+              "knowledge_refs": [],
+              "source_refs": [
+                "demo:user"
+              ]
+            },
+            {
+              "text": "我们可以先看看哪些事可以暂时简化，比如用温水擦拭代替淋浴，用简单厨具减少手腕活动；做得到就做，做不到别勉强。",
+              "claim_type": "service_suggestion",
+              "evidence_quote": null,
+              "source_quote": null,
+              "knowledge_refs": [],
+              "source_refs": []
+            }
+          ]
+        },
+        {
+          "section_type": "diagnosis_explanation",
+          "claims": [
+            {
+              "text": "您的诊断是右腕骨折。",
+              "claim_type": "case_fact",
+              "evidence_quote": "右腕骨折",
+              "source_quote": null,
+              "knowledge_refs": [],
+              "source_refs": []
+            },
+            {
+              "text": "医生解释为右腕骨头受损。",
+              "claim_type": "case_fact",
+              "evidence_quote": "右腕骨头受损",
+              "source_quote": null,
+              "knowledge_refs": [],
+              "source_refs": []
+            }
+          ]
+        },
+        {
+          "section_type": "treatment_review",
+          "claims": [
+            {
+              "text": "您这次是门诊固定治疗，没有住院，也没有做手术。",
+              "claim_type": "case_fact",
+              "evidence_quote": "门诊固定治疗，未住院，未做手术",
+              "source_quote": null,
+              "knowledge_refs": [],
+              "source_refs": []
+            },
+            {
+              "text": "医嘱要求固定装置不自行拆除。",
+              "claim_type": "case_fact",
+              "evidence_quote": "固定装置不自行拆除",
+              "source_quote": null,
+              "knowledge_refs": [],
+              "source_refs": []
+            }
+          ]
+        },
+        {
+          "section_type": "cost_explanation",
+          "claims": [
+            {
+              "text": "医疗费用总额是1200元，个人总负担也是1200元。",
+              "claim_type": "case_fact",
+              "evidence_quote": "医疗费用总额1200元，个人总负担1200元",
+              "source_quote": null,
+              "knowledge_refs": [],
+              "source_refs": []
+            },
+            {
+              "text": "目前没有其他费用分类明细。",
+              "claim_type": "case_fact",
+              "evidence_quote": "没有其他分类明细",
+              "source_quote": null,
+              "knowledge_refs": [],
+              "source_refs": []
+            },
+            {
+              "text": "费用明细缺失，需要向收费窗口或医保办确认具体分类。",
+              "claim_type": "to_confirm",
+              "evidence_quote": null,
+              "source_quote": null,
+              "knowledge_refs": [],
+              "source_refs": []
+            }
+          ]
+        },
+        {
+          "section_type": "recovery_plan",
+          "claims": [
+            {
+              "text": "洗漱时可以把毛巾搭在健侧手上，用单手拧干；做饭可以先用简单餐具，避免端重锅。",
+              "claim_type": "service_suggestion",
+              "evidence_quote": null,
+              "source_quote": null,
+              "knowledge_refs": [],
+              "source_refs": []
+            },
+            {
+              "text": "固定期间哪些日常动作安全、哪些要避免，目前没有说明，需要向医生确认。",
+              "claim_type": "to_confirm",
+              "evidence_quote": null,
+              "source_quote": null,
+              "knowledge_refs": [],
+              "source_refs": []
+            }
+          ]
+        },
+        {
+          "section_type": "next_visit_advice",
+          "claims": [
+            {
+              "text": "复诊时间以门诊安排为准，没有给具体日期。",
+              "claim_type": "case_fact",
+              "evidence_quote": "复诊时间以门诊安排为准，记录未给具体日期",
+              "source_quote": null,
+              "knowledge_refs": [],
+              "source_refs": []
+            },
+            {
+              "text": "您需要向门诊确认具体复诊日期，可以打电话或下次就诊时问：我的复诊日期是哪天？",
+              "claim_type": "to_confirm",
+              "evidence_quote": null,
+              "source_quote": null,
+              "knowledge_refs": [],
+              "source_refs": []
+            },
+            {
+              "text": "您还可以问医生：固定装置要戴多久？复诊前出现什么情况需要提前联系？",
+              "claim_type": "service_suggestion",
+              "evidence_quote": null,
+              "source_quote": null,
+              "knowledge_refs": [],
+              "source_refs": []
+            }
+          ]
+        }
+      ],
+      "actions": [
+        {
+          "action_text": "向门诊确认您的具体复诊日期。",
+          "source_quote": "复诊时间以门诊安排为准，记录未给具体日期",
+          "source_refs": [],
+          "owner_role": "patient",
+          "due_at": null,
+          "due_source": "medical_order",
+          "rationale": "复诊时间只写了以门诊安排为准，没有具体日期，需要主动确认。"
+        },
+        {
+          "action_text": "把您在洗漱、做饭方面的具体困难写下来，下次门诊时问医生哪些动作可以安全进行。",
+          "source_quote": "我一个人生活，担心洗漱和做饭不方便。我不想收到关于住院手术的指导，请帮我整理生活安排和需要向医生问的问题。",
+          "source_refs": [
+            "demo:user"
+          ],
+          "owner_role": "patient",
+          "due_at": null,
+          "due_source": "user_request",
+          "rationale": "您一个人生活，担心洗漱和做饭不方便，并希望整理需要向医生问的问题。"
+        },
+        {
+          "action_text": "不要自行拆除固定装置。",
+          "source_quote": "固定装置不自行拆除",
+          "source_refs": [],
+          "owner_role": "patient",
+          "due_at": null,
+          "due_source": "medical_order",
+          "rationale": "医嘱明确写了固定装置不自行拆除。"
+        }
+      ]
+    },
+    "insights": [
+      {
+        "label": "EXP_TERMINOLOGY_BARRIER",
+        "evidence_quote": "诊断：右腕骨折。医生解释：右腕骨头受损。",
+        "rationale": "医生解释使用'右腕骨头受损'这一通俗表述，与诊断'右腕骨折'的医学术语不完全一致，可能存在医学术语沟通障碍，需核实患者是否准确理解病情。",
+        "suggested_action": "建议核实医生解释是否充分传达了骨折诊断，并评估患者对病情的理解程度。",
+        "knowledge_refs": [],
+        "confidence": null,
+        "category": "experience",
+        "severity": "undetermined",
+        "judgment_status": "candidate",
+        "review_status": "pending"
+      },
+      {
+        "label": "EXP_DISCHARGE_GUIDANCE_GAP",
+        "evidence_quote": "复诊时间以门诊安排为准，记录未给具体日期",
+        "rationale": "医嘱未提供具体复诊日期，仅说明'以门诊安排为准'，可能存在出院指导不明确的情况，需核实是否已向患者明确复诊时间。",
+        "suggested_action": "建议核实复诊时间是否已明确告知患者，并确认门诊安排的具体日期。",
+        "knowledge_refs": [],
+        "confidence": null,
+        "category": "experience",
+        "severity": "undetermined",
+        "judgment_status": "candidate",
+        "review_status": "pending"
+      }
+    ],
+    "source_check_errors": [],
+    "status": "completed",
+    "medical_approval": false,
+    "publication_status": "unpublished_demo_draft"
+  }
+]

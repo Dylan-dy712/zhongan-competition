@@ -151,7 +151,7 @@ def layout_text(cache):
                      for _, items in rows)
 
 
-def atoms(fields):
+def atoms(fields, include_inferred_categories=False):
     result = defaultdict(Counter)
     for key in DIAGNOSES + SCALARS + NUMBERS:
         value = fields.get(key)
@@ -166,14 +166,15 @@ def atoms(fields):
             # Do not mix inferred classification with directly recorded item identity/amount.
             result['cost_detail_name_amount'][(normalize(line.get('detailName', '')),
                                                normalize(line['feeAmount']))] += 1
-            if line.get('itemCategoryName') and not line.get('category_inferred', False):
-                result['cost_explicit_category'][(normalize(line.get('detailName', '')),
+            if line.get('itemCategoryName') and (include_inferred_categories or not line.get('category_inferred', False)):
+                category_key = 'cost_semantic_category' if include_inferred_categories else 'cost_explicit_category'
+                result[category_key][(normalize(line.get('detailName', '')),
                                                   normalize(line['feeAmount']),
                                                   normalize(line['itemCategoryName']))] += 1
     return result
 
 
-def score(manifest, predictions_dir):
+def score(manifest, predictions_dir, include_inferred_categories=False):
     totals = defaultdict(Counter)
     errors = []
     failed = 0
@@ -182,7 +183,7 @@ def score(manifest, predictions_dir):
         reference = load(row['reference'])
         if sha(row['reference']) != row['reference_sha256']:
             raise ValueError('reference changed after manifest was frozen')
-        gold = atoms(reference['fields'])
+        gold = atoms(reference['fields'], include_inferred_categories)
         unannotated += int(not reference['fields'])
         path = Path(predictions_dir) / (row['document_id'] + '.json')
         run = load(path) if path.exists() else {'status': 'missing'}
@@ -191,7 +192,7 @@ def score(manifest, predictions_dir):
                 raise ValueError('prediction source does not match manifest')
         valid = run.get('status') == 'completed'
         failed += int(not valid)
-        predicted = atoms(run.get('result', {}).get('fields', {})) if valid else {}
+        predicted = atoms(run.get('result', {}).get('fields', {}), include_inferred_categories) if valid else {}
         # Missing reference keys are unannotated, not verified negatives.
         for key, expected in gold.items():
             actual = predicted.get(key, Counter())
@@ -210,10 +211,13 @@ def score(manifest, predictions_dir):
     combined = Counter()
     for count in totals.values():
         combined.update(count)
-    return {'policy': 'document-explicit-list-opportunities-exact-v2', 'official_metric_verified': False,
+    return {'policy': ('document-fee-taxonomy-exact-v3' if include_inferred_categories
+                       else 'document-explicit-list-opportunities-exact-v2'), 'official_metric_verified': False,
             'five_core_categories_fully_annotated': False,
             'limits': ['surgery/drug entities inside prose lack an independent normalized gold',
-                       'absent reference fields are unannotated; inferred cost categories scored separately later',
+                       ('all annotated fee categories scored as semantic classification, not literal transcription'
+                        if include_inferred_categories else
+                        'absent reference fields are unannotated; inferred cost categories not scored'),
                        'replayed OCR is not fresh end-to-end OCR validation'],
             'documents': len(manifest['documents']), 'failed_or_missing_predictions': failed,
             'empty_reference_documents': unannotated, 'overall': metrics(combined),
@@ -234,6 +238,8 @@ def main():
     parser.add_argument('--workers', type=int, default=4)
     parser.add_argument('--ocr-layout', choices=['plain', 'bbox'], default='plain')
     parser.add_argument('--vision', action='store_true', help='read original image with OCR as optional context')
+    parser.add_argument('--include-inferred-categories', action='store_true',
+                        help='score semantic fee classification too; changes policy to v3, not comparable to v2 totals')
     args = parser.parse_args()
     repo = Path(__file__).resolve().parents[1]
     for output in (args.output, args.predictions_dir):
@@ -251,7 +257,7 @@ def main():
         manifest = {**manifest, 'documents': manifest['documents'][:args.limit],
                     'evaluation_subset': f'fixed-first-{args.limit}-development-documents'}
     if args.mode == 'score':
-        result = score(manifest, args.predictions_dir)
+        result = score(manifest, args.predictions_dir, args.include_inferred_categories)
         result['evaluation_subset'] = manifest.get('evaluation_subset', 'all-manifest-documents')
         write(args.output, result)
         print(json.dumps({k: result[k] for k in ('documents', 'failed_or_missing_predictions', 'overall')}))

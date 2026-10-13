@@ -13,6 +13,7 @@ import time
 from services.api.app.insight_llm import detect_semantic
 from services.api.app.report_llm import draft_report, PROMPT_VERSION
 from services.api.app.report_builder import SECTION_TYPES
+from services.api.app.insight_detector import LABEL_CATEGORY
 from scripts.preliminary_kr1 import load, write
 
 CASES = [
@@ -47,13 +48,36 @@ CASES = [
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--config', required=True)
+    parser.add_argument('--config')
     parser.add_argument('--output-dir', required=True)
+    parser.add_argument('--export-only', action='store_true')
+    parser.add_argument('--public-output', help='export only the known synthetic fixture results')
     args = parser.parse_args()
-    os.environ.update({k:str(v) for k,v in load(args.config).items() if k.startswith('LLM_')})
+    if not args.export_only:
+        if not args.config:
+            parser.error('live generation requires private model configuration')
+        os.environ.update({k:str(v) for k,v in load(args.config).items() if k.startswith('LLM_')})
     output = Path(args.output_dir)
     if output.resolve().is_relative_to(Path(__file__).resolve().parents[1]):
         parser.error('model drafts must remain outside the public repository')
+    if args.export_only:
+        results = [load(output/(case['id']+'.json')) for case in CASES]
+        for case, result in zip(CASES,results):
+            if result['data_origin'] != 'synthetic' or result['material'] != case['material'] or \
+               result['user_input'] != case['user'] or result.get('medical_approval') is not False:
+                raise ValueError('only exact known synthetic fixtures may be exported')
+        if not args.public_output:
+            parser.error('export-only requires public-output')
+        public = [{key:r[key] for key in ('id','disease','data_origin','execution_mode','model_id',
+                   'prompt_version','material','user_input','input_sha256','draft','insights',
+                   'source_check_errors','status','medical_approval','publication_status')} for r in results]
+        for record in public:
+            record['insights'] = [{**item, 'category': LABEL_CATEGORY[item['label']],
+                'severity': 'undetermined', 'judgment_status': 'candidate', 'review_status': 'pending'}
+                for item in record['insights']]
+        write(args.public_output,public)
+        print(json.dumps({'exported_synthetic_cases':len(public),'medical_approval':False}))
+        return
     def run(case):
         path = output/(case['id']+'.json')
         input_hash = hashlib.sha256(json.dumps(case,ensure_ascii=False,sort_keys=True).encode()).hexdigest()
