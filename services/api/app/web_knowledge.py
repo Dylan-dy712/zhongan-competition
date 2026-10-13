@@ -45,6 +45,12 @@ def approved_url(url):
     except (TypeError,ValueError):return False
 
 
+def appropriate_title(title):
+    # This first reference vocabulary serves adult guidance. Do not mix in
+    # pediatric/pregnancy-specific pages merely because the disease word matches.
+    return isinstance(title,str) and not re.search(r'儿童|小儿|婴幼儿|婴儿|新生儿|孕妇|妊娠|\bchildren\b|pediatric|paediatric|pregnan',title,re.I)
+
+
 def safe_concepts(fields,material):
     """Only quote-validated standalone diagnosis/procedure names, no free queries."""
     candidates=fields.get('candidates',{})
@@ -117,7 +123,7 @@ class WebKnowledge:
             if not row or row[1]<=self.clock():return None
             doc=json.loads(row[0])
             digest=hashlib.sha256((doc['source']+'\n'+doc['content']).encode()).hexdigest()
-            if not approved_url(doc['source']) or doc['entry_id']!='WEB-VOLC-'+digest[:24] or doc['version']!=POLICY+':'+digest:return None
+            if not approved_url(doc['source']) or not appropriate_title(doc.get('title')) or doc['entry_id']!='WEB-VOLC-'+digest[:24] or doc['version']!=POLICY+':'+digest:return None
             if doc.get('reference_policy')!=POLICY:return None
             return doc
         except (sqlite3.Error,OSError,ValueError,KeyError,TypeError):return None
@@ -175,7 +181,7 @@ class WebKnowledge:
         for item in rows:
             if not isinstance(item,dict):continue
             url=item.get('Url');title=item.get('Title') or ''
-            if not isinstance(title,str):continue
+            if not appropriate_title(title):continue
             if not approved_url(url) or url in seen or not any(t.lower() in title.lower() for t in terms):continue
             content=select_excerpt(item.get('Content'),terms)
             if not content:continue
