@@ -442,8 +442,7 @@ def run_agent(history, question, attachments, tools, model=None, on_event=None, 
                 '材料读取尚未覆盖全部页。必须说明本轮只解读已读取的部分；不得把未读取的内容说成缺资料。'})
     seed = None
     if (analysis_mode and initial_analysis and offset is None and not truncated
-            and getattr(type(model),'review_analysis',None) is not None
-            and not any(batch.get('quality_warnings') for batch in source_batches)):
+            and getattr(type(model),'review_analysis',None) is not None):
         try:
             wire = AnalysisWireReply.model_validate(initial_analysis)
             if wire.history_refs or not wire.evidence_refs or _unsafe(wire.text.replace('**','')):
@@ -452,6 +451,13 @@ def run_agent(history, question, attachments, tools, model=None, on_event=None, 
                 raise ValueError('STALE_CACHED_SOURCES')
             normalized = canonical_analysis_citations(wire.model_dump(mode='json'),aliases,
                 [page['document'] for page in knowledge_pages])
+            # Uncertain OCR lines were excluded from the live evidence packet.
+            # Warnings must not discard prose whose citations still bind to
+            # readable sources; independent fidelity review remains mandatory.
+            if any(batch.get('quality_warnings') for batch in source_batches):
+                notice='部分材料文字识别不够清晰，本次只解读已能核对的内容；相关图片可补拍后再核对。'
+                if notice not in normalized['text']:
+                    normalized['text'] += '\n\n'+notice
             bound = normalized['citations']
             if not bound:
                 raise ValueError('CACHED_CITATIONS_REQUIRED')
