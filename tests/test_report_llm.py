@@ -25,7 +25,8 @@ class ReportRequestTests(unittest.TestCase):
 
     def test_report_waits_longer_than_old_45_second_limit(self):
         clock = [0.]
-        def call(messages, *, timeout):
+        def call(messages, *, timeout, workload):
+            self.assertEqual(workload, "narrative")
             self.assertEqual(timeout, (10, 180))
             clock[0] += 49.49
             return PAYLOAD, VALID
@@ -53,7 +54,8 @@ class ReportRequestTests(unittest.TestCase):
     def test_exhausted_timeouts_are_bounded_and_preserve_specific_error(self):
         clock = [0.]
         timeouts = []
-        def call(messages, *, timeout):
+        def call(messages, *, timeout, workload):
+            self.assertEqual(workload, "narrative")
             timeouts.append(timeout)
             clock[0] += timeout[1]
             raise requests.ReadTimeout("private")
@@ -79,6 +81,14 @@ class ReportRequestTests(unittest.TestCase):
         self.assertEqual(result["error_code"], "REPORT_MODEL_HTTP_ERROR")
         self.assertFalse(result["retryable"])
         self.assertEqual(result["usage_metadata"]["request_attempts"][0]["http_status"], 401)
+
+    def test_balance_exhausted_is_distinct_and_does_not_retry(self):
+        response=requests.Response();response.status_code=402
+        with patch.object(OpenAiCompatibleExtractor,'_call',side_effect=requests.HTTPError(response=response)) as call:
+            result=draft_report('synthetic',[],None)
+        self.assertEqual(call.call_count,1)
+        self.assertEqual(result['error_code'],'REPORT_MODEL_BALANCE_EXHAUSTED')
+        self.assertFalse(result['retryable'])
 
     def test_transient_http_errors_retry(self):
         for status in (429, 503):

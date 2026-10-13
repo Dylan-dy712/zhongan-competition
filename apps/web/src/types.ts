@@ -47,6 +47,8 @@ export interface Evidence {
   page_index: number | null;
   text_span: { text: string; start: number; end: number } | null;
   extraction_method: string;
+  case_id?:string; source_name?:string; document_type?:string; media_type?:string;
+  bbox?:[number,number,number,number]|null;
 }
 
 export interface AssistantAnswer {
@@ -64,8 +66,9 @@ export interface Conversation {
   created_at: string; updated_at: string;
 }
 export interface ChatAnswer {text: string; evidence_refs: string[]; history_refs: string[];
-  prompt_version?:string; analysis_run_id?:string; knowledge_refs?:string[]; knowledge_sources?:KnowledgeSource[]}
-export interface KnowledgeSource {entry_id:string;title:string;source:string;source_path:string;scope:string;version:string;reference_policy:string}
+  prompt_version?:string; analysis_run_id?:string; knowledge_refs?:string[]; knowledge_sources?:KnowledgeSource[]; citations?:InlineCitation[]}
+export interface InlineCitation {quote:string;source_refs:string[]}
+export interface KnowledgeSource {entry_id:string;title:string;source:string;source_path?:string;scope:string;version:string;reference_policy?:string;content?:string}
 export interface ToolEvent {tool: string; status: string; run_id?: string}
 export interface ChatTurn {
   turn_id: string; request_id: string; question: string;
@@ -114,3 +117,10 @@ export interface RecommendationResponse {
   policy_status: string;
   results: QualityRecommendation[];
 }
+
+export interface PhotoQuality {material_type:string;type_certainty:'likely'|'unknown';status:'checked'|'warning'|'partial';issues:string[];ocr_status:string;recognized_excerpt:string;notice:string}
+export interface ExtractedFact {field_id:string;fact_type:string;value:unknown;raw_value:string|null;status:string;assertion:string;unit:string|null;confidence_score:number|null;confidence_method:string|null;evidence_ids:string[];missing_reason:string|null;alternatives:{value:unknown;evidence_ids:string[]}[]}
+export interface Insight {insight_id:string;category:'clinical'|'cost'|'experience';label:string;severity:string;rationale:string;uncertainty:string|null;suggested_action:string;review_status:string;judgment_status:string;evidence_ids:string[];knowledge_refs:string[]}
+export interface ProfileMetric {metric_name:string;label:string;value:number|null;unit:string;sample_count:number;missing_rate:number;window_start:string;window_end:string;comparison_allowed:boolean;limitations:string[];metric_ref:string}
+export interface QualityProfile {entity_id:string;entity_type:string;display_name:string;cohort_filters:{disease_group:string;treatment_group:string;risk_group:string|null;payer_group:string|null};metrics:ProfileMetric[]}
+export interface QualitySnapshot {snapshot_id:string;data_origin:string;dataset_version:string;policy:{status:string};profiles:QualityProfile[];limitations?:string[]}

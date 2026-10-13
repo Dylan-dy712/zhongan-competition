@@ -5,6 +5,7 @@ import {careSectionLabels} from './carePresentation';
 import {currentNarrative} from './AnalysisNarrative';
 import mascot from '../../../output_dir/product-design/assets/reference-mascot.webp';
 import './analysis-flow.css';
+import {SourceRefs} from './SourceCitations';
 
 const steps=[['parse','识别材料'],['extract','提取信息'],['insights','核对疑点'],['guidance','整理重点'],['validate','校验来源'],['narrative','写好解读']];
 function AnalysisIcon({kind}:{kind:string}) {
@@ -22,11 +23,12 @@ function AnalysisIcon({kind}:{kind:string}) {
 }
 export type UploadProgress={done:number;total:number};
 export function analysisView(snapshot:ChatSnapshot|null,upload?:UploadProgress,submitting=false,error='') {
+  if(!upload && !submitting && currentNarrative(snapshot?.turns || [],snapshot?.analysis.run_id))return {kind:'ready',title:'暖暖的解读已准备好',detail:'解读已出现在对话中，可以接着聊',percent:100,index:6};
   if(error)return {kind:'failed',title:'这次分析没有完成',detail:error,percent:null,index:-1};
   if(upload)return {kind:'upload',title:'正在上传材料',detail:`已上传 ${upload.done} / ${upload.total} 份`,percent:Math.floor(upload.done/upload.total*100),index:-1};
   const material=snapshot?.material_report;
-  if(currentNarrative(snapshot?.turns || [],snapshot?.analysis.run_id))return {kind:'ready',title:'暖暖的解读已准备好',detail:'解读已出现在对话中，可以接着聊',percent:100,index:6};
   if(material?.status==='available')return {kind:'processing',title:'暖暖正在把情况讲清楚',detail:'正在写好解读并核对内容，准备好后会直接显示在对话里',percent:95,index:5};
+  if((snapshot?.analysis.error as {code?:string}|undefined)?.code==='REPORT_MODEL_BALANCE_EXHAUSTED')return {kind:'failed',title:'分析服务暂不可用',detail:'材料已保存，无需重新上传。服务恢复后可以重新分析。',percent:null,index:-1};
   if(material?.status==='failed' || snapshot?.analysis.status==='failed')return {kind:'failed',title:'报告生成没有完成',detail:'材料已保存，可以重新分析。',percent:null,index:-1};
   if(snapshot?.analysis.status==='cancelled')return {kind:'failed',title:'这次分析已取消',detail:'材料已保存，可以重新分析。',percent:null,index:-1};
   const status=snapshot?.analysis.status;
@@ -44,8 +46,8 @@ export function MaterialReportContent({report,onEvidence,onAsk}:{report:Material
     {(report.sections || []).map(section=><section className="material-report-section" key={section.section_type}>
       <h3>{careSectionLabels[section.section_type]}<span>{section.items.length?'已核对材料':'资料待补充'}</span></h3>
       {section.items.map((item,i)=><div className="material-report-item" key={i}>
-        {item.kind==='source' && <small>材料原文 · 保留原文限定</small>}<p>{item.text}</p>
-        {item.evidence_refs.map(id=><button className="material-evidence" key={id} onClick={()=>onEvidence(id)}>查看原始依据 ↗</button>)}
+        {item.kind==='source' && <small>材料原文 · 保留原文限定</small>}<p>{item.text}<SourceRefs refs={item.evidence_refs} onEvidence={onEvidence}/></p>
+
       </div>)}
       {!section.items.length && <p className="material-report-empty">当前没有通过自动核对的内容。可以补充相关材料或向暖暖核实。</p>}
       {section.pending_count>0 && <p className="material-pending">{section.pending_count} 项解释或结论需要核实，暂未作为确认结果展示。</p>}

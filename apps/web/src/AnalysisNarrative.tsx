@@ -1,6 +1,6 @@
 import type {ChatTurn} from './types';
 import {narrativeBlocks,emphasisParts} from './narrativeFormatting';
-import KnowledgeSources from './KnowledgeSources';
+import {CitedText} from './SourceCitations';
 
 export function Emphasis({text}:{text:string}) {
   return <>{emphasisParts(text).map((part,i)=>part.strong?<strong key={i}>{part.text}</strong>:part.text)}</>;
@@ -14,26 +14,23 @@ export function currentNarrative(turns:ChatTurn[],runId?:string) {
 export default function AnalysisNarrative({turn,onEvidence}:{turn:ChatTurn;onEvidence:(id:string)=>void}) {
   if(!turn.answer)return null;
   const blocks=narrativeBlocks(turn.answer.text);
+  const cited=(text:string)=><CitedText text={text} citations={turn.answer!.citations} sources={turn.answer!.knowledge_sources} onEvidence={onEvidence}/>;
   let number=0;
   return <article className="analysis-narrative" aria-label="暖暖的材料解读">
     <div className="analysis-narrative-copy">
       {blocks.map((block,i)=>block.kind==='point'
         ? <section className="analysis-narrative-point" key={i}>
             <span className="analysis-point-number" aria-label={`第 ${++number} 点`}>{number}</span>
-            <div><p className="analysis-point-lead">{block.legacyLead?<strong>{block.text}</strong>:<Emphasis text={block.text}/>}</p>
-              {block.paragraphs.map((text,j)=><p key={j}><Emphasis text={text}/></p>)}</div>
+            <div><p className="analysis-point-lead">{cited(block.text)}</p>
+              {block.paragraphs.map((text,j)=><p key={j}>{cited(text)}</p>)}</div>
           </section>
         : block.kind==='closing'
           ? <section className="analysis-narrative-closing" key={i}>
               <h3>{block.text}</h3>
-              {block.paragraphs.map((text,j)=><p key={j}><Emphasis text={text}/></p>)}
+              {block.paragraphs.map((text,j)=><p key={j}>{cited(text)}</p>)}
             </section>
-          : <p key={i}><Emphasis text={block.text}/></p>)}
+          : <p key={i}>{cited(block.text)}</p>)}
     </div>
-    {turn.answer.evidence_refs.length>0 && <details className="analysis-narrative-sources">
-      <summary>这份解读的材料依据 <span>{turn.answer.evidence_refs.length}</span></summary>
-      <div>{turn.answer.evidence_refs.map((id,i)=><button className="citation" key={id} onClick={()=>onEvidence(id)}>依据 {i+1} ↗</button>)}</div>
-    </details>}
-    <KnowledgeSources sources={turn.answer.knowledge_sources}/>
+    {!turn.answer.citations?.length && turn.answer.evidence_refs.length>0 && <small className="muted">此历史解读尚无逐条引用，可重新分析材料以生成带来源角标的解读。</small>}
   </article>;
 }

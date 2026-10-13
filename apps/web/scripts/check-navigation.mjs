@@ -16,7 +16,7 @@ const conversation={conversation_id:'synthetic-a',subject_id:'synthetic-subject'
   updated_at:'2026-10-05T09:00:00+08:00',created_at:'2026-10-05T09:00:00+08:00',recall_enabled:false};
 const snapshot={conversation,turns:[],analysis:{status:'completed'},report:{status:'published',report_id:'synthetic-report',report_version:1,
   actions:[],sections:[{section_type:'diagnosis_explanation',claims:[{claim_id:'synthetic-claim',text:'合成资料说明',
-    review_status:'approved',claim_type:'case_fact',evidence_refs:['synthetic-evidence']}]}]}};
+    review_status:'approved',claim_type:'case_fact',evidence_refs:['00000000-0000-4000-8000-000000000001']}]}]}};
 let delayed=null;
 let delayedEvidence=null;
 globalThis.fetch=async url=>{
@@ -26,7 +26,7 @@ globalThis.fetch=async url=>{
   if(path==='/v1/me/consents')return Response.json({subject_id:'synthetic-subject',status:'active',version:1});
   if(path==='/v1/chat/subjects')return Response.json([{subject_id:'synthetic-subject',consent_id:'synthetic-consent'}]);
   if(path==='/v1/cases/case-a/deliveries')return Response.json([]);
-  if(path==='/v1/evidence/synthetic-evidence')return delayedEvidence.promise;
+  if(path==='/v1/evidence/00000000-0000-4000-8000-000000000001')return delayedEvidence.promise;
   if(path==='/v1/conversations/synthetic-a')return delayed ? delayed.promise : Response.json(snapshot);
   throw new Error('Unexpected test request: '+path);
 };
@@ -62,12 +62,15 @@ try {
   assert.equal(document.querySelector('.nuan-priority'),null,'Reload must not manufacture a claim-completion entry');
   await click('关怀指引');
   let resolveEvidence;delayedEvidence={promise:new Promise(r=>{resolveEvidence=r;})};
-  await click('查看这段说明的资料依据');await click('首页');
-  await act(async()=>resolveEvidence(Response.json({evidence_id:'synthetic-evidence',document_version:1,page_index:0,text_span:{text:'合成证据'}})));
-  await flush();assert.equal(document.querySelector('dialog.evidence-overlay'),null,'Late evidence must not reopen a modal on another page');
+  await act(async()=>document.querySelector('[aria-label="查看来源 1"]').click());await click('首页');
+  await act(async()=>resolveEvidence(Response.json({evidence_id:'00000000-0000-4000-8000-000000000001',document_version:1,page_index:0,text_span:{text:'合成证据'}})));
+  await flush();assert.equal(document.querySelector('dialog.source-sheet'),null,'Late evidence must not reopen a modal on another page');
   assert.match(document.body.textContent,/提交理赔材料/);
   await click('问暖暖');
-  await click('新的关怀对话');await click('年龄未填写');assert.match(document.body.textContent,/开始新的对话/);
+  await click('新的关怀对话');assert.match(document.body.textContent,/开始新的对话/);
+  assert.equal(document.querySelector('dialog'),null,'New chat must open directly without a member picker');
+  assert.equal(document.querySelector('.connect-form select').value,'');
+  assert.equal(button('开始新的对话').disabled,true,'A member must still be selected before starting');
   await click('我的');await click('查看更多');
   assert.ok(document.querySelector('.member-records-header'),'Secondary record list identifies the person');
   assert.equal(document.querySelector('.records-profile'),null,'Record list must not duplicate the profile card');
@@ -83,7 +86,10 @@ try {
   assert.doesNotMatch(document.body.textContent,/开始新的对话/,'Loading must not masquerade as a new case');
   await act(async()=>resolve(Response.json({message:'不可访问'},{status:404})));await flush();
   assert.doesNotMatch(document.body.textContent,/正在打开就医记录/,'Access failure must clear loading');
-  await click('问暖暖');await click('年龄未填写');assert.equal(button('开始新的对话').disabled,false,'Access failure must not leave controls locked');
+  await click('问暖暖');
+  assert.equal(document.querySelector('dialog'),null);
+  await act(async()=>{const select=document.querySelector('.connect-form select');select.value='synthetic-subject';select.dispatchEvent(new dom.window.Event('change',{bubbles:true}));});
+  assert.equal(button('开始新的对话').disabled,false,'Access failure must not leave controls locked');
   const {PageBoundary}=modules;
   const bad=()=>{throw new Error('Synthetic render failure');};
   await act(async()=>root.unmount());root=createRoot(document.getElementById('root'));

@@ -243,13 +243,13 @@ def main():
                 data=json.loads(next(m['content'] for m in reversed(messages)
                                      if 'authorized_material_pages' in (m.get('content') or '')))['authorized_material_pages'][0]
                 evidence_ref.append(data['spans'][0][0])
-                return {'role':'assistant','content':json.dumps({'text':'票据记载总费用120元。','evidence_refs':evidence_ref,'history_refs':[]})}
+                return {'role':'assistant','content':json.dumps({'text':'票据记载总费用120元。','evidence_refs':evidence_ref,'history_refs':[], 'citations':[{'quote':'票据记载总费用120元。','source_refs':evidence_ref}]})}
             model=ScriptedModel([grounded_reply])
             with patch('services.api.app.conversation_agent.AgentModel',return_value=model):
                 completed=client.post(base+f'/analyses/{run_id}/continue',headers=headers)
             check(completed.status_code==200,'analysis completion continues with real evidence')
             check(completed.json()['answer']['analysis_run_id']==str(run_id) and
-                  completed.json()['answer']['prompt_version']=='patient-analysis-narrative-v7',
+                  completed.json()['answer']['prompt_version']=='patient-analysis-narrative-v7-inline-citations',
                   'personal narrative is model-generated and bound to the exact analysis run')
             with patch('services.api.app.conversation_agent.AgentModel',side_effect=AssertionError('replay')):
                 replay=client.post(base+f'/analyses/{run_id}/continue',headers=headers)

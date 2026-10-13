@@ -31,6 +31,7 @@ from .report_llm import PROMPT_VERSION as REPORT_PROMPT_VERSION, draft_report
 from .contracts.core import Action
 from .llm_extractor import PROMPT_VERSION, SCHEMA_VERSION as MODEL_SCHEMA_VERSION, OpenAiCompatibleExtractor, validate_evidence_quotes
 from .tencent_ocr import OCR_METHOD, OCR_VERSION, TencentOcr
+from .document_quality import classify_material
 
 
 TEXT_PARSER_VERSION = "controlled-text-v1"
@@ -78,6 +79,8 @@ def evidence_for_page(document,page):
         spans=[]
         cursor=0
         for block in page['blocks']:
+            if block.get('metadata', {}).get('needs_clearer_photo'):
+                continue
             value=block['text']
             spans.append((cursor,cursor+len(value),value,block.get('bbox')))
             cursor+=len(value)+1
@@ -203,7 +206,17 @@ def parse_controlled_text(document: dict, path: Path):
 
 def ocr_page(image_bytes: bytes, width: int, height: int, base: dict, ocr: TencentOcr):
     result = ocr.recognize(image_bytes, width, height)
-    text = result["text"]
+    kind, certainty = classify_material(result['text'])
+    uncertain = 0
+    for block in result['blocks']:
+        score = block.get('metadata', {}).get('confidence_score')
+        if isinstance(score, (int, float)) and score < .8:
+            block.setdefault('metadata', {})['needs_clearer_photo'] = True
+            uncertain += 1
+    # Preserve low-confidence OCR in page_blocks for auditing, but never feed it
+    # to facts, amounts, clinical suggestions or the narrative as confirmed text.
+    text = '\n'.join(block['text'] for block in result['blocks']
+                     if not block.get('metadata', {}).get('needs_clearer_photo')) if uncertain else result['text']
     base.update({
         "text": text or None,
         "status": "parsed" if text else "unreadable",
@@ -214,6 +227,9 @@ def ocr_page(image_bytes: bytes, width: int, height: int, base: dict, ocr: Tence
             **base["metadata"], "ocr_method": OCR_METHOD,
             "ocr_request_id": result["request_id"], "ocr_angle": result["angle"],
             "ocr_line_count": len(result["blocks"]),
+            "photo_quality": {"material_type":kind,"type_certainty":certainty,
+                              "uncertain_lines":uncertain,"readable_lines":len(result['blocks'])-uncertain,
+                              "needs_reupload":bool(uncertain or not text),"method":"ocr-line-triage-v1"},
         },
     })
     return base

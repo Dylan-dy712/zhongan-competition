@@ -95,8 +95,8 @@ export const recordDeliveryReceipt = (token:string,id:string,state:'presented'|'
 export const submitCareFeedback = (token:string,reportId:string,version:number,type:FeedbackType,key:string) =>
   chatRequest<FeedbackResult>('/v1/feedback',token,'POST',{report_id:reportId,report_version:version,type},key);
 export const listSubjects = (token: string) => chatRequest<ChatSubject[]>('/v1/chat/subjects', token);
-export const startChatAnalysis = (token:string,id:string,requestId:string,message:string,documentIds:string[]=[]) =>
-  chatRequest<{turn_id:string}>(`/v1/conversations/${id}/analyses`,token,'POST',{request_id:requestId,message,document_ids:documentIds});
+export const startChatAnalysis = (token:string,id:string,requestId:string,message:string,documentIds:string[]=[],forceNew=false) =>
+  chatRequest<{turn_id:string}>(`/v1/conversations/${id}/analyses`,token,'POST',{request_id:requestId,message,document_ids:documentIds,force_new:forceNew});
 export const createConversation = (token: string, conversationId: string, subjectId?: string, caseId?: string) =>
   chatRequest<Conversation>('/v1/conversations', token, 'POST', {conversation_id:conversationId, subject_id:subjectId || null, case_id:caseId || null,recall_enabled:false});
 
@@ -122,5 +122,29 @@ export const uploadChatDocument = (token: string, id: string, file: File) => {
 };
 export const requestRecommendations = (token: string, body: {disease_group: string; treatment_group: string;
   risk_group: string | null; payer_group: string | null;
-  needs: {need_id: string; metric_name: string}[]}) =>
-  chatRequest<RecommendationResponse>('/v1/quality/recommendations', token, 'POST', body);
+  needs: {need_id: string; metric_name: string}[]},demo=false) =>
+  chatRequest<RecommendationResponse>(demo?'/v1/quality/demo/recommendations':'/v1/quality/recommendations', token, 'POST', body);
+
+export const inspectPhoto=(token:string,subjectId:string,file:File)=>{
+  const data=new FormData();data.append('file',file);data.append('subject_id',subjectId);
+  return chatRequest<import('./types').PhotoQuality>('/v1/materials/inspect',token,'POST',data,undefined,120000);
+};
+export const getFacts=(token:string,caseId:string,runId:string)=>chatRequest<import('./types').ExtractedFact[]>(`/v1/cases/${encodeURIComponent(caseId)}/facts?run_id=${encodeURIComponent(runId)}`,token);
+export const getInsights=(token:string,caseId:string,runId:string)=>chatRequest<import('./types').Insight[]>(`/v1/cases/${encodeURIComponent(caseId)}/insights?run_id=${encodeURIComponent(runId)}`,token);
+export const getKnowledgeSource=(token:string,id:string)=>chatRequest<import('./types').KnowledgeSource>(`/v1/knowledge/${encodeURIComponent(id)}`,token);
+export const listQualitySnapshots=(token:string)=>chatRequest<{snapshot_id:string}[]>('/v1/quality/snapshots',token);
+export const getQualitySnapshot=(token:string,id:string)=>chatRequest<import('./types').QualitySnapshot>(`/v1/quality/snapshots/${encodeURIComponent(id)}`,token);
+export async function getEvidenceImage(token:string,evidence:import('./types').Evidence){
+  const response=await apiFetch(`${API_BASE}/v1/cases/${evidence.case_id}/documents/${evidence.document_id}/content?version=${evidence.document_version}`,{headers:{Authorization:`Bearer ${token}`}});
+  if(!response.ok)throw new ApiError('原图暂不可用',response.status);
+  return URL.createObjectURL(await response.blob());
+}
+
+export const getDemoQuality=(token:string)=>chatRequest<import('./types').QualitySnapshot>('/v1/quality/demo',token);
+
+export const getMaterialQuality=(token:string,caseId:string,runId:string)=>chatRequest<MaterialQuality[]>(`/v1/cases/${encodeURIComponent(caseId)}/material-quality?run_id=${encodeURIComponent(runId)}`,token);
+export interface MaterialQuality {document_id:string;name:string;page_index:number;quality:{material_type:string;type_certainty:string;uncertain_lines:number;readable_lines:number;needs_reupload:boolean}}
+export const replaceChatDocument=(token:string,conversationId:string,documentId:string,file:File)=>{
+ const data=new FormData();data.append('file',file);
+ return chatRequest<{document_id:string;source_ref:string}>(`/v1/conversations/${encodeURIComponent(conversationId)}/documents/${encodeURIComponent(documentId)}/replacement`,token,'POST',data);
+};

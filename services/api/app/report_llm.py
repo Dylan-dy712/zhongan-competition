@@ -31,7 +31,7 @@ def request_failure(exc):
     elif isinstance(exc, requests.ConnectionError):
         code, retryable = "REPORT_MODEL_CONNECTION_ERROR", True
     elif isinstance(exc, requests.HTTPError):
-        code = "REPORT_MODEL_RATE_LIMITED" if status == 429 else "REPORT_MODEL_HTTP_ERROR"
+        code = {402: "REPORT_MODEL_BALANCE_EXHAUSTED", 429: "REPORT_MODEL_RATE_LIMITED"}.get(status, "REPORT_MODEL_HTTP_ERROR")
         retryable = status in {408, 429, 500, 502, 503, 504}
     else:
         code, retryable = "REPORT_MODEL_RESPONSE_INVALID", False
@@ -123,7 +123,7 @@ def draft_report(material: str, reviewable_knowledge: list[dict], user_context: 
         started = time.monotonic()
         try:
             payload, content = client._call(
-                messages, timeout=(10, min(REPORT_READ_TIMEOUT, remaining - 10)))
+                messages, timeout=(10, min(REPORT_READ_TIMEOUT, remaining - 10)), workload='narrative')
             first_payload = first_payload or payload
             if repairing:
                 repaired_payload = payload

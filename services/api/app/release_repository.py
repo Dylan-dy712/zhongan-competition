@@ -69,7 +69,7 @@ def publish_report(conn, *, actor_id, case_id, version, expected_version, idempo
             raise ReleaseBlocked('analysis is incomplete or input hash changed')
         if any(run['stage_results'].get(stage,{}).get('status')!='completed' for stage in ('parse','extract')):
             raise ReleaseBlocked('required analysis stages are incomplete')
-        documents = conn.execute('SELECT * FROM documents WHERE case_id=%s ORDER BY document_id FOR SHARE',
+        documents = conn.execute('SELECT * FROM documents WHERE case_id=%s AND NOT EXISTS (SELECT 1 FROM document_replacements replacement WHERE replacement.old_document_id=documents.document_id) ORDER BY document_id FOR SHARE',
                                  (case_id,)).fetchall()
         snapshot = [{'document_id':str(d['document_id']),'document_version':d['document_version'],
                      'source_hash':d['source_hash']} for d in documents]

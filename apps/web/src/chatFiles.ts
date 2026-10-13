@@ -3,7 +3,6 @@ const documentTypes: Record<string,string> = {
 };
 
 export function prepareChatFiles(files:FileList, attached:number):File[] {
-  if(files.length+attached>20)throw new Error('一次最多附加20份材料。');
   return Array.from(files,file=>{
     const extension=file.name.split('.').at(-1)?.toLowerCase() || '';
     const type=documentTypes[extension];

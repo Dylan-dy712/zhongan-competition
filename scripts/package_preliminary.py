@@ -32,7 +32,8 @@ def main():
         for member in source:
             if member.isfile():
                 path = Path(member.name)
-                if path.is_absolute() or '..' in path.parts or path.name.startswith('.env') or path.suffix in {'.pem', '.key'}:
+                if path.is_absolute() or '..' in path.parts or \
+                   (path.name.startswith('.env') and path.name != '.env.example') or path.suffix in {'.pem', '.key'}:
                     raise ValueError('disallowed source path')
                 files['source/' + member.name] = source.extractfile(member).read()
             elif not member.isdir():
