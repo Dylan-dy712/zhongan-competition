@@ -10,9 +10,9 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 from .llm_extractor import OpenAiCompatibleExtractor
 from .report_builder import SECTION_TYPES
 from .analysis_sources import compact_schema
-from .inline_citations import InlineCitation
+from .inline_citations import InlineCitation, MAX_ANALYSIS_REFERENCES
 
-PROMPT_VERSION = "six-section-care-report-v8-shared-analysis"
+PROMPT_VERSION = "six-section-care-report-v9-canonical-citations"
 REPORT_READ_TIMEOUT = 180
 REPORT_REQUEST_BUDGET = 240
 
@@ -71,7 +71,7 @@ class DraftAction(BaseModel):
 class PatientAnalysis(BaseModel):
     model_config = ConfigDict(extra="forbid")
     text: str = Field(min_length=1, max_length=6000)
-    evidence_refs: list[str] = Field(max_length=20)
+    evidence_refs: list[str] = Field(max_length=MAX_ANALYSIS_REFERENCES)
     history_refs: list[str] = Field(default_factory=list, max_length=0)
     knowledge_refs: list[str] = Field(default_factory=list, max_length=4)
     citations: list[InlineCitation] = Field(default_factory=list, max_length=30)

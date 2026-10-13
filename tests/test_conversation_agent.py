@@ -29,7 +29,7 @@ class AgentTests(unittest.TestCase):
         payloads = json.loads(sent[-1]['content'])['authorized_material_pages']
         self.assertEqual(len(payloads), 1)
         self.assertIn('不能排除肺炎', str(payloads))
-        self.assertEqual(reply['prompt_version'], 'patient-analysis-narrative-v8-shared-draft')
+        self.assertEqual(reply['prompt_version'], 'patient-analysis-narrative-v9-canonical-citations')
         self.assertEqual(reply['text'], '票据记载120元。\n\n检查记录写到不能排除肺炎。')
         self.assertEqual(len(events), 2)
         self.assertEqual(json.loads(tools.execute.call_args_list[1].args[1]),
@@ -50,15 +50,19 @@ class AgentTests(unittest.TestCase):
     def test_analysis_partial_read_is_explicit_and_bounded(self):
         model, tools = MagicMock(), MagicMock()
         ref=str(uuid4())
-        tools.execute.return_value={'status':'available','evidence':[{'text':'synthetic','evidence_id':ref}], 'next_offset':8}
+        def page(name,arguments):
+            offset=json.loads(arguments)['offset']
+            return {'status':'available','evidence':[{'text':'','evidence_id':ref}]*200,
+                    'next_offset':offset+200}
+        tools.execute.side_effect=page
         model.complete.return_value=answer('本轮只解读已读取的部分。',[ref])
         run_agent([], '解释资料', [], tools, model=model, analysis_mode=True)
-        self.assertEqual(tools.execute.call_count, 6)
+        self.assertEqual(tools.execute.call_count, 50)
         self.assertFalse(model.complete.call_args.kwargs['allow_tools'])
         self.assertIn('不得把未读取的内容说成缺资料', str(model.complete.call_args.args[0]))
 
     def test_analysis_repairs_excess_citations_with_the_actual_schema_budget(self):
-        refs=[str(uuid4()) for _ in range(21)]
+        refs=[str(uuid4()) for _ in range(81)]
         model,tools=MagicMock(),MagicMock()
         tools.execute.return_value={'status':'available','next_offset':None,
                                     'evidence':[{'evidence_id':ref,'text':'合成材料'} for ref in refs]}
@@ -66,8 +70,8 @@ class AgentTests(unittest.TestCase):
         reply,_=run_agent([], '解释资料', [], tools, model=model, analysis_mode=True)
         self.assertEqual(reply['evidence_refs'],refs[:5])
         messages=model.complete.call_args.args[0]
-        self.assertIn('evidence_refs只填这些短编号，最多20个',messages[0]['content'])
-        self.assertIn('最多20个材料中S1等短编号',messages[-1]['content'])
+        self.assertIn('evidence_refs只填这些短编号，最多80个',messages[0]['content'])
+        self.assertIn('最多80个材料中S1等短编号',messages[-1]['content'])
         self.assertIn('evidence_refs:too_long',messages[-1]['content'])
         self.assertEqual(model.complete.call_count,2)
 

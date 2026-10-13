@@ -350,6 +350,14 @@ def analyze_models(material, knowledge_entries, user_context, source_refs, fact_
                 shared['evidence_refs'] = [aliases.get(ref,ref) for ref in shared['evidence_refs']]
                 for citation in shared.get('citations',[]):
                     citation['source_refs'] = [aliases.get(ref,ref) for ref in citation.get('source_refs',[])]
+                from .inline_citations import canonical_analysis_citations
+                try:
+                    report['draft']['patient_analysis'] = canonical_analysis_citations(shared,aliases,
+                        [entry['entry_id'] for entry in reviewable])
+                except (ValueError,KeyError,TypeError):
+                    # Optional chat prose is unusable; retain the structured
+                    # report and regenerate prose against live authorized sources.
+                    report['draft']['patient_analysis'] = None
         if insights_future:
             insights = insights_future.result()
     performance = {'model_schedule':'parallel','model_seconds':timings,

@@ -1,0 +1,19 @@
+"""Safe failure classifications; never persist exception bodies or patient text."""
+from pydantic import ValidationError
+
+SAFE_CODES = frozenset({
+    'CITATION_ANCHOR_NOT_UNIQUE','CITATION_SOURCE_NOT_AUTHORIZED','ANALYSIS_CITATION_LIMIT',
+    'UNKNOWN_EVIDENCE_REFERENCE','UNKNOWN_KNOWLEDGE_REFERENCE','STALE_KNOWLEDGE_REFERENCE',
+    'UNKNOWN_HISTORY_REFERENCE','INLINE_CITATIONS_REQUIRED','UNSOURCED_ANALYSIS',
+    'UNSAFE_ANALYSIS','ANALYSIS_FIDELITY_REJECTED','UNGROUNDED_ANALYSIS_REVIEW',
+    'ANALYSIS_REVIEW_FORMAT','ANALYSIS_JUDGMENT_FORMAT','ANALYSIS_RESPONSE_FORMAT',
+    'ANALYSIS_SOURCES_UNAVAILABLE','ANALYSIS_SOURCE_PAGING_INVALID','AGENT_TOOL_LIMIT',
+})
+
+
+def generation_error_code(exc):
+    if isinstance(exc,ValidationError):
+        return 'AGENT_FORMAT_INVALID'
+    if isinstance(exc,(ValueError,RuntimeError)) and str(exc) in SAFE_CODES:
+        return str(exc)
+    return 'AGENT_UNAVAILABLE'
