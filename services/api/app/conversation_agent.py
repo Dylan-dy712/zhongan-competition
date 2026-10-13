@@ -30,7 +30,7 @@ from .contracts.knowledge import DiseaseCode
 
 
 PROMPT_VERSION = 'conversation-agent-v3'
-ANALYSIS_PROMPT_VERSION = 'patient-analysis-narrative-v11-reading-depth'
+ANALYSIS_PROMPT_VERSION = 'patient-analysis-narrative-v12-web-references'
 ANALYSIS_INSTRUCTION = """
 本轮是暖暖看完资料后，对用户讲清这次就医情况。遵循上面的对话语气，读起来要像人在耐心讲解。
 表达顺序：开头两三句抓住这次就医的整体情况；然后用编号分主题解释；最后单独写“**接下来，可以这样做**”。
@@ -361,9 +361,13 @@ class CareTools:
             raise ValueError('UNKNOWN_KNOWLEDGE_REFERENCE')
         if reply.knowledge_refs:
             current=KnowledgeRetriever()
-            if any(ref not in current.by_id or current.version!=self.knowledge_sources[ref]['version']
-                   for ref in reply.knowledge_refs):
-                raise ValueError('STALE_KNOWLEDGE_REFERENCE')
+            for ref in reply.knowledge_refs:
+                if ref.startswith('WEB-VOLC-'):
+                    from .web_knowledge import WebKnowledge
+                    doc=WebKnowledge().resolve(ref)
+                    valid=doc is not None and doc['version']==self.knowledge_sources[ref]['version']
+                else:valid=ref in current.by_id and current.version==self.knowledge_sources[ref]['version']
+                if not valid:raise ValueError('STALE_KNOWLEDGE_REFERENCE')
         if any(str(x) not in self.evidence_ids for x in reply.evidence_refs):
             raise ValueError('UNKNOWN_EVIDENCE_REFERENCE')
         if any(str(x) not in self.history_ids for x in reply.history_refs):
@@ -648,7 +652,8 @@ def run_agent(history, question, attachments, tools, model=None, on_event=None, 
                   'prompt_version': ANALYSIS_PROMPT_VERSION if analysis_mode else PROMPT_VERSION}
         if isinstance(tools,CareTools):
             result['knowledge_sources']=[{key:tools.knowledge_sources[ref][key]
-                for key in ('entry_id','title','source','source_path','scope','version','reference_policy','content')}
+                for key in ('entry_id','title','source','source_path','scope','version','reference_policy','content','retrieval_provider','retrieved_at','published_at')
+                if key in tools.knowledge_sources[ref]}
                 for ref in dict.fromkeys(reply.knowledge_refs)]
         if analysis_mode:
             result['performance'] = {'source_fragments':len(aliases), 'source_characters':size,

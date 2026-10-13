@@ -342,6 +342,8 @@ def analyze_models(material, knowledge_entries, user_context, source_refs, fact_
         if configured and not knowledge_excluded:
             from .guidance_context import care_priorities, select_guidance_knowledge
             reviewable = select_guidance_knowledge(knowledge_entries,fields,material,user_context)
+            from .web_knowledge import supplement_knowledge
+            reviewable,web_search=supplement_knowledge(reviewable,fields,material)
             priorities = care_priorities(insights,material,[entry['entry_id'] for entry in reviewable])
             from .analysis_sources import pack_sources
             packed, aliases = pack_sources([{'evidence':fact_inputs}])
@@ -349,6 +351,8 @@ def analyze_models(material, knowledge_entries, user_context, source_refs, fact_
                 user_sources=source_refs, structured_costs=report_cost_context(fact_inputs,fields['candidates'].get('cost_lines',[])),
                 personnel=fields.get('personnel',[]), normalized_dates=encounter_dates, analysis_sources=packed,
                 care_priorities=priorities, structured_fields=fields.get('candidates',{}))
+            report.setdefault('usage_metadata',{})['web_search']=web_search
+            report['reference_knowledge']=reviewable
             shared = report['draft'].get('patient_analysis')
             if shared:
                 shared['evidence_refs'] = [aliases.get(ref,ref) for ref in shared['evidence_refs']]
@@ -580,7 +584,7 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
             mapped_draft = map_report_sources(report_model_result["draft"], evidence_texts, source_refs)
             sections, action_drafts, report_errors = validate_and_complete(
                 mapped_draft, evidence_texts,
-                {e.entry_id for e in knowledge_entries}, source_refs,
+                {e.entry_id for e in knowledge_entries} | {d['entry_id'] for d in report_model_result.get('reference_knowledge',[])}, source_refs,
                 structured_dates=encounter_dates,
             )
             report_id = uuid4()

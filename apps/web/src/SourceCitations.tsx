@@ -18,10 +18,13 @@ function KnowledgeSheet({id,token,initial,onClose}:{id:string;token:string;initi
   if(!initial?.content)void getKnowledgeSource(token,id).then(value=>{if(active)setSource(value);}).catch(()=>{if(active)setError('该来源的详细摘录暂不可用，请稍后重试。');});
   return()=>{active=false;dialog.current?.close();previous?.focus?.();};
  },[id,token]);
+ const web=source?.retrieval_provider==='volcengine';
+ const original=web&&/^https?:\/\//.test(source.source)?source.source:undefined;
  return <dialog ref={dialog} className="source-sheet" aria-labelledby="knowledge-source-title" onCancel={e=>{e.preventDefault();onClose();}}>
-  <header><div><small>医学知识来源</small><h2 id="knowledge-source-title">{source?.title||'正在查阅来源…'}</h2></div><button onClick={onClose} aria-label="关闭来源">×</button></header>
+  <header><div><small>{web?'网络参考资料':'医学知识来源'}</small><h2 id="knowledge-source-title">{source?.title||'正在查阅来源…'}</h2></div><button onClick={onClose} aria-label="关闭来源">×</button></header>
   {source&&<><p>{source.source||'参考资料名称待核对'}</p><p className="muted">资料版本：{source.version}</p><p>{source.scope}</p>
-  {source.content&&<blockquote>{source.content}</blockquote>}<small>章节与页码以资料原有标注为准；未提供的位置不作推测。</small></>}
+  {original&&<p><a href={original} target="_blank" rel="noopener noreferrer">查看原网页</a>{source.retrieved_at&&<small> · 获取时间：{new Date(source.retrieved_at).toLocaleString('zh-CN')}</small>}</p>}
+  {source.content&&<blockquote>{source.content}</blockquote>}<small>{web?'公开网页用于一般解释，个人治疗安排以你的病历和医生医嘱为准。':'章节与页码以资料原有标注为准；未提供的位置不作推测。'}</small></>}
   {error&&<p role="alert">{error}</p>}
  </dialog>;
 }
