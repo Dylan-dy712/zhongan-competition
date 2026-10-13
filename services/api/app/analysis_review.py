@@ -49,10 +49,9 @@ def review_analysis(config,packed,text,citations=None):
     originals=[{'document':page['document'],'page':page['page'],
                 **({'source_kind':page['source_kind']} if page.get('source_kind') else {}),
                 'text':'\n'.join(span[1] for span in page['spans'])} for page in packed]
-    citation_sources={span[0]:span[1] for page in packed for span in page['spans']}
-    audit=[{'quote':c['quote'],'cited_sources':[citation_sources.get(ref,'来源不存在') for ref in c['source_refs']]} for c in (citations or [])]
-    messages=[{'role':'system','content':INSTRUCTION+'另核对citation_links：引用的原文必须支持对应quote；其他未引用的页面不能替错误引用辩护。错误关联按unsupported指出。'},
-              {'role':'user','content':json.dumps({'original_material_pages':originals,'draft':text,'citation_links':audit},ensure_ascii=False,separators=(',',':'))}]
+    audit=[{'quote':c['quote'],'source_refs':c['source_refs']} for c in (citations or [])]
+    messages=[{'role':'system','content':INSTRUCTION+'原文spans每项为[来源编号,原文]。citation_links的source_refs只指向这些编号。另核对citation_links：引用的原文必须支持对应quote；其他未引用的页面不能替错误引用辩护。错误关联按unsupported指出。'},
+              {'role':'user','content':json.dumps({'original_material_pages':packed,'draft':text,'citation_links':audit},ensure_ascii=False,separators=(',',':'))}]
     literal_issues=literal_scope_issues([page for page in packed if page.get('source_kind')!='general_knowledge'],text)
     compact=lambda value:re.sub(r'[\s，,；;：:（）()“”\"。*]','',value)
     draft=compact(text)

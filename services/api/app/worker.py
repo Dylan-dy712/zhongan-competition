@@ -340,9 +340,16 @@ def analyze_models(material, knowledge_entries, user_context, source_refs, fact_
             reviewable = [{"entry_id":e.entry_id,"title":e.title,"content":e.content[:500],
                            "status":e.status.value,"ai_verified":e.ai_verified,
                            "ai_verification_source":e.ai_verification_source} for e in knowledge_entries[:80]]
+            from .analysis_sources import pack_sources
+            packed, aliases = pack_sources([{'evidence':fact_inputs}])
             report = measured('guidance_seconds', draft_report, material, reviewable, user_context,
                 user_sources=source_refs, structured_costs=report_cost_context(fact_inputs,fields['candidates'].get('cost_lines',[])),
-                personnel=fields.get('personnel',[]), normalized_dates=encounter_dates)
+                personnel=fields.get('personnel',[]), normalized_dates=encounter_dates, analysis_sources=packed)
+            shared = report['draft'].get('patient_analysis')
+            if shared:
+                shared['evidence_refs'] = [aliases.get(ref,ref) for ref in shared['evidence_refs']]
+                for citation in shared.get('citations',[]):
+                    citation['source_refs'] = [aliases.get(ref,ref) for ref in citation.get('source_refs',[])]
         if insights_future:
             insights = insights_future.result()
     performance = {'model_schedule':'parallel','model_seconds':timings,
