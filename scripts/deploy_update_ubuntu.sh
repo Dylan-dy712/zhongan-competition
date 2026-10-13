@@ -97,7 +97,7 @@ pg_restore --list "$backup_dir/database.dump" > "$backup_dir/database-manifest.t
 fi
 changed=1
 install -d -m 755 "$app_dir/scripts" "$app_dir/contracts" "$app_dir/docs/medical"
-sudo install -d -m 700 -o ubuntu -g ubuntu /home/ubuntu/zhongan-data/web-search
+sudo install -d -m 700 -o "$(id -u)" -g "$(id -g)" /home/ubuntu/zhongan-data/web-search
 cp -a "$release_dir/scripts/." "$app_dir/scripts/"
 if [[ "$backend_changed" == 1 ]]; then
     cp -a "$release_dir/services" "$app_dir/"
