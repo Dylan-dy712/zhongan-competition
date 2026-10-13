@@ -67,7 +67,10 @@ try {
   await flush();assert.equal(document.querySelector('dialog.source-sheet'),null,'Late evidence must not reopen a modal on another page');
   assert.match(document.body.textContent,/提交理赔材料/);
   await click('问暖暖');
-  await click('新的关怀对话');await click('年龄未填写');assert.match(document.body.textContent,/开始新的对话/);
+  await click('新的关怀对话');assert.match(document.body.textContent,/开始新的对话/);
+  assert.equal(document.querySelector('dialog'),null,'New chat must open directly without a member picker');
+  assert.equal(document.querySelector('.connect-form select').value,'');
+  assert.equal(button('开始新的对话').disabled,true,'A member must still be selected before starting');
   await click('我的');await click('查看更多');
   assert.ok(document.querySelector('.member-records-header'),'Secondary record list identifies the person');
   assert.equal(document.querySelector('.records-profile'),null,'Record list must not duplicate the profile card');
@@ -83,7 +86,10 @@ try {
   assert.doesNotMatch(document.body.textContent,/开始新的对话/,'Loading must not masquerade as a new case');
   await act(async()=>resolve(Response.json({message:'不可访问'},{status:404})));await flush();
   assert.doesNotMatch(document.body.textContent,/正在打开就医记录/,'Access failure must clear loading');
-  await click('问暖暖');await click('年龄未填写');assert.equal(button('开始新的对话').disabled,false,'Access failure must not leave controls locked');
+  await click('问暖暖');
+  assert.equal(document.querySelector('dialog'),null);
+  await act(async()=>{const select=document.querySelector('.connect-form select');select.value='synthetic-subject';select.dispatchEvent(new dom.window.Event('change',{bubbles:true}));});
+  assert.equal(button('开始新的对话').disabled,false,'Access failure must not leave controls locked');
   const {PageBoundary}=modules;
   const bad=()=>{throw new Error('Synthetic render failure');};
   await act(async()=>root.unmount());root=createRoot(document.getElementById('root'));

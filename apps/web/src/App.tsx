@@ -317,13 +317,11 @@ export default function App() {
 
   const requestBusiness=(destination:'chat'|'claim',personId?:string)=>{
     if(busyRef.current||uploadingRef.current||analysisSubmitting)return;
+    if(destination==='chat'){setMemberPicker(undefined);prepareNewChat(personId||'');return;}
     if(destination==='claim'&&panel==='claim')return;
     if(personId){
-      if(destination==='chat')prepareNewChat(personId);
-      else {
-        if(claimSubject&&claimSubject!==personId&&claimDirty&&!window.confirm('切换就医人员将清除尚未提交的表单和材料，是否继续？'))return;
-        if(claimSubject!==personId)setClaimDirty(false);setClaimSubject(personId);setPanel('claim');
-      }
+      if(claimSubject&&claimSubject!==personId&&claimDirty&&!window.confirm('切换就医人员将清除尚未提交的表单和材料，是否继续？'))return;
+      if(claimSubject!==personId)setClaimDirty(false);setClaimSubject(personId);setPanel('claim');
     }
     else setMemberPicker(destination);
   };
