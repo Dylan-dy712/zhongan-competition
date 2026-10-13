@@ -5,6 +5,7 @@ import os
 import re
 import time
 from urllib.parse import urlparse
+from threading import Lock
 from typing import Literal
 
 import requests
@@ -14,6 +15,8 @@ from .model_workloads import workload_options
 
 PROMPT_VERSION = "medical-fields-and-cost-labels-v4"
 SCHEMA_VERSION = "0.3.0"
+_QIANFAN_REQUEST_LOCK = Lock()
+_QIANFAN_NEXT_REQUEST = 0.0
 
 MEDICATION_PHASE = Literal["inpatient", "discharge", "outpatient", "charge_item", "plan", "unknown"]
 STAFF_ROLES = ("术者", "手术者", "手术助手", "Ⅰ助", "Ⅱ助", "麻醉医师", "主管医师",
@@ -95,9 +98,21 @@ class OpenAiCompatibleExtractor:
             raise RuntimeError("LLM_NOT_CONFIGURED")
         if self.provider == 'mock' and urlparse(self.base_url).hostname not in {'localhost', '127.0.0.1', '::1'}:
             raise RuntimeError('MOCK_PROVIDER_MUST_BE_LOCAL')
+        if urlparse(self.base_url).hostname == 'qianfan.baidubce.com' and self.model_id not in {'glm-5.3', 'glm-5.3-flash'}:
+            raise RuntimeError('QIANFAN_MODEL_NOT_AUTHORIZED')
 
     def _call(self, messages, *, timeout=45, workload='review'):
-        response = requests.post(
+        global _QIANFAN_NEXT_REQUEST
+        if urlparse(self.base_url).hostname == 'qianfan.baidubce.com':
+            # The configured Qianfan models have a 60 RPM limit, including repair/classification calls.
+            with _QIANFAN_REQUEST_LOCK:
+                time.sleep(max(0, _QIANFAN_NEXT_REQUEST - time.monotonic()))
+                _QIANFAN_NEXT_REQUEST = time.monotonic() + 1.1
+        requester = requests
+        if urlparse(self.base_url).hostname == 'qianfan.baidubce.com':
+            requester = requests.Session()
+            requester.trust_env = False
+        response = requester.post(
             f"{self.base_url}/chat/completions",
             headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
             json={"model": self.model_id, "messages": messages, "temperature": 0,

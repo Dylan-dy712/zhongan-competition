@@ -19,7 +19,7 @@ import ast
 from statistics import median
 from pydantic import ValidationError
 
-from services.api.app.document_fields import DIAGNOSES, NUMBERS, SCALARS, PROMPT_VERSION, extract_document
+from services.api.app.document_fields import DIAGNOSES, NUMBERS, SCALARS, PROMPT_VERSION, extract_document, DocumentExtractionFailure
 from services.api.app.llm_extractor import OpenAiCompatibleExtractor
 
 
@@ -98,6 +98,17 @@ def normalize(value):
     return text
 
 
+def normalize_number(value):
+    """Compare typed numeric fields without changing identifier or entity strings."""
+    if isinstance(value, bool):
+        return normalize(value)
+    try:
+        number = Decimal(str(value))
+    except InvalidOperation:
+        return normalize(value)
+    return str(number.normalize()) if number.is_finite() else normalize(value)
+
+
 def explicit_entities(value):
     """Normalize explicitly delimited reference lists, preserving brackets inside names.
 
@@ -108,6 +119,9 @@ def explicit_entities(value):
     if not isinstance(value, str):
         return [value]
     text = unicodedata.normalize('NFKC', value).strip()
+    if not (text.startswith('[') and text.endswith(']')):
+        # A comma inside a clinical sentence is not an entity boundary.
+        return [value]
     if text.startswith('[') and text.endswith(']'):
         try:
             parsed = ast.literal_eval(text)
@@ -158,18 +172,19 @@ def atoms(fields, include_inferred_categories=False):
         if value is None or value == '' or value == []:
             continue
         values = explicit_entities(value) if key in DIAGNOSES + ('medication',) else value if isinstance(value, list) else [value]
-        result[key].update(normalize(v) for v in values if v is not None and v != '')
+        canonical = normalize_number if key in NUMBERS else normalize
+        result[key].update(canonical(v) for v in values if v is not None and v != '')
     for block in fields.get('blocks', []):
         for line in block.get('costDetailList', []):
             if line.get('feeAmount') is None:
                 continue
             # Do not mix inferred classification with directly recorded item identity/amount.
             result['cost_detail_name_amount'][(normalize(line.get('detailName', '')),
-                                               normalize(line['feeAmount']))] += 1
+                                               normalize_number(line['feeAmount']))] += 1
             if line.get('itemCategoryName') and (include_inferred_categories or not line.get('category_inferred', False)):
                 category_key = 'cost_semantic_category' if include_inferred_categories else 'cost_explicit_category'
                 result[category_key][(normalize(line.get('detailName', '')),
-                                                  normalize(line['feeAmount']),
+                                                  normalize_number(line['feeAmount']),
                                                   normalize(line['itemCategoryName']))] += 1
     return result
 
@@ -213,8 +228,8 @@ def score(manifest, predictions_dir, include_inferred_categories=False):
     combined = Counter()
     for count in totals.values():
         combined.update(count)
-    return {'policy': ('document-fee-taxonomy-exact-v3' if include_inferred_categories
-                       else 'document-explicit-list-opportunities-exact-v2'), 'official_metric_verified': False,
+    return {'policy': ('document-fee-taxonomy-exact-v5' if include_inferred_categories
+                       else 'document-explicit-list-opportunities-exact-v5'), 'official_metric_verified': False,
             'five_core_categories_fully_annotated': False,
             'limits': ['surgery/drug entities inside prose lack an independent normalized gold',
                        ('all annotated fee categories scored as semantic classification, not literal transcription'
@@ -269,7 +284,9 @@ def main():
     provider = OpenAiCompatibleExtractor()
     revision = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
     implementation_hashes = {'runner': sha(__file__),
-                             'extractor': sha(repo/'services/api/app/document_fields.py')}
+                             'extractor': sha(repo/'services/api/app/document_fields.py'),
+                             'provider': sha(repo/'services/api/app/llm_extractor.py'),
+                             'workload': sha(repo/'services/api/app/model_workloads.py')}
     rows = manifest['documents']
     def infer(row):
         destination = Path(args.predictions_dir) / (row['document_id'] + '.json')
@@ -311,6 +328,10 @@ def main():
             if isinstance(exc, ValidationError):
                 run['validation_errors'] = [{'type': e['type'], 'loc': e['loc']}
                                             for e in exc.errors(include_input=False, include_context=False)]
+            if isinstance(exc, DocumentExtractionFailure):
+                run.update(failed_stage=exc.stage, failed_response=exc.response,
+                           validation_errors=exc.validation_errors, stage_error_code=exc.error_code,
+                           failed_usage=exc.usage, finish_reason=exc.finish_reason)
         run['seconds'] = round(time.monotonic() - start, 3)
         write(destination, run)
         return run['status']
