@@ -118,7 +118,8 @@ class WebKnowledgeTests(unittest.TestCase):
                 post.assert_not_called()
 
     def test_malformed_provider_payload_does_not_interrupt_report(self):
-        for payload in [[],{'Result':[]},{'Result':{'WebResults':['invalid',{'Title':123}]}}]:
+        for payload in [[],{'Result':[]},{'Result':{'WebResults':['invalid',{'Title':123}]}},
+                        {'ResponseMetadata':{'Error':'invalid'}},{'ResponseMetadata':{'Error':{'Code':'synthetic'}}}]:
             with self.subTest(payload=payload),tempfile.TemporaryDirectory(dir=Path(self.tmp.name)) as d:
                 post=Mock(return_value=Mock(json=lambda:payload,raise_for_status=lambda:None))
                 result=WebKnowledge(path=Path(d)/'cache.db',post=post).search({'term':'胆囊结石','slot':'S1'})

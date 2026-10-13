@@ -154,7 +154,9 @@ class WebKnowledge:
             response.raise_for_status();data=response.json()
             if not isinstance(data,dict) or not isinstance(data.get('ResponseMetadata') or {},dict):raise ValueError('INVALID_SEARCH_RESPONSE')
             error=(data.get('ResponseMetadata') or {}).get('Error')
-            if error:return {'status':'provider_error','error_code':str(error.get('Code','unknown'))[:20],'results':[],'calls':1}
+            if error:
+                code=str(error.get('Code','unknown')) if isinstance(error,dict) else 'unknown'
+                return {'status':'provider_error','error_code':code if re.fullmatch(r'\d{3,10}',code) else 'unknown','results':[],'calls':1}
             result=data.get('Result') or {}
             if not isinstance(result,dict):raise ValueError('INVALID_SEARCH_RESPONSE')
             docs=self.references(result.get('WebResults',[]),concept,now)
