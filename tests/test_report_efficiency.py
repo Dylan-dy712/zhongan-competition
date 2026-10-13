@@ -67,15 +67,49 @@ class ReportEfficiencyTests(unittest.TestCase):
         self.assertEqual(count[0],2)
         self.assertFalse(reply['performance']['draft_reused'])
 
-    def test_partial_or_low_confidence_sources_do_not_reuse_draft(self):
-        for extra in [{'next_offset':200,'evidence':[{'evidence_id':str(uuid4()),'text':'长'*28001}]},
-                      {'quality_warnings':[{'name':'模糊照片'}]}]:
+    def test_partial_sources_do_not_reuse_draft(self):
+        for extra in [{'next_offset':200,'evidence':[{'evidence_id':str(uuid4()),'text':'长'*28001}]}]:
             _,draft,tools,model=self.fixture()
             if 'evidence' in extra:
                 extra={**extra,'evidence':tools.execute.return_value['evidence']+extra['evidence']}
             tools.execute.return_value.update(extra)
             run_agent([], '解释', [], tools,model=model,analysis_mode=True,initial_analysis=draft)
             model.complete.assert_called_once()
+
+    def test_quality_warning_preserves_readable_draft_and_still_reviews_with_notice(self):
+        _,draft,tools,model=self.fixture()
+        tools.execute.return_value['quality_warnings']=[{'name':'模糊照片'}]
+        reply,_=run_agent([], '解释', [],tools,model=model,analysis_mode=True,initial_analysis=draft)
+        model.complete.assert_not_called()
+        self.assertTrue(reply['performance']['draft_reused'])
+        self.assertIn('部分材料文字识别不够清晰',reply['text'])
+        self.assertEqual(len(model.reviews),1)
+        self.assertEqual(model.reviews[0][1],reply['text'])
+
+    def test_quality_warning_does_not_authorize_a_missing_draft_source(self):
+        _,draft,tools,model=self.fixture()
+        tools.execute.return_value['quality_warnings']=[{'name':'模糊照片'}]
+        stale={**draft,'evidence_refs':[str(uuid4())]}
+        reply,_=run_agent([], '解释', [],tools,model=model,analysis_mode=True,initial_analysis=stale)
+        model.complete.assert_called_once()
+        self.assertFalse(reply['performance']['draft_reused'])
+
+    def test_quality_warning_never_bypasses_rejection_by_independent_review(self):
+        _,draft,tools,model=self.fixture()
+        tools.execute.return_value['quality_warnings']=[{'name':'模糊照片'}]
+        original=model.review_analysis
+        count=[0]
+        def review(*args,**kwargs):
+            count[0]+=1
+            if count[0]==1:
+                return AnalysisReview(accepted=False,issues=[{'category':'payment',
+                    'explanation':'需核对原文金额','draft_quote':draft['text'],'source_quote':'票据总额120元。'}])
+            return original(*args,**kwargs)
+        model.review_analysis=review
+        reply,_=run_agent([], '解释', [],tools,model=model,analysis_mode=True,initial_analysis=draft)
+        self.assertEqual(count[0],2)
+        model.complete.assert_called_once()
+        self.assertFalse(reply['performance']['draft_reused'])
 
     def test_schema_keeps_constraints_and_property_names(self):
         schema={'title':'Display','properties':{'title':{'type':'string','title':'Title','minLength':2},
