@@ -25,7 +25,8 @@ def model_post(url, *, post, **kwargs):
         time.sleep(max(0,_qianfan_next_request-time.monotonic()))
         _qianfan_next_request=time.monotonic()+1.1
     timeout=kwargs.get('timeout',45)
-    kwargs['timeout']=(10,max(180,timeout[1] if isinstance(timeout,tuple) else timeout))
+    # Keep explicit stage budgets, including quality reviews and retry deadlines.
+    kwargs['timeout']=timeout if isinstance(timeout,tuple) and timeout[0]==10 else (10,180)
     with requests.Session() as session:
         session.trust_env=False
         return session.post(url,**kwargs)

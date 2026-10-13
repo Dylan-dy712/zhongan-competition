@@ -150,3 +150,16 @@ class KnowledgeRetriever:
         return {'status': status, 'results': hits, 'knowledge_version': self.version,
                 'retrieval_method': 'bm25', 'indexed_count': len(self.documents),
                 'notice': '知识用于一般解释，不是本人的诊断、处方或保险赔付结论。'}
+
+    def resolve_references(self,refs,*,case_text):
+        """Read exact cached references, with current scope and version checks."""
+        hits=[]
+        for ref in list(dict.fromkeys(refs))[:8]:
+            doc=self.by_id.get(ref)
+            if not doc or doc.get('numeric_pending_review'):continue
+            if self.assembler and doc['disease_code']!='TY':
+                try:self.assembler.check_exclusions(DiseaseCode(doc['disease_code']),case_text)
+                except PackExcludedError:continue
+            hits.append({**doc,'version':self.version,'use':'general_reference',
+                         'reference_policy':REFERENCE_POLICY})
+        return self._result('available' if hits else 'no_results',hits)

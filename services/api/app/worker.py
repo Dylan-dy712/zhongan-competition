@@ -335,16 +335,19 @@ def analyze_models(material, knowledge_entries, user_context, source_refs, fact_
             insights_future = pool.submit(measured, 'insight_seconds', detect_semantic, material, knowledge)
         if fields_future:
             fields = validate_evidence_quotes(fields_future.result(), material)
+        if insights_future:
+            insights = insights_future.result()
         advance('guidance')
         if configured and not knowledge_excluded:
-            reviewable = [{"entry_id":e.entry_id,"title":e.title,"content":e.content[:500],
-                           "status":e.status.value,"ai_verified":e.ai_verified,
-                           "ai_verification_source":e.ai_verification_source} for e in knowledge_entries[:80]]
+            from .guidance_context import care_priorities, select_guidance_knowledge
+            reviewable = select_guidance_knowledge(knowledge_entries,fields,material,user_context)
+            priorities = care_priorities(insights,material,[entry['entry_id'] for entry in reviewable])
             from .analysis_sources import pack_sources
             packed, aliases = pack_sources([{'evidence':fact_inputs}])
             report = measured('guidance_seconds', draft_report, material, reviewable, user_context,
                 user_sources=source_refs, structured_costs=report_cost_context(fact_inputs,fields['candidates'].get('cost_lines',[])),
-                personnel=fields.get('personnel',[]), normalized_dates=encounter_dates, analysis_sources=packed)
+                personnel=fields.get('personnel',[]), normalized_dates=encounter_dates, analysis_sources=packed,
+                care_priorities=priorities, structured_fields=fields.get('candidates',{}))
             shared = report['draft'].get('patient_analysis')
             if shared:
                 shared['evidence_refs'] = [aliases.get(ref,ref) for ref in shared['evidence_refs']]
@@ -358,8 +361,6 @@ def analyze_models(material, knowledge_entries, user_context, source_refs, fact_
                     # Optional chat prose is unusable; retain the structured
                     # report and regenerate prose against live authorized sources.
                     report['draft']['patient_analysis'] = None
-        if insights_future:
-            insights = insights_future.result()
     performance = {'model_schedule':'parallel','model_seconds':timings,
                    'model_wall_seconds':round(time.monotonic()-started,3)}
     return fields, insights, report, provider, model_id, performance
