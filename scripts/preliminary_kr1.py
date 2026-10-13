@@ -331,7 +331,7 @@ def main():
             if isinstance(exc, DocumentExtractionFailure):
                 run.update(failed_stage=exc.stage, failed_response=exc.response,
                            validation_errors=exc.validation_errors, stage_error_code=exc.error_code,
-                           failed_usage=exc.usage, finish_reason=exc.finish_reason)
+                           failed_usage=exc.usage, finish_reason=exc.finish_reason, http_status=exc.http_status)
         run['seconds'] = round(time.monotonic() - start, 3)
         write(destination, run)
         return run['status']

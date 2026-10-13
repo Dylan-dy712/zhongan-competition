@@ -11,7 +11,7 @@ from PIL import Image
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
-PROMPT_VERSION = 'document-fields-evidence-v15'
+PROMPT_VERSION = 'document-fields-evidence-v16'
 SCHEMA_VERSION = 'document-fields-v1'
 FEE_TAXONOMY = {
     'inspectionFee': '检查费', 'westernMedicineFee': '西药费', 'materialFee': '材料费',
@@ -52,6 +52,8 @@ class DocumentExtractionFailure(ValueError):
         self.stage = stage
         self.response = response
         self.error_code = type(error).__name__
+        response_object = getattr(error, 'response', None)
+        self.http_status = response_object.status_code if response_object is not None else None
         self.usage = (payload or {}).get('usage', {})
         self.finish_reason = ((payload or {}).get('choices') or [{}])[0].get('finish_reason')
         self.validation_errors = error.errors(include_input=False, include_context=False) if isinstance(error, ValidationError) else []
@@ -221,7 +223,7 @@ hospitalName用原医院全称数组。诊断字段用原文数组；diagnosis�
                        'allowed_fields': sorted(ALLOWED_FIELDS - {'blocks'}),
                        'text': text}, ensure_ascii=False)
     qianfan = getattr(provider, 'provider', None) == 'qianfan'
-    request_timeout = (10, 600) if qianfan else 120
+    request_timeout = (30, 600) if qianfan else 120
     stage_seconds = {}
     def call_stage(stage, stage_messages):
         started = time.monotonic()
@@ -258,7 +260,8 @@ hospitalName用原医院全称数组。诊断字段用原文数组；diagnosis�
     table_usage = None
     if result.document_kind == 'fee_list':
         fee_system = ('逐行转录费用清单。项目名称取名称栏，金额取该行总金额，不取单价或右侧自费金额。'
-            '不计算，不归类，不包含小计合计，不抄背景纸张。原文中换行的名称合并，保留编号和括号。'
+            '不计算，不归类，不包含小计合计，不抄背景纸张。detailName严格只取项目名称栏，合并该栏换行续文，保留该栏括号与内嵌编号。'
+            '相邻单独项目编码、规格、厂家、单位不拼入名称；规格栏表示空规格的斜杠/也不拼入名称。'
             '每行给名称与金额各自置信度和原文名称金额引用。只输出如下结构，不解释：'
             '{"rows":[{"detailName":"原项目名","feeAmount":12.34,"confidence":{"detailName":0.9,"feeAmount":0.9},"evidence_quote":"原项目名 12.34"}]}。')
         fee_content = text if not views else [

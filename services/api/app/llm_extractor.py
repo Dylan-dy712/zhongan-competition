@@ -112,14 +112,19 @@ class OpenAiCompatibleExtractor:
         if urlparse(self.base_url).hostname == 'qianfan.baidubce.com':
             requester = requests.Session()
             requester.trust_env = False
-        response = requester.post(
-            f"{self.base_url}/chat/completions",
-            headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
-            json={"model": self.model_id, "messages": messages, "temperature": 0,
-                  "response_format": {"type": "json_object"},
-                  **workload_options(self.base_url,self.model_id,workload)},
-            timeout=timeout,
-        )
+            requester.mount('https://', requests.adapters.HTTPAdapter(max_retries=2))
+        try:
+            response = requester.post(
+                f"{self.base_url}/chat/completions",
+                headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
+                json={"model": self.model_id, "messages": messages, "temperature": 0,
+                      "response_format": {"type": "json_object"},
+                      **workload_options(self.base_url,self.model_id,workload)},
+                timeout=timeout,
+            )
+        finally:
+            if requester is not requests:
+                requester.close()
         response.raise_for_status()
         payload = response.json()
         if getattr(self, 'provider', 'openai_compatible') == 'mock' and payload.get('execution_mode') != 'mock':
