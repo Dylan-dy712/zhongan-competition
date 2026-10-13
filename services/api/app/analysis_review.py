@@ -2,7 +2,7 @@
 import json
 import re
 import requests
-from .model_workloads import workload_options
+from .model_workloads import uses_deepseek_strict
 from typing import Literal
 from pydantic import BaseModel,ConfigDict,Field,model_validator
 
@@ -100,7 +100,7 @@ def review_analysis(config,packed,text,citations=None):
 
 
 def source_verdict(config,messages):
-    if workload_options(config.base_url,config.model_id,'fidelity'):
+    if uses_deepseek_strict(config.base_url,config.model_id):
         response=requests.post('https://api.deepseek.com/beta/chat/completions',
             headers={'Authorization':f'Bearer {config.api_key}','Content-Type':'application/json'},
             json={'model':config.model_id,'messages':messages,'temperature':0,'max_tokens':3000,

@@ -9,7 +9,7 @@ from typing import Literal
 
 import requests
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
-from .model_workloads import workload_options
+from .model_workloads import workload_options, model_post
 
 
 PROMPT_VERSION = "medical-fields-and-cost-labels-v4"
@@ -97,8 +97,9 @@ class OpenAiCompatibleExtractor:
             raise RuntimeError('MOCK_PROVIDER_MUST_BE_LOCAL')
 
     def _call(self, messages, *, timeout=45, workload='review'):
-        response = requests.post(
+        response = model_post(
             f"{self.base_url}/chat/completions",
+            post=requests.post,
             headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
             json={"model": self.model_id, "messages": messages, "temperature": 0,
                   "response_format": {"type": "json_object"},
