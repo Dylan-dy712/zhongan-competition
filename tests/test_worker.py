@@ -18,8 +18,8 @@ class Detection:
 
 
 class WorkerTests(unittest.TestCase):
-    def test_independent_models_overlap_but_report_awaits_validated_fields(self):
-        insight_started,report_started=threading.Event(),threading.Event()
+    def test_models_overlap_but_report_receives_grounded_insights_and_fields(self):
+        insight_started,insight_finished=threading.Event(),threading.Event()
         caller=threading.get_ident()
         extractor=MagicMock(provider='synthetic',model_id='synthetic')
         def fields(_):
@@ -27,12 +27,15 @@ class WorkerTests(unittest.TestCase):
             return {'status':'completed','candidates':{'candidates':[]},'personnel':[]}
         def insights(*_):
             insight_started.set()
-            self.assertTrue(report_started.wait(2),'Report must not wait for independent insights')
-            return {'status':'completed','candidates':[]}
+            insight_finished.set()
+            return {'status':'completed','candidates':[{'label':'EXP_TERMINOLOGY_BARRIER',
+                'evidence_quote':'合成材料','rationale':'术语需要解释','suggested_action':'解释术语含义',
+                'knowledge_refs':[]}]}
         def report(*args,**kwargs):
             self.assertEqual(threading.get_ident(),caller)
             self.assertEqual(kwargs['personnel'],[])
-            report_started.set()
+            self.assertTrue(insight_finished.is_set())
+            self.assertEqual(kwargs['care_priorities'][0]['label'],'EXP_TERMINOLOGY_BARRIER')
             return {'status':'completed','draft':{'sections':[],'actions':[]}}
         def advance(stage):
             self.assertEqual(threading.get_ident(),caller,'SQL progress must stay on caller thread')

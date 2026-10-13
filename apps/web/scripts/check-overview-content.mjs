@@ -50,6 +50,10 @@ try{
  await click('就医参考');assert.match(document.querySelector('.overview-content').textContent,/合成复诊参考资料/);
  assert.match(document.querySelector('.overview-content').textContent,/当前没有可用于机构比较的数据/);
  assert.equal(requests.filter(r=>r.method==='POST').length,0,'Displaying saved analysis never starts a model request');
+ const bodyCare={...snapshot,turns:[{...snapshot.turns[0],answer:{...answer,
+   text:`1. **工作安排**\n${followup}`,citations:[answer.citations[2]]}}]};
+ await act(async()=>root.render(React.createElement(modules.EncounterOverview,{...props,key:'body-care',snapshot:bodyCare,initialTab:'care'})));await flush();
+ assert.match(document.querySelector('.overview-ai-content').textContent,/复诊时间未提供/,'Care guidance in the body is preserved when its heading does not contain care keywords');
  sessionStorage.setItem('zhongan_chat_token','synthetic');
  await act(async()=>root.render(React.createElement(modules.App)));await flush();
  assert.equal(document.querySelectorAll('.chat-analysis-nav button').length,4,'All four sections are reachable above the long report');

@@ -28,8 +28,10 @@ INSTRUCTION="""你是患者材料解读的独立原文复核员。只核对提�
 逐项核对事实、金额、日期、用药阶段、否定、疑似、既往限定，以及加粗和标题是否造成误导。
 不能排除/疑似不能成为确诊；既往不能成为本次；住院用药不能推断为出院继续或停药。
 费用须保持票据口径，不推算缺范围的合计，不混淆个人自费、个人账户、现金、统筹及商业保险。
-解读可以通俗转述原文明示事实、医嘱以及限定词的字面含义，不能添加病因、疗效、用药建议、保险赔付或诊疗建议。
+病例事实、本人病因、疗效、个体用药和诊疗安排必须有本人的原文依据，不能从一般知识推断。
 source_kind为general_knowledge的来源是用户授权的专业参考知识，可支持明确标为一般知识的解释，不能证明用户的诊断、适应证或新治疗方案。
+source_kind为user_statement的来源是授权的用户表达，可支持担心、生活限制和偏好的回应，不能当作确诊、医嘱或检验正常判断。
+这些知识可以支持术语含义、治疗的一般目的、一般康复原则、记录和就医准备方法；不能仅因解释未逐字出现在病历中就判错。核对知识来源与适用范围，以及是否被误写成该患者的新处方、停换药、活动强度或复诊日期。
 不要因缺少普通常识解释而拒绝；不能把模型补充的知识当作专业性。要看重要医嘱或重要疑似/否定限定有无被省略。
 重点及加粗必须保留完整限定；例如“不能排除**肺炎**”会误导，应突出“**不能排除肺炎**”。
 只拒绝能用原文和拟交付文本直接对照证明的事实错误，不用“可能让读者误以为”等假设性理由拒绝。
@@ -43,7 +45,10 @@ source_kind为general_knowledge的来源是用户授权的专业参考知识，�
 category仅限unsupported、qualifier、phase、payment、emphasis、omission、scope。意见只指出问题，不编造替代事实。
 """
 
-def review_analysis(config,packed,text,citations=None):
+def review_analysis(config,packed,text,citations=None,user_context=None):
+    if user_context:
+        packed=[*packed,{'document':'USER_CONTEXT','page':0,'source_kind':'user_statement',
+            'spans':[['USER_CONTEXT',json.dumps(user_context,ensure_ascii=False)]]}]
     # This is source comparison, not diagnostic reasoning. Keep every original word
     # while removing citation identifiers that the reviewer does not need.
     originals=[{'document':page['document'],'page':page['page'],
@@ -56,7 +61,7 @@ def review_analysis(config,packed,text,citations=None):
     audit=[{'quote':c['quote'],'source_refs':c['source_refs']} for c in (citations or [])]
     messages=[{'role':'system','content':INSTRUCTION+'原文只提供一次，仅被引用片段前有[来源:编号]标记；标记不属于原文，不得写入source_quote。citation_links的source_refs必须对应这些标记后的同一片段。其他片段不能替错误引用辩护；错误关联按unsupported指出。'},
               {'role':'user','content':json.dumps({'original_material_pages':marked,'draft':text,'citation_links':audit},ensure_ascii=False,separators=(',',':'))}]
-    literal_issues=literal_scope_issues([page for page in packed if page.get('source_kind')!='general_knowledge'],text)
+    literal_issues=literal_scope_issues([page for page in packed if page.get('source_kind') not in {'general_knowledge','user_statement'}],text)
     compact=lambda value:re.sub(r'[\s，,；;：:（）()“”\"。*]','',value)
     draft=compact(text)
     material=[compact(page['text']) for page in originals]
