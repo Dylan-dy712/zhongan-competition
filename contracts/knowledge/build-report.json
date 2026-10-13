@@ -1,5 +1,5 @@
 {
-  "built_at": "2026-09-25T07:02:31.433750+00:00",
+  "built_at": "2026-10-13T16:31:07.997495+00:00",
   "packs": [
     {
       "pack_id": "KP-FX",
@@ -68,6 +68,22 @@
       }
     },
     {
+      "pack_id": "KP-HJ",
+      "disease_code": "HJ",
+      "version": "0.1.0-draft",
+      "status": "draft-待医学审核",
+      "scope": "成人材料明确记载股骨头坏死或髋关节置换；仅解释一般含义与原医嘱，不能据知识推断手术适应证、分期、个体预后或新增处方。",
+      "exclusions": "儿童髋关节；人工髋关节翻修；假体周围感染",
+      "entries_total": 8,
+      "slot_counts": {
+        "S1": 1,
+        "S10": 2,
+        "S11": 2,
+        "S6": 2,
+        "S7": 1
+      }
+    },
+    {
       "pack_id": "KP-TN",
       "disease_code": "TN",
       "version": "0.1.0-draft",
@@ -124,7 +140,7 @@
       }
     }
   ],
-  "entries_total": 599,
-  "content_sha256": "1b9ffa0ddf3432736bae973fdc5f3b48b1abfae5feb8b9ce7655abc37f95277a",
+  "entries_total": 607,
+  "content_sha256": "ea5c4a5c69df2dfd1f0b89b114986a7ad21c365b5a1a9de5e78799c4ad189d37",
   "validation_errors": []
 }

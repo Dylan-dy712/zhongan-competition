@@ -37,6 +37,7 @@ DISEASE_BY_PACK = {
     "KP-GX": "GX",
     "KP-YZ": "YZ",
     "KP-TN": "TN",
+    "KP-HJ": "HJ",
     "KP-TY": "TY",
 }
 

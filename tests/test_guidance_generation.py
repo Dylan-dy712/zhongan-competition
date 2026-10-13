@@ -1,7 +1,7 @@
 import json,os,unittest
 from unittest.mock import patch
 from services.api.app.guidance_context import care_priorities,select_guidance_knowledge
-from services.api.app.guidance_quality import GuidanceQuality
+from services.api.app.guidance_quality import GuidanceQuality,guidance_requirements,enforce_guidance_requirements
 from services.api.app.knowledge_assembler import KnowledgeAssembler
 from services.api.app.contracts.knowledge import DiseaseCode
 from services.api.app.report_llm import draft_report
@@ -19,6 +19,59 @@ def draft(text='本次记录为肺炎。',quote=None):
             'knowledge_refs':[],'citations':[{'quote':quote or text,'source_refs':['S1']}]}}
 
 class GuidanceGenerationTests(unittest.TestCase):
+    def test_summary_cannot_pass_as_full_report_even_when_model_says_all_true(self):
+        # Synthetic analogue of the observed one-paragraph report, no medical data.
+        material=('诊断股骨头坏死。手术髋关节置换。费用合计。出院医嘱扶拐复诊。\n')*60
+        knowledge=[{'entry_id':'HJ-S1-01','slot':'S1'},{'entry_id':'HJ-S11-01','slot':'S11'},
+                   {'entry_id':'TY-COST-04','slot':'TY'}]
+        requirements=guidance_requirements(material,knowledge)
+        brief=draft('本次诊断、手术、费用和出院医嘱都在这里。'*20)
+        quality=enforce_guidance_requirements(GuidanceQuality.model_validate(assessment()),brief,
+                                              {'reading_requirements':requirements})
+        self.assertFalse(quality.accepted)
+        self.assertFalse(quality.detail_sufficient)
+        self.assertFalse(quality.readable_structure)
+        self.assertFalse(quality.explanation_clear)
+        self.assertFalse(quality.treatment_understood)
+        self.assertFalse(quality.costs_understood)
+
+    def test_short_single_topic_material_does_not_require_padded_full_report(self):
+        requirements=guidance_requirements('费用总额120元。')
+        quality=enforce_guidance_requirements(GuidanceQuality.model_validate(assessment()),draft(),
+                                              {'reading_requirements':requirements})
+        self.assertTrue(quality.accepted)
+        self.assertEqual(requirements['min_body_chars'],0)
+
+    def test_detailed_cited_report_passes_presentation_floor(self):
+        material=('诊断肺炎。治疗用药。费用结算。出院医嘱复诊。')*100
+        body='我看过这次的资料了。\n\n'+'\n\n'.join(
+            f'{i}. **本次情况{i}**\n'+('解释本次事实及具体核对方向。'*16) for i in range(1,5))
+        full=draft(body)
+        full['patient_analysis']['knowledge_refs']=['FY-S1-01','TY-COST-04']
+        requirements=guidance_requirements(material,[{'entry_id':'FY-S1-01','slot':'S1'},
+                                                    {'entry_id':'TY-COST-04','slot':'TY'}])
+        self.assertTrue(enforce_guidance_requirements(GuidanceQuality.model_validate(assessment()),full,
+            {'reading_requirements':requirements}).accepted)
+
+    def test_hip_references_are_resolvable_with_scope_and_approval_state_preserved(self):
+        from services.api.app.insight_detector import infer_disease_code
+        self.assertEqual(infer_disease_code('股骨头缺血性坏死，髋关节置换术后'),DiseaseCode.hj)
+        retriever=KnowledgeRetriever()
+        result=retriever.search('股骨头坏死 髋关节置换',case_text='成人股骨头坏死')
+        self.assertTrue(any(item['disease_code']=='HJ' for item in result['results']))
+        self.assertTrue(all(item['source_path'].startswith('docs/medical/knowledge/') for item in result['results']))
+        excluded=retriever.resolve_references(['HJ-S1-01'],case_text='假体周围感染')
+        self.assertEqual(excluded['results'],[])
+        self.assertEqual(KnowledgeAssembler().select(DiseaseCode.hj,patient_visible=True).allowed,[])
+        assembler=KnowledgeAssembler()
+        entries=assembler.select(DiseaseCode.hj,patient_visible=False).allowed+assembler.select(DiseaseCode.ty,patient_visible=False).allowed
+        selected=select_guidance_knowledge(entries,{'candidates':{'candidates':[{'raw_value':'股骨头坏死'}]}},
+                                          '股骨头坏死，髋关节置换，抗凝预防血栓，费用医保结算。',None)
+        self.assertIn('HJ-S11-01',{item['entry_id'] for item in selected})
+        no_operation=guidance_requirements('肺炎抗感染治疗',[
+            {'entry_id':'FY-S1-01','slot':'S1'},{'entry_id':'FY-S11-01','slot':'S11'}])
+        self.assertFalse(any(group['theme']=='treatment' for group in no_operation['knowledge_groups']))
+
     def test_quote_terminal_punctuation_can_be_corrected_without_changing_words(self):
         text='复诊日期请联系诊疗团队确认；再准备已有影像。'
         links=bind_citations(text,[{'quote':'复诊日期请联系诊疗团队确认。','source_refs':['S1']}],{},['S1'],[])
