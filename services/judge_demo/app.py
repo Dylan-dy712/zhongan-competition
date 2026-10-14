@@ -124,18 +124,20 @@ def read_sample_manifest(directory):
         raise HTTPException(503, '示例资料暂未准备好，请稍后再试。') from None
 
 
-def sample_manifest(version=None):
+def sample_manifest(version=None,sample_id=None):
     directory=Path(os.getenv('ZHONGAN_JUDGE_SAMPLE_ROOT','/home/ubuntu/.config/zhongan/judge-sample')).resolve()
     directory,manifest=read_sample_manifest(directory)
-    if version is None or version==manifest['version']:return directory,manifest
-    if not isinstance(version,str) or not re.fullmatch(r'[a-zA-Z0-9_.-]{1,64}',version):
+    sample_id=manifest['sample_id'] if sample_id is None else sample_id
+    version=manifest['version'] if version is None else version
+    if any(not isinstance(value,str) or not re.fullmatch(r'[a-zA-Z0-9_.-]{1,64}',value) for value in (sample_id,version)):
         raise HTTPException(404,'示例资料版本不存在。')
-    # Reviewed versions are immutable private siblings; preserve selections during updates.
-    previous=directory.parent/(manifest['sample_id']+'-'+version)
+    if sample_id==manifest['sample_id'] and version==manifest['version']:return directory,manifest
+    # Only canonical, reviewed immutable siblings can preserve existing selections.
+    previous=directory.parent/(sample_id+'-'+version)
     if previous.is_symlink() or previous.resolve().parent!=directory.parent:
         raise HTTPException(404,'示例资料版本不存在。')
     old_directory,old_manifest=read_sample_manifest(previous)
-    if old_manifest['sample_id']!=manifest['sample_id'] or old_manifest['version']!=version:
+    if old_manifest['sample_id']!=sample_id or old_manifest['version']!=version:
         raise HTTPException(404,'示例资料版本不存在。')
     return old_directory,old_manifest
 
@@ -146,8 +148,8 @@ def sample_info():
         'documents':[{key:item[key] for key in ('id','name','page_count','document_type','sha256')} for item in manifest['documents']]}
 
 
-def sample_document(document_id,version=None):
-    directory,manifest=sample_manifest(version)
+def sample_document(document_id,version=None,sample_id=None):
+    directory,manifest=sample_manifest(version,sample_id)
     item=next((item for item in manifest['documents'] if item['id']==document_id),None)
     if item is None:raise HTTPException(404,'示例资料不存在。')
     path=directory/item['file']
@@ -172,7 +174,7 @@ def judge_upload_allowed(conn,actor_id,body):
     if not source_ref or not source_ref.startswith('judge-upload-sample:'):return False
     if not conn.execute("SELECT to_regclass('judge_demo_slots') AS name").fetchone()['name']:return False
     if not conn.execute('SELECT 1 FROM judge_demo_slots WHERE actor_id=%s',(actor_id,)).fetchone():return False
-    _,manifest=sample_manifest(context.get('sample_version'))
+    _,manifest=sample_manifest(context.get('sample_version'),context.get('sample_id'))
     return (source_ref=='judge-upload-sample:'+manifest['sample_id'] and
             context.get('sample_id')==manifest['sample_id'] and context.get('sample_version')==manifest['version'] and
             context.get('notice')==manifest['notice'])
@@ -181,7 +183,7 @@ def judge_upload_allowed(conn,actor_id,body):
 def verify_sample_upload(conn,actor_id,case,source_hash):
     if case.data_origin!='official_deidentified' or not (case.user_context or {}).get('judge_demo'):return
     if not judge_upload_allowed(conn,actor_id,case):raise HTTPException(403,'当前示例资料授权已变更。')
-    _,manifest=sample_manifest(case.user_context.get('sample_version'))
+    _,manifest=sample_manifest(case.user_context.get('sample_version'),case.user_context.get('sample_id'))
     if source_hash not in {item['sha256'] for item in manifest['documents']}:
         raise HTTPException(422,'请使用当前示例病例提供的文件；其他资料请在新的申请中上传。')
 
@@ -216,13 +218,13 @@ def judge_sample_info(response: Response, authorization: str | None = Header(def
 
 
 @app.get('/judge/sample/files/{document_id}')
-def judge_sample_file(document_id: str, version: str | None = None, authorization: str | None = Header(default=None)):
+def judge_sample_file(document_id: str, version: str | None = None, sample_id: str | None = None, authorization: str | None = Header(default=None)):
     try:
         with psycopg.connect(os.environ['ZHONGAN_DATABASE_URL'],row_factory=dict_row,connect_timeout=5) as conn:
             actor=require_judge(conn,authorization)
             if accounts.care_consent(conn,actor)['status']!='active':
                 raise HTTPException(403,'请先确认资料用途授权，再选择示例资料。')
-            return sample_document(document_id,version)
+            return sample_document(document_id,version,sample_id)
     except (psycopg.Error,KeyError):
         raise HTTPException(503,'示例资料服务暂时不可用。') from None
 

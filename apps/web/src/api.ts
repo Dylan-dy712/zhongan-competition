@@ -19,7 +19,7 @@ export async function getJudgeSample(token:string):Promise<JudgeSample|null> {
 export async function chooseJudgeSampleFiles(token:string,sample:JudgeSample,onProgress?:(completed:number,total:number)=>void):Promise<JudgeSampleFile[]> {
   let completed=0;
   return Promise.all(sample.documents.map(async item=>{
-    const response=await apiFetch(`${API_BASE}/judge/sample/files/${encodeURIComponent(item.id)}?version=${encodeURIComponent(sample.version)}`,{headers:{Authorization:`Bearer ${token}`}},120000);
+    const response=await apiFetch(`${API_BASE}/judge/sample/files/${encodeURIComponent(item.id)}?version=${encodeURIComponent(sample.version)}&sample_id=${encodeURIComponent(sample.sample_id)}`,{headers:{Authorization:`Bearer ${token}`}},120000);
     if(!response.ok){const error=await response.json().catch(()=>null);throw new ApiError(error?.detail || error?.message || failureMessage(response.status),response.status);}
     const data=await response.arrayBuffer().catch(error=>{
       if((error instanceof Error||error instanceof DOMException)&&['TimeoutError','AbortError'].includes(error.name))throw new Error('示例资料载入超时，请检查网络后重新选择。');
@@ -27,7 +27,7 @@ export async function chooseJudgeSampleFiles(token:string,sample:JudgeSample,onP
     });
     if(!data.byteLength || data.byteLength>10*1024*1024 || String.fromCharCode(...new Uint8Array(data).slice(0,5))!=='%PDF-')throw new Error('示例文件暂时不可用，请重新选择。');
     onProgress?.(++completed,sample.documents.length);
-    return {file:new File([data],item.name,{type:'application/pdf'}),category:item.document_type==='出院记录'?'record':'invoice'};
+    return {file:new File([data],item.name,{type:'application/pdf'}),category:['费用清单','医保结算单','医疗发票'].includes(item.document_type)?'invoice':'record'};
   }));
 }
 export async function createJudgeSampleUploadCase(token:string,subjectId:string,sample:JudgeSample,key:string) {
