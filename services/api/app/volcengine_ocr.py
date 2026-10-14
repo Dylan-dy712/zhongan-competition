@@ -13,6 +13,7 @@ import re
 from urllib.parse import urlencode
 
 import requests
+from .ocr_throttle import ocr_request_slot
 
 HOST = 'visual.volcengineapi.com'
 QUERY = 'Action=OCRNormal&Version=2020-08-26'
@@ -96,9 +97,10 @@ class VolcengineOcr:
             raise RuntimeError('OCR_PROVIDER_ERROR:IMAGE_TOO_LARGE')
         # One request: avoid duplicate charges when an upstream times out.
         try:
-            response = requests.post('https://'+HOST+'/?'+QUERY, data=body,
-                                     headers=signed_headers(body, self.access_key, self.secret_key, self.token),
-                                     timeout=(5, 30), allow_redirects=False)
+            with ocr_request_slot(os.environ.get('ZHONGAN_OCR_RATE_LIMIT_FILE')):
+                response = requests.post('https://'+HOST+'/?'+QUERY, data=body,
+                                         headers=signed_headers(body, self.access_key, self.secret_key, self.token),
+                                         timeout=(5, 30), allow_redirects=False)
         except requests.Timeout:
             raise RuntimeError('OCR_PROVIDER_ERROR:TIMEOUT') from None
         except requests.RequestException:

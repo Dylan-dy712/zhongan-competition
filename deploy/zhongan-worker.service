@@ -11,6 +11,7 @@ WorkingDirectory=/home/ubuntu/zhongan-app
 EnvironmentFile=/home/ubuntu/.config/zhongan/database.env
 EnvironmentFile=-/home/ubuntu/.config/zhongan/tencent-ocr.env
 EnvironmentFile=-/home/ubuntu/.config/zhongan/ocr.env
+Environment=ZHONGAN_OCR_RATE_LIMIT_FILE=/home/ubuntu/zhongan-data/ocr-rate.lock
 EnvironmentFile=-/home/ubuntu/.config/zhongan/llm.env
 EnvironmentFile=-/home/ubuntu/.config/zhongan/web-search.env
 Environment=ZHONGAN_WEB_SEARCH_CACHE=/home/ubuntu/zhongan-data/web-search/cache.sqlite3
