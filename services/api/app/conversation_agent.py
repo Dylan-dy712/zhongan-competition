@@ -30,7 +30,7 @@ from .contracts.knowledge import DiseaseCode
 
 
 PROMPT_VERSION = 'conversation-agent-v3'
-ANALYSIS_PROMPT_VERSION = 'patient-analysis-narrative-v12-web-references'
+ANALYSIS_PROMPT_VERSION = 'patient-analysis-narrative-v14-concept-explanations'
 ANALYSIS_INSTRUCTION = """
 本轮是暖暖看完资料后，对用户讲清这次就医情况。遵循上面的对话语气，读起来要像人在耐心讲解。
 表达顺序：开头两三句抓住这次就医的整体情况；然后用编号分主题解释；最后单独写“**接下来，可以这样做**”。
@@ -279,15 +279,16 @@ class CareTools:
                 return {'status': 'needs_materials'}
             if len(docs) > 100:
                 return {'status': 'too_many_documents', 'limit': 100}
-            # Older runs may have marked a failed report draft as completed.
-            # A user retry must queue new work instead of reusing that failure.
-            failed_draft = self.conn.execute("""SELECT 1 FROM model_extractions WHERE status='failed'
-                AND prompt_version LIKE 'six-section-care-report%%' AND run_id=(SELECT run_id FROM analysis_runs
-                WHERE case_id=%s ORDER BY created_at DESC,run_id DESC LIMIT 1) LIMIT 1""", (case_id,)).fetchone()
+            from .report_llm import PROMPT_VERSION as report_prompt
+            # A user request must not reuse a failed or superseded draft policy.
+            stale_draft = self.conn.execute("""SELECT 1 FROM model_extractions WHERE
+                prompt_version LIKE 'six-section-care-report%%' AND run_id=(SELECT run_id FROM analysis_runs
+                WHERE case_id=%s ORDER BY created_at DESC,run_id DESC LIMIT 1)
+                AND (status='failed' OR prompt_version<>%s) LIMIT 1""", (case_id,report_prompt)).fetchone()
             run, created = create_analysis_run(self.conn, actor_id=self.actor_id, case_id=case_id,
                 document_versions=[DocumentVersionRef(document_id=d['document_id'],
                     document_version=d['document_version']) for d in docs],
-                pipeline_version='document-parser-v1', force_new=bool(failed_draft) or self.force_analysis,
+                pipeline_version='document-parser-v1', force_new=bool(stale_draft) or self.force_analysis,
                 conversation_id=self.conversation_id,turn_id=self.turn_id)
             # Make queued work visible to the worker before the next model round.
             self.conn.commit()
@@ -515,7 +516,7 @@ def run_agent(history, question, attachments, tools, model=None, on_event=None, 
             if not bound:
                 raise ValueError('CACHED_CITATIONS_REQUIRED')
             presentation=enforce_guidance_requirements(GuidanceQuality(**{
-                key:True for key in GuidanceQuality.model_fields if key!='issues'}),
+                key:True for key in GuidanceQuality.model_fields if key not in {'issues','explanations'}}),
                 {'patient_analysis':normalized},guidance_context)
             if not presentation.accepted:raise ValueError('CACHED_GUIDANCE_TOO_BRIEF')
             tools.validate_reply(AgentReply.model_validate(normalized))

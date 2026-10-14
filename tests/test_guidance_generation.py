@@ -11,7 +11,7 @@ from services.api.app.knowledge_retrieval import KnowledgeRetriever
 from services.api.app.inline_citations import bind_citations
 
 def assessment(**changes):
-    return {**{key:True for key in GuidanceQuality.model_fields if key!='issues'},'issues':[],**changes}
+    return {**{key:True for key in GuidanceQuality.model_fields if key not in {'issues','explanations'}},'issues':[],**changes}
 
 def draft(text='本次记录为肺炎。',quote=None):
     return {'sections':[{'section_type':section,'claims':[]} for section in SECTION_TYPES],'actions':[],
