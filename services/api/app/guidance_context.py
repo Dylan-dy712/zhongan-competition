@@ -29,6 +29,11 @@ def select_guidance_knowledge(entries,fields,material,user_context):
     for slots,topic in groups:
         subset=[doc for doc in documents if doc['slot'] in slots]
         if not subset:continue
+        if topic=='费用 自费 支付' and any(term in material for term in ('甲类','乙类')):
+            # The exact billing category needs its own definition, rather than a
+            # loosely related payment entry winning on disease/context tokens.
+            for item in subset:
+                if item['entry_id']=='TY-COST-01':selected.setdefault(item['entry_id'],item)
         concern=json.dumps(user_context or {},ensure_ascii=False)[:100] if slots=={'S10'} else ''
         recorded=material[:200] if topic=='治疗 检查 目的' else ''
         result=KnowledgeRetriever(subset).search((clinical+' '+recorded+' '+topic+' '+concern)[:400],limit=2)

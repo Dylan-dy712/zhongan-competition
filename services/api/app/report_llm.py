@@ -14,7 +14,7 @@ from .inline_citations import InlineCitation, MAX_ANALYSIS_REFERENCES, MAX_KNOWL
 from .guidance_quality import GUIDANCE_INSTRUCTION, review_guidance_quality, guidance_requirements
 from .model_workloads import is_qianfan
 
-PROMPT_VERSION = "six-section-care-report-v13-format-recovery"
+PROMPT_VERSION = "six-section-care-report-v14-concept-explanations"
 REPORT_READ_TIMEOUT = 180
 REPORT_REQUEST_BUDGET = 240
 

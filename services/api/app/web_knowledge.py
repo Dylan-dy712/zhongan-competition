@@ -17,7 +17,7 @@ ENDPOINT='https://open.feedcoopapi.com/search_api/web_search'
 # Original public institutions only. Provider ranking is not a medical approval.
 HOSTS=('nhc.gov.cn','nhsa.gov.cn','cma.org.cn','pumch.cn','pkuph.cn',
        'bjmu.edu.cn','hjzyy.mil.cn','xasdjyy.cn','ghsrmyy.com',
-       'orthoinfo.aaos.org','orthoinfo.org','nhs.uk','medlineplus.gov','mayoclinic.org')
+       'orthoinfo.aaos.org','orthoinfo.org','nhs.uk','medlineplus.gov','mayoclinic.org','cancer.gov')
 # Public generic vocabulary, not patient-derived search strings. Unknown names
 # are not sent until an administrator extends this dictionary.
 CONCEPTS=tuple(sorted(('肺炎','社区获得性肺炎','骨折','糖尿病','冠心病','腰椎间盘突出症',
@@ -29,10 +29,14 @@ CONCEPTS=tuple(sorted(('肺炎','社区获得性肺炎','骨折','糖尿病','�
  '白内障','青光眼','骨质疏松症','膝关节骨关节炎','类风湿关节炎','痛风','椎管狭窄',
  '髋关节置换术','髋关节置换','膝关节置换术','胆囊切除术','阑尾切除术',
  '甲状腺切除术','冠状动脉支架植入术','冠状动脉搭桥术','骨折切开复位内固定术',
- '椎间盘切除术','白内障手术','胃镜检查','肠镜检查'),key=len,reverse=True))
+ '椎间盘切除术','白内障手术','胃镜检查','肠镜检查','靶向治疗','化疗','放射治疗'),key=len,reverse=True))
+PUBLIC_SYNONYMS={'乳腺恶性肿瘤':'乳腺癌','乳癌':'乳腺癌','骨质疏松':'骨质疏松症'}
+TREATMENT_TERMS={'靶向治疗','化疗','放射治疗'}
 ALIASES={'胆囊结石':('gallstones',),'胆囊切除术':('gallbladder removal','cholecystectomy'),
          '心房颤动':('atrial fibrillation',),'高血压':('hypertension','high blood pressure'),
-         '甲状腺结节':('thyroid nodules',)}
+         '甲状腺结节':('thyroid nodules',),'乳腺癌':('breast cancer',),
+         '骨质疏松症':('osteoporosis',),'靶向治疗':('targeted therapy',),
+         '化疗':('chemotherapy',),'放射治疗':('radiation therapy',)}
 
 
 def approved_url(url):
@@ -52,22 +56,30 @@ def appropriate_title(title):
 
 
 def safe_concepts(fields,material):
-    """Only quote-validated standalone diagnosis/procedure names, no free queries."""
+    """Map quote-validated names to fixed public terms; no raw records or free queries."""
     candidates=fields.get('candidates',{})
     if isinstance(candidates,dict):candidates=candidates.get('candidates',[])
     names=re.findall(r'(?:姓名|患者姓名|病人姓名)\s*[:：]\s*([\u4e00-\u9fff]{2,8})',material)
     result=[]
     for c in candidates or []:
         kind=c.get('fact_type');raw=c.get('raw_value','');quote=c.get('evidence_quote','')
-        if kind not in {'diagnosis','surgery'} or c.get('assertion') not in {'present','suspected'}:continue
+        if kind not in {'diagnosis','surgery','medication'} or c.get('assertion') not in {'present','suspected'}:continue
         if not isinstance(raw,str) or not quote or quote not in material or raw not in quote:continue
         if len(raw)>100 or re.search(r'姓名|某|先生|女士|患者|岁|地址|住院|电话|身份证|病历|帐号|账号|https?://',raw):continue
         if any(name in raw for name in names):continue
-        term=next((public for public in CONCEPTS if public in raw),None)
-        if not term:continue
-        item={'term':term,'slot':'S1' if kind=='diagnosis' else 'S11'}
-        if item not in result:result.append(item)
-    return result
+        vocabulary={**{term:term for term in CONCEPTS},**PUBLIC_SYNONYMS}
+        occupied=[]
+        for word,term in sorted(vocabulary.items(),key=lambda x:len(x[0]),reverse=True):
+            for match in re.finditer(re.escape(word),raw):
+                if any(match.start()<end and match.end()>start for start,end in occupied):continue
+                occupied.append(match.span())
+                if kind=='medication' and term not in TREATMENT_TERMS:continue
+                item={'term':term,'slot':'S11' if term in TREATMENT_TERMS or kind=='surgery' else 'S1'}
+                if item not in result:result.append(item)
+    # Reserve the second query for a recorded treatment before other diagnoses.
+    diagnosis=[item for item in result if item['slot']=='S1']
+    treatment=[item for item in result if item['slot']=='S11']
+    return [*diagnosis[:1],*treatment,*diagnosis[1:]]
 
 
 def select_excerpt(content,terms,limit=2200):
@@ -135,7 +147,7 @@ class WebKnowledge:
         if safe_concepts({'candidates':[{'fact_type':'diagnosis' if slot=='S1' else 'surgery',
             'raw_value':term,'evidence_quote':term,'assertion':'present'}]},term)!=[concept]:
             return {'status':'unsafe_query','results':[],'calls':0}
-        query=term+' '+(ALIASES.get(term) or ('',))[0]+(' 医学解释' if slot=='S1' else ' 手术目的')
+        query=term+' '+(ALIASES.get(term) or ('',))[0]+(' 医学解释' if slot=='S1' else ' 治疗含义' if term in TREATMENT_TERMS else ' 手术目的')
         query_hash=hashlib.sha256((POLICY+'|'+query).encode()).hexdigest()
         now=self.clock();day=datetime.fromtimestamp(now,timezone(timedelta(hours=8))).date().isoformat()
         try:
