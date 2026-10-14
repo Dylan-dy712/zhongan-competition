@@ -6,6 +6,7 @@ import unittest
 import json
 import hashlib
 import tempfile
+import shutil
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import patch
@@ -200,6 +201,20 @@ class NativeJudgeLibraryTests(unittest.TestCase):
             self.assertEqual(conn.execute('SELECT count(*) AS n FROM documents').fetchone()['n'],0)
             self.assertEqual(conn.execute('SELECT count(*) AS n FROM analysis_runs').fetchone()['n'],0)
             consent=accounts.care_consent(conn,self.actors[0])
+        # Updating the reviewed library must preserve files already selected by a judge.
+        previous=self.directory/'synthetic-01-test-v1'
+        shutil.copytree(self.assets,previous)
+        updated=json.loads(json.dumps(self.manifest));updated['version']='test-v2'
+        first_asset=self.assets/updated['documents'][0]['file']
+        newer_data=first_asset.read_bytes()+b'\n% reviewed compression revision\n'
+        first_asset.write_bytes(newer_data)
+        updated['documents'][0]['sha256']=hashlib.sha256(newer_data).hexdigest()
+        (self.assets/'manifest.json').write_text(json.dumps(updated),encoding='utf-8')
+        with patch.object(judge.psycopg,'connect',side_effect=lambda *args,**kwargs:self.connection()),TestClient(judge.app) as library:
+            self.assertEqual(library.get('/judge/sample',headers=first).json()['version'],'test-v2')
+            old=library.get('/judge/sample/files/synthetic-0?version=test-v1',headers=first)
+            self.assertEqual(old.content,selected[0])
+            self.assertEqual(library.get('/judge/sample/files/synthetic-0?version=../test-v1',headers=first).status_code,404)
         def isolated_database():
             with self.connection() as conn:yield conn
         care_app.dependency_overrides[database]=isolated_database
@@ -216,6 +231,8 @@ class NativeJudgeLibraryTests(unittest.TestCase):
                 self.assertIn(response.status_code,(200,201),response.text)
                 unrelated=client.post(f'/v1/conversations/{conversation}/documents',headers=first,files={'file':('synthetic-unapproved.pdf',b'%PDF-1.4\nNot in reviewed sample','application/pdf')})
                 self.assertEqual(unrelated.status_code,422,'Unreviewed files must not be tagged as approved official samples')
+                wrong_version=client.post(f'/v1/conversations/{conversation}/documents',headers=first,files={'file':('synthetic-0.pdf',newer_data,'application/pdf')})
+                self.assertEqual(wrong_version.status_code,422,'Uploads must match the version actually selected')
                 document_ids=[]
                 for item,data in zip(self.manifest['documents'],selected):
                     uploaded=client.post(f'/v1/conversations/{conversation}/documents',headers=first,files={'file':(item['name'],data,'application/pdf')})
