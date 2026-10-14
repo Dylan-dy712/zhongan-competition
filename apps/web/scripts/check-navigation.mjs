@@ -21,6 +21,7 @@ let delayed=null;
 let delayedEvidence=null;
 globalThis.fetch=async url=>{
   const path=new URL(url,'http://localhost').pathname;calls.push(path);
+  if(path==='/judge/sample')return Response.json({message:'普通用户没有评委示例资料'}, {status:403});
   if(path==='/v1/conversations')return Response.json([conversation]);
   if(path==='/v1/medical-records')return Response.json({records:[{record_id:'record-a',subject_id:conversation.subject_id,title:'合成就医记录',updated_at:conversation.updated_at,document_count:1,conversation_count:1,related_records:[],cases:[{case_id:conversation.case_id,conversations:[conversation],profile:{},updated_at:conversation.updated_at,document_count:1,organization_status:'ready',assignment_source:'ai',relation:'new_episode',version:1,analysis_status:'completed'}]}],unorganized_count:0,processing_count:0});
   if(path==='/v1/me/members')return Response.json([{subject_id:'synthetic-subject',name:'合成用户',relationship:'self',gender:'unspecified',birth_date:null,profile_completed:true}]);
