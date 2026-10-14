@@ -6,6 +6,34 @@ export type {MemberInput,MemberResponse} from './api/generated/accounts';
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
 
+export type JudgeSample = {sample_id:string;version:string;title:string;summary:string;notice:string;data_origin:'official_deidentified';file_count:number;page_count:number;claim_info:Partial<import('./claimTemplate').ClaimForm>;documents:{id:string;name:string;page_count:number;document_type:string;sha256:string}[]};
+export type JudgeSampleFile = {file:File;category:'record'|'invoice'};
+export async function getJudgeSample(token:string):Promise<JudgeSample|null> {
+  const response=await apiFetch(`${API_BASE}/judge/sample`,{headers:{Authorization:`Bearer ${token}`}});
+  if([403,404].includes(response.status))return null;
+  const value=await response.json().catch(()=>null);
+  if(!response.ok)throw new ApiError(value?.detail || value?.message || failureMessage(response.status),response.status);
+  if(!value||!Array.isArray(value.documents)||typeof value.sample_id!=='string')return null;
+  return value;
+}
+export async function chooseJudgeSampleFiles(token:string,sample:JudgeSample):Promise<JudgeSampleFile[]> {
+  return Promise.all(sample.documents.map(async item=>{
+    const response=await apiFetch(`${API_BASE}/judge/sample/files/${encodeURIComponent(item.id)}`,{headers:{Authorization:`Bearer ${token}`}});
+    if(!response.ok){const error=await response.json().catch(()=>null);throw new ApiError(error?.detail || error?.message || failureMessage(response.status),response.status);}
+    const data=await response.arrayBuffer();
+    if(!data.byteLength || data.byteLength>10*1024*1024 || String.fromCharCode(...new Uint8Array(data).slice(0,5))!=='%PDF-')throw new Error('示例文件暂时不可用，请重新选择。');
+    return {file:new File([data],item.name,{type:'application/pdf'}),category:item.document_type==='出院记录'?'record':'invoice'};
+  }));
+}
+export async function createJudgeSampleUploadCase(token:string,subjectId:string,sample:JudgeSample,key:string) {
+  const consent=await getCareConsent(token,subjectId);
+  if(consent.status!=='active'||!consent.consent_id)throw new Error('请先确认资料用途授权。');
+  return chatRequest<{case_id:string}>('/v1/cases',token,'POST',{
+    subject_id:subjectId,consent_id:consent.consent_id,source_ref:`judge-upload-sample:${sample.sample_id}`,
+    data_origin:sample.data_origin,user_context:{judge_demo:true,sample_id:sample.sample_id,sample_version:sample.version,notice:sample.notice}
+  },key);
+}
+
 export async function authenticate(mode:'login'|'register',body:unknown):Promise<SessionResponse> {
   const response=await apiFetch(`${API_BASE}/v1/auth/${mode}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   const result=await response.json().catch(()=>null);

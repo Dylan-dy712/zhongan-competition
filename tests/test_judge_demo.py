@@ -3,6 +3,9 @@ import importlib.util
 import os
 import secrets
 import unittest
+import json
+import hashlib
+import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import patch
@@ -47,6 +50,16 @@ class EntryContractTests(unittest.TestCase):
         self.assertIn("frame-ancestors 'none'", response.headers['content-security-policy'])
         self.assertNotIn('password', Path(response.path).read_text(encoding='utf-8'))
         self.assertTrue(Path(judge.entry_script().path).is_file())
+
+    def test_library_rejects_missing_assets_and_path_escape(self):
+        with tempfile.TemporaryDirectory(dir=ROOT) as folder,patch.dict(os.environ,{'ZHONGAN_JUDGE_SAMPLE_ROOT':folder}):
+            with self.assertRaises(HTTPException) as error:judge.sample_manifest()
+            self.assertEqual(error.exception.status_code,503)
+            manifest={'sample_id':'test','version':'v1','data_origin':'official_deidentified','file_count':1,'page_count':1,
+                      'documents':[{'id':'test','file':'../escaped.pdf'}]}
+            Path(folder,'manifest.json').write_text(json.dumps(manifest))
+            with self.assertRaises(HTTPException) as error:judge.sample_manifest()
+            self.assertEqual(error.exception.status_code,503)
 
 
 @unittest.skipUnless(os.getenv('ZHONGAN_AUTH_TEST_DATABASE_URL'), 'Native PostgreSQL DSN not configured')
@@ -127,5 +140,104 @@ class NativeJudgePoolTests(unittest.TestCase):
             care_app.dependency_overrides.pop(database, None)
 
 
-if __name__ == '__main__':
-    unittest.main()
+@unittest.skipUnless(os.getenv('ZHONGAN_AUTH_TEST_DATABASE_URL'),'Native PostgreSQL DSN not configured')
+class NativeJudgeLibraryTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        from pypdf import PdfWriter
+        cls.dsn=os.environ['ZHONGAN_AUTH_TEST_DATABASE_URL'];cls.schema='judge_library_test_'+uuid4().hex
+        cls.original_connect=staticmethod(psycopg.connect)
+        cls.temporary=tempfile.TemporaryDirectory(dir=ROOT);cls.directory=Path(cls.temporary.name)
+        cls.assets=cls.directory/'assets';cls.assets.mkdir();cls.storage=cls.directory/'uploads';cls.storage.mkdir()
+        documents=[]
+        for index in range(3):
+            name=f'synthetic-{index}.pdf';path=cls.assets/name
+            writer=PdfWriter();writer.add_blank_page(width=300+index,height=400);writer.write(path)
+            documents.append({'id':f'synthetic-{index}','file':name,'name':name,'document_type':'出院记录' if index==0 else '费用清单',
+                              'media_type':'application/pdf','page_count':1,'sha256':hashlib.sha256(path.read_bytes()).hexdigest()})
+        cls.manifest={'sample_id':'synthetic-01','version':'test-v1','data_origin':'official_deidentified','title':'合成路径测试','summary':'测试',
+                      'notice':'合成测试，非患者资料','file_count':3,'page_count':3,'claim_info':{},'documents':documents}
+        (cls.assets/'manifest.json').write_text(json.dumps(cls.manifest),encoding='utf-8')
+        cls.environment=patch.dict(os.environ,{'ZHONGAN_JUDGE_SAMPLE_ROOT':str(cls.assets)})
+        cls.environment.__enter__()
+        with cls.original_connect(cls.dsn,row_factory=dict_row) as conn:
+            conn.execute(f'CREATE SCHEMA {cls.schema}');conn.execute(f'SET search_path TO {cls.schema}')
+            migrations=Path(os.getenv('ZHONGAN_TEST_MIGRATIONS_DIR',ROOT/'services/api/sql'))
+            for path in sorted(migrations.glob('*.sql')):conn.execute(path.read_text(encoding='utf-8'))
+            judge.seed_pool(conn)
+            cls.actors=[row['actor_id'] for row in conn.execute('SELECT actor_id FROM judge_demo_slots ORDER BY slot LIMIT 2').fetchall()]
+            cls.tokens=[accounts.session(conn,actor)['access_token'] for actor in cls.actors]
+            cls.ordinary=accounts.register(conn,accounts.Registration(username='13900000003',password='synthetic-only',display_name='合成普通用户',care_consent=True))['access_token']
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.environment.__exit__(None,None,None)
+        with cls.original_connect(cls.dsn) as conn:conn.execute(f'DROP SCHEMA {cls.schema} CASCADE')
+        cls.temporary.cleanup()
+
+    def connection(self):
+        conn=self.original_connect(self.dsn,row_factory=dict_row)
+        conn.execute(f'SET search_path TO {self.schema}');conn.commit();return conn
+
+    def test_private_download_then_real_upload_then_explicit_analysis(self):
+        from services.api.app.main import document_storage_root
+        first={'Authorization':'Bearer '+self.tokens[0]};second={'Authorization':'Bearer '+self.tokens[1]}
+        with patch.object(judge.psycopg,'connect',side_effect=lambda *args,**kwargs:self.connection()),TestClient(judge.app) as library:
+            self.assertEqual(library.get('/judge/sample').status_code,401)
+            self.assertEqual(library.get('/judge/sample',headers={'Authorization':'Bearer '+self.ordinary}).status_code,403)
+            self.assertEqual(library.get('/judge/sample/files/synthetic-0').status_code,401)
+            meta=library.get('/judge/sample',headers=first)
+            self.assertEqual(meta.status_code,200,meta.text);self.assertEqual(meta.json()['file_count'],3)
+            self.assertNotIn('file',meta.json()['documents'][0]);self.assertNotIn('actor_id',meta.text)
+            selected=[]
+            for item in self.manifest['documents']:
+                response=library.get('/judge/sample/files/'+item['id'],headers=first)
+                self.assertEqual(response.status_code,200);self.assertEqual(response.headers['cache-control'],'no-store')
+                self.assertEqual(hashlib.sha256(response.content).hexdigest(),item['sha256'])
+                selected.append(response.content)
+        with self.connection() as conn:
+            self.assertEqual(conn.execute('SELECT count(*) AS n FROM cases').fetchone()['n'],0,'Selecting sample files must never import a case')
+            self.assertEqual(conn.execute('SELECT count(*) AS n FROM documents').fetchone()['n'],0)
+            self.assertEqual(conn.execute('SELECT count(*) AS n FROM analysis_runs').fetchone()['n'],0)
+            consent=accounts.care_consent(conn,self.actors[0])
+        def isolated_database():
+            with self.connection() as conn:yield conn
+        care_app.dependency_overrides[database]=isolated_database
+        care_app.dependency_overrides[document_storage_root]=lambda:self.storage
+        try:
+            with TestClient(care_app) as client:
+                created=client.post('/v1/cases',headers={**first,'Idempotency-Key':'synthetic-sample-upload'},json={
+                    'subject_id':str(consent['subject_id']),'consent_id':str(consent['consent_id']),
+                    'source_ref':'judge-upload-sample:synthetic-01','data_origin':'official_deidentified','user_context':{
+                        'judge_demo':True,'sample_id':'synthetic-01','sample_version':'test-v1','notice':self.manifest['notice']}})
+                self.assertEqual(created.status_code,201,created.text)
+                case=created.json()['case_id'];conversation=str(uuid4())
+                response=client.post('/v1/conversations',headers=first,json={'conversation_id':conversation,'case_id':case,'recall_enabled':False})
+                self.assertIn(response.status_code,(200,201),response.text)
+                unrelated=client.post(f'/v1/conversations/{conversation}/documents',headers=first,files={'file':('synthetic-unapproved.pdf',b'%PDF-1.4\nNot in reviewed sample','application/pdf')})
+                self.assertEqual(unrelated.status_code,422,'Unreviewed files must not be tagged as approved official samples')
+                document_ids=[]
+                for item,data in zip(self.manifest['documents'],selected):
+                    uploaded=client.post(f'/v1/conversations/{conversation}/documents',headers=first,files={'file':(item['name'],data,'application/pdf')})
+                    self.assertEqual(uploaded.status_code,201,uploaded.text);document_ids.append(uploaded.json()['document_id'])
+                with self.connection() as conn:
+                    self.assertEqual(conn.execute('SELECT count(*) AS n FROM documents').fetchone()['n'],3)
+                    self.assertEqual(conn.execute('SELECT count(*) AS n FROM analysis_runs').fetchone()['n'],0,'Upload confirmation must precede analysis')
+                body={'request_id':str(uuid4()),'message':'合成测试：开始分析已上传资料','document_ids':document_ids}
+                started=client.post(f'/v1/conversations/{conversation}/analyses',headers=first,json=body)
+                self.assertEqual(started.status_code,200,started.text)
+                self.assertEqual(client.post(f'/v1/conversations/{conversation}/analyses',headers=first,json=body).status_code,200)
+                with self.connection() as conn:self.assertEqual(conn.execute('SELECT count(*) AS n FROM analysis_runs').fetchone()['n'],1)
+                path=f'/v1/cases/{case}/documents/{document_ids[0]}/content'
+                self.assertEqual(client.get(path,headers=first).status_code,200)
+                self.assertEqual(client.get(path,headers=second).status_code,404)
+        finally:
+            care_app.dependency_overrides.pop(database,None);care_app.dependency_overrides.pop(document_storage_root,None)
+        with self.connection() as conn:
+            current=accounts.care_consent(conn,self.actors[0])
+            accounts.change_consent(conn,self.actors[0],accounts.ConsentChange(confirmation=False,expected_version=current['version']),'revoke-sample-download')
+        with patch.object(judge.psycopg,'connect',side_effect=lambda *args,**kwargs:self.connection()),TestClient(judge.app) as library:
+            self.assertEqual(library.get('/judge/sample/files/synthetic-0',headers=first).status_code,403)
+
+
+if __name__ == '__main__':unittest.main()

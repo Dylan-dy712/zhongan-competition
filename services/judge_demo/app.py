@@ -3,6 +3,8 @@ import hashlib
 import hmac
 import os
 import secrets
+import json
+import re
 from pathlib import Path
 from uuid import uuid4
 
@@ -13,6 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from psycopg.rows import dict_row
 
 from services.api.app import accounts
+from services.api.app.repository import actor_for_token
 
 CAPACITY = 50
 LOCK_NAME = 'zhongan-judge-demo-v1'
@@ -88,6 +91,86 @@ def validate_entry(authorization):
         raise HTTPException(403, '体验链接无效，请重新扫描现场二维码。')
 
 
+def require_judge(conn, authorization):
+    if not authorization or not authorization.startswith('Bearer ') or len(authorization)>4096:
+        raise HTTPException(401, '请先进入评委体验账号。')
+    actor=actor_for_token(conn,authorization.removeprefix('Bearer '))
+    if actor is None:
+        raise HTTPException(401, '登录已失效，请重新扫描体验二维码。')
+    if not conn.execute('SELECT 1 FROM judge_demo_slots WHERE actor_id=%s',(actor,)).fetchone():
+        raise HTTPException(403, '示例资料仅供评委体验账号使用。')
+    return actor
+
+
+def sample_manifest():
+    directory=Path(os.getenv('ZHONGAN_JUDGE_SAMPLE_ROOT','/home/ubuntu/.config/zhongan/judge-sample')).resolve()
+    try:
+        manifest=json.loads((directory/'manifest.json').read_text(encoding='utf-8'))
+        if manifest.get('data_origin')!='official_deidentified':raise ValueError('Invalid sample origin')
+        for key in ('sample_id','version'):
+            if not re.fullmatch(r'[a-zA-Z0-9_.-]{1,64}',manifest[key]):raise ValueError('Invalid identity')
+        documents=manifest['documents']
+        if not 1<=len(documents)<=10 or manifest['file_count']!=len(documents):raise ValueError('Invalid count')
+        if len({item['id'] for item in documents})!=len(documents):raise ValueError('Duplicate document')
+        for item in documents:
+            if not re.fullmatch(r'[a-z0-9-]{1,64}\.pdf',item['file']):raise ValueError('Invalid file')
+            path=directory/item['file']
+            if path.is_symlink() or not path.resolve().is_relative_to(directory) or not path.is_file():raise ValueError('Escaped file')
+            if item['media_type']!='application/pdf' or not 0<path.stat().st_size<=10*1024*1024:raise ValueError('Invalid media')
+            if not re.fullmatch(r'[0-9a-f]{64}',item['sha256']) or not 1<=item['page_count']<=10:raise ValueError('Invalid metadata')
+            if not isinstance(item['name'],str) or not 1<=len(item['name'])<=200:raise ValueError('Invalid name')
+        if manifest['page_count']!=sum(item['page_count'] for item in documents):raise ValueError('Invalid pages')
+        return directory,manifest
+    except (OSError,ValueError,KeyError,TypeError):
+        raise HTTPException(503, '示例资料暂未准备好，请稍后再试。') from None
+
+
+def sample_info():
+    _,manifest=sample_manifest()
+    return {key:manifest[key] for key in ('sample_id','version','title','summary','notice','data_origin','file_count','page_count','claim_info')} | {
+        'documents':[{key:item[key] for key in ('id','name','page_count','document_type','sha256')} for item in manifest['documents']]}
+
+
+def sample_document(document_id):
+    directory,manifest=sample_manifest()
+    item=next((item for item in manifest['documents'] if item['id']==document_id),None)
+    if item is None:raise HTTPException(404,'示例资料不存在。')
+    path=directory/item['file']
+    with path.open('rb') as handle:
+        if handle.read(5)!=b'%PDF-':raise HTTPException(503,'示例资料校验未通过。')
+        handle.seek(0)
+        if hashlib.file_digest(handle,'sha256').hexdigest()!=item['sha256']:
+            raise HTTPException(503,'示例资料校验未通过。')
+    return FileResponse(path,media_type=item['media_type'],filename=item['name'],headers={
+        'Cache-Control':'no-store','Referrer-Policy':'no-referrer','X-Robots-Tag':'noindex, nofollow','X-Content-Type-Options':'nosniff'})
+
+
+def judge_upload_allowed(conn,actor_id,body):
+    """Enable exactly the reviewed library for judge uploads; other imports stay closed."""
+    context=body.user_context or {}
+    if body.data_origin!='official_deidentified' or context.get('judge_demo') is not True:
+        return False
+    source_ref=getattr(body,'source_ref',None)
+    if source_ref is None and getattr(body,'case_id',None):
+        row=conn.execute('SELECT source_ref FROM cases WHERE case_id=%s',(body.case_id,)).fetchone()
+        source_ref=row['source_ref'] if row else None
+    if not source_ref or not source_ref.startswith('judge-upload-sample:'):return False
+    if not conn.execute("SELECT to_regclass('judge_demo_slots') AS name").fetchone()['name']:return False
+    if not conn.execute('SELECT 1 FROM judge_demo_slots WHERE actor_id=%s',(actor_id,)).fetchone():return False
+    _,manifest=sample_manifest()
+    return (source_ref=='judge-upload-sample:'+manifest['sample_id'] and
+            context.get('sample_id')==manifest['sample_id'] and context.get('sample_version')==manifest['version'] and
+            context.get('notice')==manifest['notice'])
+
+
+def verify_sample_upload(conn,actor_id,case,source_hash):
+    if case.data_origin!='official_deidentified' or not (case.user_context or {}).get('judge_demo'):return
+    if not judge_upload_allowed(conn,actor_id,case):raise HTTPException(403,'当前示例资料授权已变更。')
+    _,manifest=sample_manifest()
+    if source_hash not in {item['sha256'] for item in manifest['documents']}:
+        raise HTTPException(422,'请使用当前示例病例提供的文件；其他资料请在新的申请中上传。')
+
+
 @app.get('/judge/health')
 def health():
     return {'status': 'ok', 'capacity': CAPACITY}
@@ -104,6 +187,29 @@ def entry():
 @app.get('/judge/entry.js')
 def entry_script():
     return FileResponse(ROOT / 'entry.js', media_type='text/javascript', headers={'Cache-Control': 'no-store'})
+
+
+@app.get('/judge/sample')
+def judge_sample_info(response: Response, authorization: str | None = Header(default=None)):
+    response.headers['Cache-Control']='no-store'
+    try:
+        with psycopg.connect(os.environ['ZHONGAN_DATABASE_URL'],row_factory=dict_row,connect_timeout=5) as conn:
+            require_judge(conn,authorization)
+            return sample_info()
+    except (psycopg.Error,KeyError):
+        raise HTTPException(503,'示例资料服务暂时不可用。') from None
+
+
+@app.get('/judge/sample/files/{document_id}')
+def judge_sample_file(document_id: str, authorization: str | None = Header(default=None)):
+    try:
+        with psycopg.connect(os.environ['ZHONGAN_DATABASE_URL'],row_factory=dict_row,connect_timeout=5) as conn:
+            actor=require_judge(conn,authorization)
+            if accounts.care_consent(conn,actor)['status']!='active':
+                raise HTTPException(403,'请先确认资料用途授权，再选择示例资料。')
+            return sample_document(document_id)
+    except (psycopg.Error,KeyError):
+        raise HTTPException(503,'示例资料服务暂时不可用。') from None
 
 
 @app.post('/judge/session')

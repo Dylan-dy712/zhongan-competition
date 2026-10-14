@@ -286,7 +286,9 @@ def post_case(body: CreateCase, response: Response,
               idempotency_key: str = Header(min_length=1, max_length=128),
               actor_id: UUID = Depends(current_actor), conn=Depends(database)) -> Case:
     if body.data_origin != DataOrigin.synthetic:
-        raise HTTPException(status_code=403, detail="Only synthetic imports are enabled")
+        from services.judge_demo.app import judge_upload_allowed
+        if not judge_upload_allowed(conn, actor_id, body):
+            raise HTTPException(status_code=403, detail="Only synthetic imports and approved judge samples are enabled")
     try:
         case, created = create_case(
             conn, actor_id=actor_id, subject_id=body.subject_id,
@@ -384,6 +386,10 @@ async def post_document(
         if byte_size == 0:
             raise HTTPException(status_code=422, detail="Document is empty")
         validate_file_signature(temp_path, media_type)
+        sample_case = get_case(conn, actor_id=actor_id, case_id=case_id)
+        if sample_case and sample_case.data_origin==DataOrigin.official_deidentified and (sample_case.user_context or {}).get('judge_demo'):
+            from services.judge_demo.app import verify_sample_upload
+            verify_sample_upload(conn, actor_id, sample_case, digest.hexdigest())
         page_count = 1 if media_type.startswith("image/") else None
         try:
             document, created = register_document(
