@@ -7,6 +7,7 @@
     "dev": "vite",
     "test:navigation": "node scripts/check-navigation.mjs",
     "test:auth": "node scripts/check-auth-flow.mjs",
+    "test:reminders": "node scripts/check-home-reminders.mjs",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "test:availability": "node scripts/check-availability.mjs"
