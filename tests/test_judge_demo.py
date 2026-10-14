@@ -204,7 +204,7 @@ class NativeJudgeLibraryTests(unittest.TestCase):
         # Updating the reviewed library must preserve files already selected by a judge.
         previous=self.directory/'synthetic-01-test-v1'
         shutil.copytree(self.assets,previous)
-        updated=json.loads(json.dumps(self.manifest));updated['version']='test-v2'
+        updated=json.loads(json.dumps(self.manifest));updated['version']='test-v2';updated['sample_id']='synthetic-02'
         first_asset=self.assets/updated['documents'][0]['file']
         newer_data=first_asset.read_bytes()+b'\n% reviewed compression revision\n'
         first_asset.write_bytes(newer_data)
@@ -212,9 +212,10 @@ class NativeJudgeLibraryTests(unittest.TestCase):
         (self.assets/'manifest.json').write_text(json.dumps(updated),encoding='utf-8')
         with patch.object(judge.psycopg,'connect',side_effect=lambda *args,**kwargs:self.connection()),TestClient(judge.app) as library:
             self.assertEqual(library.get('/judge/sample',headers=first).json()['version'],'test-v2')
-            old=library.get('/judge/sample/files/synthetic-0?version=test-v1',headers=first)
+            old=library.get('/judge/sample/files/synthetic-0?version=test-v1&sample_id=synthetic-01',headers=first)
             self.assertEqual(old.content,selected[0])
             self.assertEqual(library.get('/judge/sample/files/synthetic-0?version=../test-v1',headers=first).status_code,404)
+            self.assertEqual(library.get('/judge/sample/files/synthetic-0?sample_id=../synthetic-01',headers=first).status_code,404)
         def isolated_database():
             with self.connection() as conn:yield conn
         care_app.dependency_overrides[database]=isolated_database
