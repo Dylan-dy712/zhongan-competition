@@ -146,3 +146,58 @@ class ReportEfficiencyTests(unittest.TestCase):
         with patch('services.api.app.material_report.get_material_report',return_value={'status':'outdated'}):
             self.assertIsNone(tools.reusable_analysis())
         tools.conn.execute.assert_not_called()
+
+    def test_source_rejected_draft_is_excluded_from_the_next_retry(self):
+        _,draft,_,_=self.fixture()
+        run_id=str(uuid4())
+        conn=MagicMock()
+        row={'draft':draft,'usage_metadata':{}}
+        conn.execute.return_value.fetchone.side_effect=lambda:row
+        tools=CareTools(conn,uuid4(),uuid4())
+        with patch('services.api.app.material_report.get_material_report',return_value={'status':'available','run_id':run_id}):
+            self.assertEqual(tools.reusable_analysis(),draft)
+            tools.reject_shared_analysis()
+            update=conn.execute.call_args
+            self.assertIn('patient_analysis_rejected',update.args[0])
+            self.assertEqual(update.args[1][0],run_id)
+            row['usage_metadata']['patient_analysis_rejected']=True
+            self.assertIsNone(tools.reusable_analysis())
+        self.assertEqual(row['draft'],draft)
+
+    def test_rejected_old_draft_cannot_mark_a_new_analysis(self):
+        _,draft,_,_=self.fixture()
+        old_run,new_run=str(uuid4()),str(uuid4())
+        conn=MagicMock();conn.execute.return_value.fetchone.return_value={'draft':draft,'usage_metadata':{}}
+        tools=CareTools(conn,uuid4(),uuid4())
+        with patch('services.api.app.material_report.get_material_report',side_effect=[
+                {'status':'available','run_id':old_run},{'status':'available','run_id':new_run}]):
+            self.assertEqual(tools.reusable_analysis(),draft)
+            conn.execute.reset_mock()
+            tools.reject_shared_analysis()
+            conn.execute.assert_not_called()
+
+    def test_planned_check_correction_requires_independent_second_review(self):
+        ref=str(uuid4())
+        source='辅助检查：血常规。辅助检查结果：无。'
+        bad='12月19日已完成抽血化验。'
+        corrected='医生安排了血常规检查，材料未提供检查结果。'
+        draft={'text':bad,'evidence_refs':[ref],'history_refs':[],'knowledge_refs':[],
+               'citations':[{'quote':bad,'source_refs':[ref]}]}
+        reply={**draft,'text':corrected,'citations':[{'quote':corrected,'source_refs':[ref]}]}
+        tools=MagicMock(spec=CareTools)
+        tools.knowledge_sources={};tools.draft_guidance_delivery=None
+        tools.resolve_draft_knowledge.return_value=[]
+        tools.guidance_context.return_value={}
+        tools.execute.side_effect=lambda name,args:{'status':'available','next_offset':None,
+            'evidence':[{'evidence_id':ref,'text':source}],'results':[]}
+        model=ReviewingModel(reply)
+        model.review_analysis=MagicMock(side_effect=[
+            AnalysisReview(accepted=False,issues=[{'category':'phase','explanation':'只有检查安排',
+                'draft_quote':bad,'source_quote':source}]),AnalysisReview(accepted=True,issues=[])])
+        result,_=run_agent([],'解释',[],tools,model=model,analysis_mode=True,initial_analysis=draft)
+        self.assertEqual(result['text'],corrected)
+        self.assertEqual(model.review_analysis.call_count,2)
+        tools.reject_shared_analysis.assert_called_once()
+        messages=model.complete.call_args.args[0]
+        self.assertIn('执行状态待核实',messages[-1]['content'])
+        self.assertIn(source,json.dumps(messages,ensure_ascii=False))

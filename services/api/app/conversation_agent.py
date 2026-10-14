@@ -40,6 +40,7 @@ ANALYSIS_INSTRUCTION = """
 只在影响当前问题时说明缺口，一次说清。不逐项盘点没写的检查、用药、明细，不把缺少记录说成事情没发生，不在每点重复限制说明。
 下一步优先转述原有医嘱，或给一两件具体核对方向；不用反复问用户“最想聊哪块”，也不新增检查、停换药、复诊时间或赔付承诺。
 病例事实只用本轮实际读取的材料。保持疑似、否定、既往和住院/出院阶段；“症状缓解”不扩写成“比入院时轻”。原文未列用药不等于停药。
+检查申请、辅助检查项目或“辅助检查结果：无”只证明医生开立或安排，不能写成已抽血、已完成检查或结果正常。没有执行或结果记录时明确说“医生安排了”，不把安排改为已经发生，也不据此断言未执行。
 费用按原文标签与金额转述，不相加、不推算比例或最终负担；个人自费、个人账户、现金支付、统筹支付不互换。不把跨列对应不明的数值硬配项目。
 检验值没有原文评价或参考范围时，不自行判正常异常；难断句的“暂未回报异常”等表述保留限定，不擅自改写含义。
 检索知识可补充一般的疾病、术语、康复或费用解释，须注明是一般知识并引用knowledge_refs；不得把指南当成这个人的诊断、适应证或新处方，须满足知识的适用范围。
@@ -208,7 +209,24 @@ class CareTools:
             (report['run_id'],report_prompt,os.environ.get('LLM_MODEL_ID',''),
              os.environ.get('LLM_PROVIDER','openai_compatible'))).fetchone()
         self.draft_guidance_delivery=(row.get('usage_metadata') or {}).get('guidance_delivery') if row else None
+        if row and (row.get('usage_metadata') or {}).get('patient_analysis_rejected'):
+            return None
+        self.shared_analysis_run=report['run_id'] if row and row['draft'] else None
         return row['draft'] if row else None
+
+    def reject_shared_analysis(self):
+        """A source-rejected draft must not seed every subsequent retry."""
+        from .material_report import get_material_report
+        from .report_llm import PROMPT_VERSION as report_prompt
+        report=get_material_report(self.conn,self.actor_id,self.conversation_id)
+        if report.get('status')!='available' or report.get('run_id')!=getattr(self,'shared_analysis_run',None):
+            return
+        self.conn.execute('''UPDATE model_extractions SET usage_metadata=usage_metadata ||
+            '{"patient_analysis_rejected":true}'::jsonb
+            WHERE run_id=%s AND prompt_version=%s AND model_id=%s AND provider=%s
+              AND status='completed' ''',
+            (report['run_id'],report_prompt,os.environ.get('LLM_MODEL_ID',''),
+             os.environ.get('LLM_PROVIDER','openai_compatible')))
 
     def guidance_context(self,case_text):
         current=require_conversation(self.conn,self.actor_id,self.conversation_id)
@@ -620,6 +638,8 @@ def run_agent(history, question, attachments, tools, model=None, on_event=None, 
             review_calls+=1
             review_seconds+=time.monotonic()-review_started
             if not verdict.accepted:
+                if reused_draft and isinstance(tools,CareTools):
+                    tools.reject_shared_analysis()
                 if round_index>=1 or verdict.unverified:
                     partial=verified_partial(reply.text,verdict.issues,packed,aliases,reply.evidence_refs)
                     if not partial:raise ValueError('ANALYSIS_FIDELITY_REJECTED')
@@ -636,7 +656,9 @@ def run_agent(history, question, attachments, tools, model=None, on_event=None, 
                     partial_delivery=True
                 else:
                     messages.extend([{'role':'assistant','content':content},
-                        {'role':'user','content':('费用有错时，删掉有问题的次要明细；只保留能直接核对的原文总额，不再列起付线、乙类费用等容易错配的项目。不要把错误数字换成新的推断。' if any(issue.category=='payment' for issue in verdict.issues) else '')+'原文复核未通过。仅修正这些有依据的具体问题，其他正确表述保持简短，不新增项目或解释。重新输出完整解读；原文才是依据，复核意见不是新增事实：'+
+                        {'role':'user','content':('费用有错时，删掉有问题的次要明细；只保留能直接核对的原文总额，不再列起付线、乙类费用等容易错配的项目。不要把错误数字换成新的推断。' if any(issue.category=='payment' for issue in verdict.issues) else '')+
+                         ('检查或治疗只有开立、安排、计划记录时，明确写“医生安排了”，不能简写成“抽血化验”“做了检查”或声称已执行、结果正常；执行状态待核实，不断言未执行。' if any(issue.category=='phase' for issue in verdict.issues) else '')+
+                         '原文复核未通过。仅修正这些有依据的具体问题，其他正确表述保持简短，不新增项目或解释。重新输出完整解读；原文才是依据，复核意见不是新增事实：'+
                          json.dumps([issue.model_dump() for issue in verdict.issues],ensure_ascii=False)}])
                     continue
         if (analysis_mode and (not reused_draft or partial_delivery) and getattr(type(model),'review_guidance',None) is not None
