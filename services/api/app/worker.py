@@ -7,6 +7,8 @@ import os
 import re
 import signal
 import time
+import threading
+import logging
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from pathlib import Path
@@ -33,6 +35,7 @@ from .contracts.knowledge import DiseaseCode
 from .llm_extractor import PROMPT_VERSION, SCHEMA_VERSION as MODEL_SCHEMA_VERSION, OpenAiCompatibleExtractor, validate_evidence_quotes
 from .ocr import OCR_METHOD, OCR_VERSION, Ocr, create_ocr, page_ocr_method
 from .document_quality import classify_material
+from . import medical_records
 
 
 TEXT_PARSER_VERSION = "controlled-text-v1"
@@ -770,6 +773,11 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
                              'retryable': report_model_result.get('retryable', True)}) if result_status == 'failed' else None,
                  run["run_id"], run["lease_token"]),
             )
+            if result_status in ('completed','waiting_review'):
+                try:
+                    with conn.transaction():medical_records.enqueue(conn,run['run_id'])
+                except Exception:
+                    logging.getLogger(__name__).warning('MEDICAL_RECORD_QUEUE_UNAVAILABLE')
     except Exception as exc:
         code = worker_error_code(exc)
         with conn.transaction():
@@ -787,6 +795,8 @@ def main() -> None:
     storage_root = Path(os.environ["ZHONGAN_STORAGE_ROOT"]).resolve()
     signal.signal(signal.SIGTERM, request_stop)
     signal.signal(signal.SIGINT, request_stop)
+    # Separate connection/thread: record organization never delays report delivery or OCR.
+    threading.Thread(target=medical_records.worker_loop,args=(dsn,lambda:stop_requested),name='medical-records',daemon=True).start()
     while not stop_requested:
         try:
             with connect(dsn) as conn:

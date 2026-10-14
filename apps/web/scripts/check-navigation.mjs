@@ -22,6 +22,7 @@ let delayedEvidence=null;
 globalThis.fetch=async url=>{
   const path=new URL(url,'http://localhost').pathname;calls.push(path);
   if(path==='/v1/conversations')return Response.json([conversation]);
+  if(path==='/v1/medical-records')return Response.json({records:[{record_id:'record-a',subject_id:conversation.subject_id,title:'合成就医记录',updated_at:conversation.updated_at,document_count:1,conversation_count:1,related_records:[],cases:[{case_id:conversation.case_id,conversations:[conversation],profile:{},updated_at:conversation.updated_at,document_count:1,organization_status:'ready',assignment_source:'ai',relation:'new_episode',version:1,analysis_status:'completed'}]}],unorganized_count:0,processing_count:0});
   if(path==='/v1/me/members')return Response.json([{subject_id:'synthetic-subject',name:'合成用户',relationship:'self',gender:'unspecified',birth_date:null,profile_completed:true}]);
   if(path==='/v1/me/consents')return Response.json({subject_id:'synthetic-subject',status:'active',version:1});
   if(path==='/v1/chat/subjects')return Response.json([{subject_id:'synthetic-subject',consent_id:'synthetic-consent'}]);
@@ -75,8 +76,8 @@ try {
   assert.ok(document.querySelector('.member-records-header'),'Secondary record list identifies the person');
   assert.equal(document.querySelector('.records-profile'),null,'Record list must not duplicate the profile card');
   const requestsBeforeView=calls.length;
-  await click('按时间');assert.ok(document.querySelector('.records-timeline'));
-  await click('按就医');assert.ok(document.querySelector('.records-group'));
+  await click('关联历程');assert.equal(document.querySelectorAll('.medical-record-card').length,0);
+  await click('全部');assert.ok(document.querySelector('.medical-record-card'));
   assert.equal(calls.length,requestsBeforeView,'Changing record arrangement must not reload the backend');
   await click('查看这次就医');assert.ok(document.querySelector('.records-detail'));
   let resolve;
