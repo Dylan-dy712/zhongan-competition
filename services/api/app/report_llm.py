@@ -13,10 +13,12 @@ from .analysis_sources import compact_schema
 from .inline_citations import InlineCitation, MAX_ANALYSIS_REFERENCES, MAX_KNOWLEDGE_REFERENCES, canonical_analysis_citations, citation_anchor_issues
 from .guidance_quality import GUIDANCE_INSTRUCTION, review_guidance_quality, guidance_requirements
 from .model_workloads import is_qianfan
+from .citation_repair import citation_repair_messages,apply_citation_repairs
 
-PROMPT_VERSION = "six-section-care-report-v14-concept-explanations"
+PROMPT_VERSION = "six-section-care-report-v15-citation-only-repair"
 REPORT_READ_TIMEOUT = 180
 REPORT_REQUEST_BUDGET = 240
+CITATION_REPAIR_TIMEOUT = 60
 
 
 def request_failure(exc):
@@ -174,6 +176,7 @@ def draft_report(material: str, reviewable_knowledge: list[dict], user_context: 
     repairing = False
     quality_reviews = []
     request_usages = []
+    citation_base = None
     for attempt in range(2):
         remaining = deadline - time.monotonic()
         if remaining <= 10:
@@ -182,17 +185,25 @@ def draft_report(material: str, reviewable_knowledge: list[dict], user_context: 
         started = time.monotonic()
         try:
             payload, content = client._call(
-                messages, timeout=(10, min(REPORT_READ_TIMEOUT, remaining - 10)), workload='narrative')
+                messages, timeout=(10, min(CITATION_REPAIR_TIMEOUT if citation_base else REPORT_READ_TIMEOUT, remaining - 10)),
+                workload='citation_repair' if citation_base else 'narrative')
             first_payload = first_payload or payload
             request_usages.append(payload.get('usage',{}))
             if repairing:
                 repaired_payload = payload
             diagnostics.append({"attempt": attempt + 1, "received": True,
-                                "elapsed_seconds": round(time.monotonic() - started, 2)})
+                                "elapsed_seconds": round(time.monotonic() - started, 2),
+                                'operation':'citation_repair' if citation_base else 'draft'})
             try:
-                wire, changes = normalize_report_wire(content, [entry['entry_id'] for entry in reviewable_knowledge])
-                diagnostics[-1]['metadata_normalizations'] = changes
-                parsed = DraftReport.model_validate(wire)
+                if citation_base:
+                    parsed=citation_base.model_copy(deep=True)
+                    updated,audit=apply_citation_repairs(parsed.patient_analysis.model_dump(),content)
+                    parsed.patient_analysis=PatientAnalysis.model_validate(updated)
+                    diagnostics[-1]['citation_repair']=audit
+                else:
+                    wire, changes = normalize_report_wire(content, [entry['entry_id'] for entry in reviewable_knowledge])
+                    diagnostics[-1]['metadata_normalizations'] = changes
+                    parsed = DraftReport.model_validate(wire)
                 if analysis_sources is not None and parsed.patient_analysis:
                     aliases={span[0]:span[0] for page in analysis_sources for span in page['spans']}
                     normalized=canonical_analysis_citations(parsed.patient_analysis.model_dump(),aliases,
@@ -246,15 +257,25 @@ def draft_report(material: str, reviewable_knowledge: list[dict], user_context: 
                 failure = {"code": "REPORT_MODEL_SCHEMA_INVALID", "retryable": False}
                 anchor_errors=[]
                 if str(exc)=='CITATION_ANCHOR_NOT_UNIQUE':
-                    raw=json.loads(content).get('patient_analysis') or {}
+                    raw=parsed.patient_analysis.model_dump() if citation_base else json.loads(content).get('patient_analysis') or {}
                     anchor_errors=citation_anchor_issues(raw.get('text',''),raw.get('citations',[]))
                 diagnostics[-1]['validation_code']=str(exc) if str(exc) in {
-                    'CITATION_ANCHOR_NOT_UNIQUE','CITATION_SOURCE_NOT_AUTHORIZED','ANALYSIS_CITATION_LIMIT','PATIENT_ANALYSIS_REQUIRED'} else 'DRAFT_SCHEMA_INVALID'
+                    'CITATION_ANCHOR_NOT_UNIQUE','CITATION_SOURCE_NOT_AUTHORIZED','ANALYSIS_CITATION_LIMIT','PATIENT_ANALYSIS_REQUIRED',
+                    'CITATION_REPAIR_INVALID','INLINE_CITATIONS_REQUIRED'} else 'DRAFT_SCHEMA_INVALID'
                 schema_errors=[]
                 if isinstance(exc,ValidationError):
                     diagnostics[-1]['schema_errors']=[{'loc':list(item['loc']),'type':item['type']}
                         for item in exc.errors(include_input=False,include_context=False)][:12]
                     schema_errors=diagnostics[-1]['schema_errors']
+                if str(exc)=='CITATION_ANCHOR_NOT_UNIQUE' and attempt==0:
+                    try:
+                        messages=citation_repair_messages(parsed.patient_analysis.model_dump(),analysis_sources,reviewable_knowledge)
+                    except ValueError as repair_error:
+                        diagnostics[-1]['validation_code']=str(repair_error)
+                        break
+                    citation_base=parsed.model_copy(deep=True)
+                    repairing=True
+                    continue
                 messages += [{"role": "assistant", "content": content},
                              {"role": "user", "content": "按最初Schema修复具体错误，保留六段、完整patient_analysis正文和原有真实知识引用，不增加新事实。"
                               "根对象只含sections、actions、patient_analysis；citation只含quote和source_refs，一般知识ID也放在source_refs。"
@@ -266,7 +287,8 @@ def draft_report(material: str, reviewable_knowledge: list[dict], user_context: 
         except (requests.RequestException, KeyError, ValueError, IndexError, TypeError) as exc:
             failure = request_failure(exc)
             diagnostics.append({"attempt": attempt + 1, **failure,
-                                "elapsed_seconds": round(time.monotonic() - started, 2)})
+                                "elapsed_seconds": round(time.monotonic() - started, 2),
+                                'operation':'citation_repair' if citation_base else 'draft'})
             if not failure["retryable"] or attempt == 1:
                 break
             time.sleep(1)
