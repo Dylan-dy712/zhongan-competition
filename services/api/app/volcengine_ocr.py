@@ -100,7 +100,9 @@ class VolcengineOcr:
             with ocr_request_slot(os.environ.get('ZHONGAN_OCR_RATE_LIMIT_FILE')):
                 response = requests.post('https://'+HOST+'/?'+QUERY, data=body,
                                          headers=signed_headers(body, self.access_key, self.secret_key, self.token),
-                                         timeout=(5, 30), allow_redirects=False)
+                                         # Requests also uses the connection timeout while writing the form.
+                                         # Full-resolution scan pages take >5s on the deployed outbound link.
+                                         timeout=(90, 30), allow_redirects=False)
         except requests.Timeout:
             raise RuntimeError('OCR_PROVIDER_ERROR:TIMEOUT') from None
         except requests.RequestException:
