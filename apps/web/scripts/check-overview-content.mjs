@@ -61,8 +61,9 @@ try{
  assert.match(document.querySelector('.overview-ai-content').textContent,/复诊时间未提供/,'Direct entry opens the selected section');
  await click('‹ 返回暖暖解读');assert.equal(window.location.hash,'#/chat');
  const home=[...document.querySelectorAll('.care-navigation button')].find(n=>n.textContent.trim()==='首页');await act(async()=>home.click());await flush();
- assert.equal(document.querySelectorAll('.home-analysis-entry button').length,4,'The home screen exposes all sections for an available AI analysis');
+ assert.equal(document.querySelector('.home-analysis-entry'),null,'Home does not show the removed medical overview section');
+ assert.ok(document.querySelector('.home-reminders'),'Home retains follow-up and medication reminders');
  assert.equal(requests.filter(r=>r.method==='POST').length,0);
- console.log('PASS: visible chat/home entries, real saved narrative in four sections, preserved qualifiers/citations, independent data recovery, selected tabs and no generation calls. Synthetic fixtures only.');
+ console.log('PASS: chat analysis entries, simplified home with reminders, real saved narrative in four sections, preserved qualifiers/citations, independent data recovery, selected tabs and no generation calls. Synthetic fixtures only.');
 }finally{await act(async()=>root.unmount());await modules.close();dom.window.close();}
 
