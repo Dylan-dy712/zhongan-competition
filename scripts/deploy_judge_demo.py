@@ -16,6 +16,9 @@ FILES = [
     'tests/test_judge_demo.py', 'deploy/zhongan-judge-demo.service',
     'deploy/nginx-zhongan-judge-entry.conf', 'deploy/install_judge_demo_ubuntu.sh',
 ]
+# Native verification imports the candidate API as well as the standalone entry.
+FILES += ['services/__init__.py','services/api/__init__.py']
+FILES += [path.relative_to(ROOT).as_posix() for path in sorted((ROOT/'services/api/app').rglob('*.py')) if '__pycache__' not in path.parts]
 
 
 def run(client, command):
@@ -67,7 +70,7 @@ def main():
         command = ('set -eu; set -a; . /home/ubuntu/.config/zhongan/database.env; set +a; '
                    'export ZHONGAN_AUTH_TEST_DATABASE_URL="$ZHONGAN_DATABASE_URL"; '
                    'export ZHONGAN_TEST_MIGRATIONS_DIR=/home/ubuntu/zhongan-app/services/api/sql; '
-                   'export PYTHONPATH=/home/ubuntu/zhongan-app; cd /home/ubuntu/zhongan-app; '
+                   'export PYTHONPATH='+shlex.quote(release+':/home/ubuntu/zhongan-app')+'; cd '+shlex.quote(release)+'; '
                    '/home/ubuntu/zhongan-app/.venv/bin/python -m unittest discover -s '+shlex.quote(release+'/tests')+' -p test_judge_demo.py -v; '
                    'bash -n '+shlex.quote(release+'/deploy/install_judge_demo_ubuntu.sh'))
         run(client, 'bash -c '+shlex.quote(command))

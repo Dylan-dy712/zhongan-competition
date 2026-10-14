@@ -3,6 +3,7 @@ import type {Conversation} from './types';
 import type {MemberResponse} from './api';
 import {encounterGroups} from './carePresentation';
 import HomeReminders,{type OpenHomeRecord} from './HomeReminders';
+import JudgeSampleEntry from './JudgeSampleEntry';
 import brand from '../../../output_dir/product-design/assets/home-brand.webp';
 import mascot from '../../../output_dir/product-design/assets/reference-mascot.webp';
 import scene from '../../../output_dir/product-design/assets/reference-scene.webp';
@@ -18,6 +19,7 @@ export function DemoIcon({name}:{name:'leaf'|'user'|'arrow'|'file'|'chat'}) {
 export function DemoHome({token,member,onOpen,onClaim}:{token:string;member?:MemberResponse;onOpen:OpenHomeRecord;onClaim:()=>void}) {
  return <main className="demo-pages"><div className="home replica-home"><div className="replica-top"><img className="replica-scene" src={scene} alt=""/><header className="brand"><img src={brand} alt="暖愈智护"/></header><div className="replica-hero"><h1>看病之后，<br/><em>安心一点</em></h1><p>暖暖陪你看懂资料，记好安排。</p></div><img className="replica-mascot" src={mascot} alt=""/><img className="replica-chat" src={chatArt} alt=""/></div>
  <HomeReminders key={`${token}:${member?.subject_id}`} token={token} member={member} onOpen={onOpen} onClaim={onClaim}/>
+ <JudgeSampleEntry token={token} onChoose={()=>onClaim()} />
  <section className="home-claim-section" aria-labelledby="home-claim-title"><h2 className="replica-section-title" id="home-claim-title">提交理赔材料</h2><button className="home-claim-entry" aria-label="提交理赔材料" onClick={onClaim}><span className="home-claim-copy"><strong>病历与费用资料</strong><span className="home-claim-description">诊断证明、治疗记录<br/>发票与医疗费用清单</span><span className="home-claim-action">开始提交<DemoIcon name="arrow"/></span></span><img src={cost} alt=""/></button></section></div></main>;
 }
 

@@ -15,7 +15,7 @@ export function claimTemplate(form:ClaimForm,selected:ClaimFile[],step:number,fi
   const activeFiles = () => selected.filter(f=>groups().some(g=>g.id===f.category));
 
   const fileTiles = (files:ClaimFile[], group?:{id:string;title:string}) => `<div class="claim-file-grid">${files.map(f => `<div class="claim-file-tile">
-    ${f.url?`<button class="claim-image-preview" data-claim-preview="${f.id}" aria-label="查看${escape(f.name)}"><img src="${f.url}" alt="${escape(f.name)}" loading="lazy"></button>`:`<div class="claim-document-preview" aria-label="${f.sample?'示例 PDF':'PDF 文件'}">${icon('file',28)}<b>PDF</b><span>${f.sample?'示例材料':'已选择'}</span></div>`}
+    ${f.url?`<button class="claim-image-preview" data-claim-preview="${f.id}" aria-label="查看${escape(f.name)}"><img src="${f.url}" alt="${escape(f.name)}" loading="lazy"></button>`:`<button type="button" class="claim-document-preview" data-claim-preview="${f.id}" aria-label="查看${escape(f.name)}">${icon('file',28)}<b>PDF</b><span>${f.sample?'示例材料':'已选择'}</span></button>`}
     <button class="claim-tile-remove" data-claim-remove="${f.id}" aria-label="移除${escape(f.name)}">×</button>
     <div class="claim-tile-caption"><strong title="${escape(f.name)}">${escape(f.name)}</strong><small>${Math.ceil(f.size/1024)} KB · ${f.sample?'示例':'仅本地'}</small></div>
   </div>`).join('')}${group?`<button class="claim-upload-tile" data-claim-action="pick-${group.id}" aria-label="添加${group.title}"><span aria-hidden="true">＋</span><strong>${files.length?'继续添加':'添加材料'}</strong><small>照片 / PDF</small></button>`:''}</div>`;
