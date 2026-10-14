@@ -1,4 +1,5 @@
 import os
+from contextlib import nullcontext
 import unittest
 from unittest.mock import Mock, patch
 from urllib.parse import parse_qs
@@ -12,6 +13,12 @@ from services.api.app.worker import evidence_for_page, ocr_page, worker_error_co
 
 
 class OcrProviderTests(unittest.TestCase):
+    def setUp(self):
+        # Provider unit tests replace network calls. Scheduling has separate tests.
+        slot = patch('services.api.app.volcengine_ocr.ocr_request_slot', side_effect=lambda *args: nullcontext())
+        slot.start()
+        self.addCleanup(slot.stop)
+
     def config(self):
         return patch.dict(os.environ, {'VOLCENGINE_OCR_ACCESS_KEY_ID': 'synthetic-ak',
                                       'VOLCENGINE_OCR_SECRET_ACCESS_KEY': 'synthetic-sk'}, clear=True)

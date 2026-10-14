@@ -42,3 +42,5 @@ python -m unittest discover -s tests -p test_worker.py -v
 上述 26 项离线测试通过，覆盖显式切换、缺凭证、失败不回退、表单签名字段、禁止重定向、大小限制、受控错误、缺失置信度、低置信度金额剔除、证据字符位置与两种供应方的方法归因。
 
 2026-10-14，填入用户已有 AK/SK 后，本机真实请求通过：指定合成文字匹配，两行均返回坐标与 0–1 置信度，耗时约 0.58 秒。摘要保存在 `output_dir/volcengine-ocr-probe.json`，不包含凭证、图片或返回全文。
+
+线上验证确认 API 与 Worker 均已读取火山配置，真实 Worker 图片解析和授权上传预检均通过。紧接着连续调用时实际返回 `50429`，官方[通用错误码](https://docs.volcengine.com/docs/AIGCAIzhongtaigongyongwendang/69728?lang=zh)解释为超过 QPS 限制。应用使用同一主机私有锁文件协调 API 与 Worker 的调用，前一个请求结束后至少等待 1.1 秒再发送下一次，避免两条路径互相抢占测试额度的请求频率。锁仅包含时间戳，不含凭证或材料。其他程序直接使用同一账号的调用需自行控制频率。
