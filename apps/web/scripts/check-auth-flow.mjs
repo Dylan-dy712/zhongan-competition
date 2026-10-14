@@ -27,6 +27,7 @@ globalThis.fetch=async(url,options={})=>{
   if(path==='/v1/me/members')return Response.json([member]);
   if(path==='/v1/me/members/synthetic-subject'){member={...member,...body,profile_completed:true};return Response.json(member);}
   if(path==='/v1/chat/subjects')return Response.json(consent.status==='active'?[{subject_id:'synthetic-subject',consent_id:'synthetic-consent'}]:[]);
+  if(path==='/v1/medical-records')return Response.json({records:conversation?[{record_id:'synthetic-record',subject_id:conversation.subject_id,title:'合成资料',updated_at:conversation.updated_at,document_count:uploadCount,conversation_count:1,related_records:[],cases:[{case_id:conversation.case_id,conversations:[conversation],profile:{},updated_at:conversation.updated_at,document_count:uploadCount,organization_status:'ready',assignment_source:'ai',relation:'new_episode',version:1,analysis_status:'completed'}]}]:[],unorganized_count:0,processing_count:0});
   if(path==='/v1/conversations'){
     if(body){conversation={conversation_id:body.conversation_id,subject_id:body.subject_id,case_id:'synthetic-case',title:'合成资料',recall_enabled:body.recall_enabled,updated_at:new Date().toISOString()};return Response.json(conversation);}
     return Response.json(conversation?[conversation]:[]);

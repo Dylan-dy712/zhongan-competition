@@ -44,6 +44,7 @@ from .material_report import get_material_report
 from . import accounts
 from .document_quality import inspect_photo
 from .ocr import create_ocr
+from . import medical_records
 
 app = FastAPI(title="众安·暖愈智护", version="0.1.0")
 
@@ -145,6 +146,14 @@ class AnalysisRequest(ChatMessage):
 
 class RecallSetting(Contract):
     enabled: bool
+
+class OrganizeMedicalRecords(Contract):
+    subject_id: UUID
+
+class MedicalRecordAssignment(Contract):
+    mode: Literal['join','separate','related']
+    target_record_id: UUID | None = None
+    expected_version: int = Field(ge=0)
 
 
 DOCUMENT_POLICY_VERSION = "document-policy-v1"
@@ -740,6 +749,23 @@ def chat_subjects(actor_id: UUID = Depends(current_actor), conn=Depends(database
 @app.get('/v1/conversations')
 def conversations(subject_id: UUID | None = None, actor_id: UUID = Depends(current_actor), conn=Depends(database)):
     return chats.list_conversations(conn, actor_id, subject_id)
+
+
+@app.get('/v1/medical-records')
+def medical_record_list(subject_id:UUID,actor_id:UUID=Depends(current_actor),conn=Depends(database)):
+    return medical_records.list_records(conn,actor_id,subject_id)
+
+
+@app.post('/v1/medical-records/organize',status_code=202)
+def organize_medical_records(body:OrganizeMedicalRecords,actor_id:UUID=Depends(current_actor),conn=Depends(database)):
+    return medical_records.organize(conn,actor_id,body.subject_id)
+
+
+@app.patch('/v1/medical-records/cases/{case_id}')
+def change_medical_record(case_id:UUID,body:MedicalRecordAssignment,actor_id:UUID=Depends(current_actor),conn=Depends(database)):
+    if body.mode in ('join','related') and not body.target_record_id:raise HTTPException(422,'请选择目标就医记录。')
+    try:return medical_records.change_assignment(conn,actor_id,case_id,body.mode,body.target_record_id,body.expected_version)
+    except medical_records.StaleRecord:raise HTTPException(409,'记录已更新，请重新加载后再调整。') from None
 
 
 @app.post('/v1/conversations', status_code=201)

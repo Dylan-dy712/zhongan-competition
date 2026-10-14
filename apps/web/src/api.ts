@@ -85,6 +85,10 @@ async function chatRequest<T>(path: string, token: string, method = 'GET', data?
   return response.json() as Promise<T>;
 }
 export const listConversations = (token: string,subjectId?:string) => chatRequest<Conversation[]>(`/v1/conversations${subjectId?`?subject_id=${encodeURIComponent(subjectId)}`:''}`, token);
+export const listMedicalRecords=(token:string,subjectId:string)=>chatRequest<import('./types').MedicalRecordsResponse>(`/v1/medical-records?subject_id=${encodeURIComponent(subjectId)}`,token);
+export const organizeMedicalRecords=(token:string,subjectId:string)=>chatRequest<{queued_count:number}>('/v1/medical-records/organize',token,'POST',{subject_id:subjectId});
+export const changeMedicalRecord=(token:string,caseId:string,body:{mode:'join'|'separate'|'related';target_record_id?:string;expected_version:number})=>
+  chatRequest<{version:number}>(`/v1/medical-records/cases/${encodeURIComponent(caseId)}`,token,'PATCH',body);
 export const listMembers=(token:string)=>chatRequest<MemberResponse[]>('/v1/me/members',token);
 export const saveMember=(token:string,body:MemberInput,subjectId?:string)=>chatRequest<MemberResponse>(
   `/v1/me/members${subjectId?`/${encodeURIComponent(subjectId)}`:''}`,token,subjectId?'PATCH':'POST',body);

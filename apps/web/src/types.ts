@@ -92,6 +92,21 @@ export interface MaterialReport {
 }
 export interface ChatSubject {subject_id:string; consent_id:string}
 
+export interface RecordValue {value:string;evidence_refs:string[]}
+export interface RecordBatch {
+  case_id:string;conversations:Conversation[];updated_at:string;
+  profile:Partial<Record<'diagnosis'|'hospital'|'period'|'kind'|'summary',RecordValue>>;
+  analysis_status:string;document_count:number;organization_status:'pending'|'ready'|'needs_confirmation'|'unavailable';
+  version:number;relation:string;assignment_source:'provisional'|'ai'|'user';
+  proposed_record_id:string|null;proposal_title?:string|null;reason?:string|null;
+}
+export interface MedicalRecord {
+  record_id:string;subject_id:string;title:string;cases:RecordBatch[];updated_at:string;
+  document_count:number;conversation_count:number;related_records:{record_id:string;title:string}[];
+  portrait?:RecordBatch['profile'];
+}
+export interface MedicalRecordsResponse {records:MedicalRecord[];unorganized_count:number;processing_count:number}
+
 export interface DeliveryNotice {
   outbox_id:string; case_id:string; report_id:string; report_version:number;
   message:string; channel:'app'; receipt_state:'pending'|'presented'|'read'; receipt_version:number;
