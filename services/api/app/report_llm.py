@@ -14,7 +14,7 @@ from .inline_citations import InlineCitation, MAX_ANALYSIS_REFERENCES, MAX_KNOWL
 from .guidance_quality import GUIDANCE_INSTRUCTION, review_guidance_quality, guidance_requirements
 from .model_workloads import is_qianfan
 
-PROMPT_VERSION = "six-section-care-report-v12-web-references"
+PROMPT_VERSION = "six-section-care-report-v13-format-recovery"
 REPORT_READ_TIMEOUT = 180
 REPORT_REQUEST_BUDGET = 240
 
@@ -92,6 +92,36 @@ class DraftReport(BaseModel):
         return self
 
 
+def normalize_report_wire(content, knowledge_ids):
+    """Adapt two known metadata variants without rewriting prose or guessing links."""
+    data = json.loads(content)
+    changes = []
+    if not isinstance(data, dict):
+        return data, changes
+    # Internal model commentary is outside the report contract and is never shown.
+    if 'review_notes' in data:
+        data.pop('review_notes')
+        changes.append('review_notes_removed')
+    analysis = data.get('patient_analysis')
+    allowed = set(knowledge_ids)
+    if isinstance(analysis, dict) and isinstance(analysis.get('citations'), list):
+        for citation in analysis['citations']:
+            if not isinstance(citation, dict) or 'knowledge_refs' not in citation:
+                continue
+            refs = citation['knowledge_refs']
+            sources = citation.get('source_refs', [])
+            if not (isinstance(refs, list) and all(isinstance(ref, str) for ref in refs)
+                    and isinstance(sources, list) and all(isinstance(ref, str) for ref in sources)):
+                continue  # Strict schema validation still rejects malformed metadata.
+            if not set(refs).issubset(allowed):
+                raise ValueError('CITATION_SOURCE_NOT_AUTHORIZED')
+            # These are explicit links on this exact quote, not report-wide refs.
+            citation['source_refs'] = list(dict.fromkeys([*sources, *refs]))
+            citation.pop('knowledge_refs')
+            changes.append('citation_knowledge_refs_merged')
+    return data, list(dict.fromkeys(changes))
+
+
 def draft_report(material: str, reviewable_knowledge: list[dict], user_context: dict | None,
                  structured_costs: dict | None = None, user_sources:dict[str,str] | None=None,
                  personnel: list[dict] | None = None, normalized_dates: dict | None = None,
@@ -119,7 +149,10 @@ def draft_report(material: str, reviewable_knowledge: list[dict], user_context: 
         "没有可验证的医嘱时间或用户明确提醒时间时due_at为null，不按一般经验指定复诊日期。"
         "费用解读参考structured_costs中有原文依据的字段，保留冲突、范围和完整性限制；仍须引用原文quote。费用只解读材料明确标记的分类和支付口径；明细合计不冒充总费用，个人自费、个人账户、现金支付和商业保险后支出分别说明。"
         "未确认费用项目完整与同张单据范围时，不求和、不推算自付比例；不同页面或结算单的金额不直接比较。"
-        "不得要求自行停换药，不评价医生对错。只输出Schema JSON。" + GUIDANCE_INSTRUCTION
+        "不得要求自行停换药，不评价医生对错。只输出Schema JSON。根对象只含sections、actions、patient_analysis，不返回review_notes或其他内部备注。"
+        "citations每项只含quote和source_refs；该句的一般知识ID也放在source_refs，不能在citation内另建knowledge_refs。"
+        "reading_requirements.knowledge_groups要求对应主题的实际解释句就近引用one_of中的真实知识ID；"
+        "仅在patient_analysis.knowledge_refs列ID不能代替句子的来源关联，不要为了引用改写费用口径。" + GUIDANCE_INSTRUCTION
     )}, {"role": "user", "content": json.dumps({"schema": compact_schema(DraftReport.model_json_schema()),
         **({'material': material} if analysis_sources is None else {'authorized_material_pages': analysis_sources}),
         "reviewable_knowledge": reviewable_knowledge,
@@ -157,7 +190,9 @@ def draft_report(material: str, reviewable_knowledge: list[dict], user_context: 
             diagnostics.append({"attempt": attempt + 1, "received": True,
                                 "elapsed_seconds": round(time.monotonic() - started, 2)})
             try:
-                parsed = DraftReport.model_validate_json(content)
+                wire, changes = normalize_report_wire(content, [entry['entry_id'] for entry in reviewable_knowledge])
+                diagnostics[-1]['metadata_normalizations'] = changes
+                parsed = DraftReport.model_validate(wire)
                 if analysis_sources is not None and parsed.patient_analysis:
                     aliases={span[0]:span[0] for page in analysis_sources for span in page['spans']}
                     normalized=canonical_analysis_citations(parsed.patient_analysis.model_dump(),aliases,
@@ -215,12 +250,18 @@ def draft_report(material: str, reviewable_knowledge: list[dict], user_context: 
                     anchor_errors=citation_anchor_issues(raw.get('text',''),raw.get('citations',[]))
                 diagnostics[-1]['validation_code']=str(exc) if str(exc) in {
                     'CITATION_ANCHOR_NOT_UNIQUE','CITATION_SOURCE_NOT_AUTHORIZED','ANALYSIS_CITATION_LIMIT','PATIENT_ANALYSIS_REQUIRED'} else 'DRAFT_SCHEMA_INVALID'
+                schema_errors=[]
                 if isinstance(exc,ValidationError):
                     diagnostics[-1]['schema_errors']=[{'loc':list(item['loc']),'type':item['type']}
                         for item in exc.errors(include_input=False,include_context=False)][:12]
+                    schema_errors=diagnostics[-1]['schema_errors']
                 messages += [{"role": "assistant", "content": content},
-                             {"role": "user", "content": "仅修复JSON结构、六段完整性与patient_analysis引用，不增加新事实。引用quote必须逐字来自正文，不能跨行且只出现一次，source_refs只使用提供的来源。定位错误项："+
-                              json.dumps(anchor_errors,ensure_ascii=False)+"。以已写的正文为准修复引用元数据，不修改正文事实来迎合引用；不要用重复出现的疾病名称或拼接多处文字作为quote。"}]
+                             {"role": "user", "content": "按最初Schema修复具体错误，保留六段、完整patient_analysis正文和原有真实知识引用，不增加新事实。"
+                              "根对象只含sections、actions、patient_analysis；citation只含quote和source_refs，一般知识ID也放在source_refs。"
+                              "引用quote必须逐字来自正文，不能跨行且只出现一次，source_refs只使用提供的来源。定位错误项："+
+                              json.dumps({'validation_code':diagnostics[-1]['validation_code'],'schema_errors':schema_errors,
+                                          'citation_anchor_errors':anchor_errors},ensure_ascii=False)+
+                              "。以已写的正文为准修复引用元数据，不修改正文事实来迎合引用；不要用重复出现的疾病名称或拼接多处文字作为quote。"}]
                 repairing = True
         except (requests.RequestException, KeyError, ValueError, IndexError, TypeError) as exc:
             failure = request_failure(exc)
