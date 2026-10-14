@@ -25,13 +25,17 @@ const {default:ClaimIntake}=await import(pathToFileURL(path.join(out,'ClaimIntak
 const sample={sample_id:'synthetic-01',version:'v1',data_origin:'official_deidentified',title:'合成病例流程测试',summary:'测试',notice:'合成测试，非患者资料',file_count:3,page_count:5,
   claim_info:{kind:'住院医疗',cause:'疾病',diagnosis:'合成肺炎样例',start:'2026-09-20',end:'2026-09-25',total:'1200.00',social:'是',other:'否'},
   documents:[{id:'discharge',name:'合成出院记录.pdf',document_type:'出院记录',page_count:2},{id:'costs',name:'合成费用清单.pdf',document_type:'费用清单',page_count:2},{id:'settlement',name:'合成结算单.pdf',document_type:'医保结算单',page_count:1}]};
-const calls=[],opens=[];let uploadCount=0,failSecond=true;
+const calls=[],opens=[];let uploadCount=0,failSecond=true,failSelection=true;
 globalThis.fetch=async(url,options={})=>{
   const p=new URL(url,'http://localhost').pathname;
   const body=typeof options.body==='string'?JSON.parse(options.body):options.body;
   calls.push({path:p,method:options.method||'GET',body});
   if(p==='/judge/sample')return options.headers.Authorization.includes('ordinary')?Response.json({}, {status:403}):Response.json(sample);
-  if(p.startsWith('/judge/sample/files/'))return new Response('%PDF-1.4\nSynthetic '+p,{headers:{'Content-Type':'application/pdf'}});
+  if(p.startsWith('/judge/sample/files/')){
+    assert.equal(new URL(url,'http://localhost').searchParams.get('version'),'v1');
+    if(failSelection){failSelection=false;return {ok:true,arrayBuffer:async()=>{throw new DOMException('The user aborted a request.','AbortError');}};}
+    return new Response('%PDF-1.4\nSynthetic '+p,{headers:{'Content-Type':'application/pdf'}});
+  }
   if(p==='/v1/me/consents')return Response.json({status:'active',consent_id:'synthetic-consent'});
   if(p==='/v1/cases')return Response.json({case_id:'synthetic-case'});
   if(p==='/v1/conversations')return Response.json({});
@@ -50,6 +54,9 @@ async function click(text){const node=button(text);assert.ok(node,'Missing butto
 const props={token:'synthetic-judge',subject:'synthetic-subject',visible:true,onAuthorize:()=>{},onExit:()=>{},onOpen:async id=>opens.push(id)};
 try{
   await act(async()=>root.render(React.createElement(ClaimIntake,props)));await flush();
+  await click('导入示例病例');
+  assert.match(document.querySelector('[role="alert"]').textContent,/示例资料载入超时/);
+  assert.equal(calls.filter(call=>call.method==='POST').length,0);
   await click('导入示例病例');
   assert.equal(document.querySelectorAll('.claim-file-tile').length,3);
   assert.match(document.body.textContent,/尚未提交/);
