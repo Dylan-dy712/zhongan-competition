@@ -128,7 +128,8 @@ class GuidanceGenerationTests(unittest.TestCase):
         self.assertTrue(GuidanceQuality.model_validate(assessment(issues=['可选：进一步精简一句话'])).accepted)
 
     def test_bad_quote_is_repaired_before_quality_review(self):
-        result,call=self.run_report([draft(quote='正文中没有这句话'),draft(),assessment()])
+        result,call=self.run_report([draft(quote='正文中没有这句话'),
+                                    {'repairs':[{'citation_index':0,'quote':'本次记录为肺炎。'}]},assessment()])
         self.assertEqual(result['status'],'completed')
         self.assertEqual(call.call_count,3)
 

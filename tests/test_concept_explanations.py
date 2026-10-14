@@ -2,7 +2,7 @@ import unittest
 from unittest.mock import Mock,patch
 from uuid import uuid4
 
-from services.api.app.guidance_quality import GuidanceQuality,ExplanationEvidence,enforce_explanation_evidence,guidance_requirements,review_guidance_quality
+from services.api.app.guidance_quality import GuidanceQuality,ExplanationEvidence,enforce_explanation_evidence,guidance_requirements,review_guidance_quality,explanation_choices,decode_explanation_choices,GuidanceReviewWire
 from services.api.app.guidance_context import select_guidance_knowledge
 from services.api.app.knowledge_assembler import KnowledgeAssembler
 from services.api.app.contracts.knowledge import DiseaseCode
@@ -89,7 +89,19 @@ class ConceptExplanationTests(unittest.TestCase):
         self.assertFalse(checked.accepted)
         prompt=client._call.call_args.args[0][0]['content']
         self.assertIn('具体意义请医生解释',prompt)
-        self.assertIn('meaning_quote',prompt)
+        self.assertIn('meaning_citation',prompt)
+
+    def test_review_selection_resolves_actual_sentences_instead_of_joining_quotes(self):
+        draft,proof,context=self.fixture()
+        segments,citations=explanation_choices(draft['patient_analysis'])
+        wire=GuidanceReviewWire(**verdict().model_dump(exclude={'explanations'}),explanations=[{
+            'theme':'treatment','meaning_citation':1,'case_connection_segment':2,'help_segment':3}])
+        decoded=decode_explanation_choices(wire,segments,citations)
+        self.assertEqual(decoded.explanations[0],proof)
+        self.assertTrue(enforce_explanation_evidence(decoded,draft,context).accepted)
+        wire.explanations[0].meaning_citation=40
+        invalid=decode_explanation_choices(wire,segments,citations)
+        self.assertFalse(enforce_explanation_evidence(invalid,draft,context).accepted)
 
     def test_user_request_refreshes_an_old_draft_policy_but_reuses_a_current_one(self):
         for outdated in (True,False):

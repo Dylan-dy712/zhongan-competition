@@ -57,9 +57,7 @@ class ReportFormatRecoveryTests(unittest.TestCase):
         raw = metadata_variant(); content = json.dumps(raw)
         payload = {'choices': [{'message': {'content': content}}], 'usage': {'total_tokens': 12}}
         quality = {k: True for k in GuidanceQuality.model_fields if k not in {'issues','explanations'}} | {'issues': [],
-            'explanations':[{'theme':'cost','meaning_quote':raw['patient_analysis']['citations'][0]['quote'],
-                             'case_connection_quote':'本次票据列了统筹支付80元。',
-                             'help_quote':'核对个人承担金额时，可以对照同一次结算单的支付标签。'}]}
+            'explanations':[{'theme':'cost','meaning_citation':1,'case_connection_segment':2,'help_segment':3}]}
         env = {'LLM_BASE_URL': 'https://qianfan.baidubce.com/v2',
                'LLM_API_KEY': 'synthetic', 'LLM_MODEL_ID': 'glm-5.3-flash'}
         with patch.dict(os.environ, env), patch.object(OpenAiCompatibleExtractor, '_call',
