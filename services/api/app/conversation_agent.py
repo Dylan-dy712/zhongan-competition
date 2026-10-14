@@ -548,7 +548,9 @@ def run_agent(history, question, attachments, tools, model=None, on_event=None, 
         except (ValueError,TypeError):
             seed = None
     reused_draft = seed is not None
-    for round_index in range(2 if analysis_mode else 5):
+    # A rejected shared draft uses the first round; allow its replacement one
+    # schema repair as well, without weakening the independent source review.
+    for round_index in range(3 if analysis_mode else 5):
         if analysis_mode and on_event:
             on_event(events)
         model_started = time.monotonic()

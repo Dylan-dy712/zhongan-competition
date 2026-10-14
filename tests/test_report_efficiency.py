@@ -76,6 +76,33 @@ class ReportEfficiencyTests(unittest.TestCase):
             run_agent([], '解释', [], tools,model=model,analysis_mode=True,initial_analysis=draft)
             model.complete.assert_called_once()
 
+    def test_replacement_after_rejected_draft_can_repair_its_format(self):
+        _,draft,tools,model=self.fixture()
+        missing_citations={**draft,'citations':[]}
+        model.complete.side_effect=[{'content':json.dumps(missing_citations)},
+                                    {'content':json.dumps(draft)}]
+        model.review_analysis=MagicMock(side_effect=[
+            AnalysisReview(accepted=False,issues=[{'category':'payment','explanation':'需核对原文金额',
+                'draft_quote':draft['text'],'source_quote':'票据总额120元。'}]),
+            AnalysisReview(accepted=True,issues=[])])
+        result,_=run_agent([],'解释',[],tools,model=model,analysis_mode=True,initial_analysis=draft)
+        self.assertEqual(result['text'],draft['text'])
+        self.assertEqual(model.complete.call_count,2)
+        self.assertEqual(model.review_analysis.call_count,2)
+        self.assertFalse(result['performance']['draft_reused'])
+        self.assertIn('格式错误项',model.complete.call_args.args[0][-1]['content'])
+
+    def test_replacement_with_repeated_format_errors_is_not_delivered(self):
+        _,draft,tools,model=self.fixture()
+        model.complete.return_value={'content':json.dumps({**draft,'citations':[]})}
+        model.review_analysis=MagicMock(return_value=AnalysisReview(accepted=False,issues=[
+            {'category':'payment','explanation':'需核对原文金额','draft_quote':draft['text'],
+             'source_quote':'票据总额120元。'}]))
+        with self.assertRaisesRegex(ValueError,'INLINE_CITATIONS_REQUIRED'):
+            run_agent([],'解释',[],tools,model=model,analysis_mode=True,initial_analysis=draft)
+        self.assertEqual(model.complete.call_count,2)
+        self.assertEqual(model.review_analysis.call_count,1)
+
     def test_quality_warning_preserves_readable_draft_and_still_reviews_with_notice(self):
         _,draft,tools,model=self.fixture()
         tools.execute.return_value['quality_warnings']=[{'name':'模糊照片'}]
