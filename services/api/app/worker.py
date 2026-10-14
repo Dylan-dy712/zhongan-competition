@@ -31,7 +31,7 @@ from .report_llm import PROMPT_VERSION as REPORT_PROMPT_VERSION, draft_report
 from .contracts.core import Action
 from .contracts.knowledge import DiseaseCode
 from .llm_extractor import PROMPT_VERSION, SCHEMA_VERSION as MODEL_SCHEMA_VERSION, OpenAiCompatibleExtractor, validate_evidence_quotes
-from .tencent_ocr import OCR_METHOD, OCR_VERSION, TencentOcr
+from .ocr import OCR_METHOD, OCR_VERSION, Ocr, create_ocr, page_ocr_method
 from .document_quality import classify_material
 
 
@@ -39,6 +39,13 @@ TEXT_PARSER_VERSION = "controlled-text-v1"
 PDF_PARSER_VERSION = "pypdf-6.6.2-v1"
 ROUTING_VERSION = "page-router-v1"
 stop_requested = False
+
+
+def worker_error_code(exc: Exception) -> str:
+    value = str(exc)
+    if re.fullmatch(r'OCR_PROVIDER_ERROR:[A-Za-z0-9_.-]{1,80}', value):
+        return value
+    return value if value.isupper() else 'PARSE_FAILED'
 
 
 def request_stop(*_args) -> None:
@@ -76,7 +83,7 @@ def evidence_for_page(document,page):
     """Prepare once so report cost context and SQL evidence refer to the same source spans."""
     if not page['text']:
         return []
-    if page['parser_version']==OCR_VERSION:
+    if page_ocr_method(page):
         spans=[]
         cursor=0
         for block in page['blocks']:
@@ -205,7 +212,7 @@ def parse_controlled_text(document: dict, path: Path):
     }]
 
 
-def ocr_page(image_bytes: bytes, width: int, height: int, base: dict, ocr: TencentOcr):
+def ocr_page(image_bytes: bytes, width: int, height: int, base: dict, ocr: Ocr):
     result = ocr.recognize(image_bytes, width, height)
     kind, certainty = classify_material(result['text'])
     uncertain = 0
@@ -222,10 +229,10 @@ def ocr_page(image_bytes: bytes, width: int, height: int, base: dict, ocr: Tence
         "text": text or None,
         "status": "parsed" if text else "unreadable",
         "requires_ocr": False,
-        "parser_version": OCR_VERSION,
+        "parser_version": getattr(ocr, 'version', OCR_VERSION),
         "blocks": result["blocks"],
         "metadata": {
-            **base["metadata"], "ocr_method": OCR_METHOD,
+            **base["metadata"], "ocr_method": getattr(ocr, 'method', OCR_METHOD),
             "ocr_request_id": result["request_id"], "ocr_angle": result["angle"],
             "ocr_line_count": len(result["blocks"]),
             "photo_quality": {"material_type":kind,"type_certainty":certainty,
@@ -236,7 +243,7 @@ def ocr_page(image_bytes: bytes, width: int, height: int, base: dict, ocr: Tence
     return base
 
 
-def parse_pdf(path: Path, ocr: TencentOcr | None = None):
+def parse_pdf(path: Path, ocr: Ocr | None = None):
     reader = PdfReader(str(path), strict=False)
     if reader.is_encrypted and reader.decrypt("") == 0:
         raise RuntimeError("PDF_ENCRYPTED")
@@ -264,7 +271,7 @@ def parse_pdf(path: Path, ocr: TencentOcr | None = None):
                          "extracted_code_points": len(text)},
         }
         if requires_ocr:
-            ocr = ocr or TencentOcr()
+            ocr = ocr or create_ocr()
             rendered_pdf = rendered_pdf or pdfium.PdfDocument(str(path))
             bitmap = rendered_pdf[page_index].render(scale=2.0)
             image = bitmap.to_pil().convert("RGB")
@@ -275,7 +282,7 @@ def parse_pdf(path: Path, ocr: TencentOcr | None = None):
     return pages
 
 
-def route_document(document: dict, path: Path, pipeline_version: str, ocr: TencentOcr | None = None):
+def route_document(document: dict, path: Path, pipeline_version: str, ocr: Ocr | None = None):
     if pipeline_version == "text-parser-v1":
         if document["media_type"] != "text/plain":
             raise RuntimeError("PARSER_NOT_IMPLEMENTED")
@@ -298,7 +305,7 @@ def route_document(document: dict, path: Path, pipeline_version: str, ocr: Tence
                         "metadata": {"analysis_status": "ocr_required"}}],
             "metadata": {"media_type": document["media_type"], "image_count": 1},
         }
-        return [ocr_page(path.read_bytes(), width, height, page, ocr or TencentOcr())]
+        return [ocr_page(path.read_bytes(), width, height, page, ocr or create_ocr())]
     raise RuntimeError("PARSER_NOT_IMPLEMENTED")
 
 
@@ -513,7 +520,7 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
                              document["document_version"], page["page_index"], block["type"],
                              block["order"], block["text"], json.dumps(block.get("bbox")),
                              json.dumps(block["metadata"]),
-                             OCR_METHOD if page["parser_version"] == OCR_VERSION else
+                             page_ocr_method(page) or
                              ("pdf_text_layer" if document["media_type"] == "application/pdf" else "controlled_text"),
                              document["source_hash"], page["parser_version"]),
                         )
@@ -528,7 +535,7 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
                             (evidence_id, run["run_id"], run["case_id"], document["document_id"],
                              document["document_version"], page["page_index"], start, end, value,
                              json.dumps(bbox),
-                             OCR_METHOD if page["parser_version"] == OCR_VERSION else
+                             page_ocr_method(page) or
                              ("pdf_text_layer" if document["media_type"] == "application/pdf" else "controlled_text"),
                              document["source_hash"], page["parser_version"]),
                         )
@@ -764,7 +771,7 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
                  run["run_id"], run["lease_token"]),
             )
     except Exception as exc:
-        code = str(exc) if str(exc).isupper() else "PARSE_FAILED"
+        code = worker_error_code(exc)
         with conn.transaction():
             conn.execute(
                 """UPDATE analysis_runs SET status='failed', finished_at=now(),
