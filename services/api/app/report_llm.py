@@ -11,11 +11,11 @@ from .llm_extractor import OpenAiCompatibleExtractor
 from .report_builder import SECTION_TYPES
 from .analysis_sources import compact_schema
 from .inline_citations import InlineCitation, MAX_ANALYSIS_REFERENCES, MAX_KNOWLEDGE_REFERENCES, canonical_analysis_citations, citation_anchor_issues
-from .guidance_quality import GUIDANCE_INSTRUCTION, review_guidance_quality, guidance_requirements
+from .guidance_quality import GUIDANCE_INSTRUCTION, review_guidance_quality, guidance_requirements, guidance_delivery, guidance_review_error
 from .model_workloads import is_qianfan
 from .citation_repair import citation_repair_messages,apply_citation_repairs
 
-PROMPT_VERSION = "six-section-care-report-v15-citation-only-repair"
+PROMPT_VERSION = "six-section-care-report-v16-quality-advisory"
 REPORT_READ_TIMEOUT = 180
 REPORT_REQUEST_BUDGET = 240
 CITATION_REPAIR_TIMEOUT = 60
@@ -213,9 +213,7 @@ def draft_report(material: str, reviewable_knowledge: list[dict], user_context: 
                     raise ValueError('PATIENT_ANALYSIS_REQUIRED')
                 if is_qianfan(client.base_url):
                     remaining=deadline-time.monotonic()
-                    if remaining<=10:
-                        failure={'code':'REPORT_GUIDANCE_QUALITY_TIMEOUT','retryable':True}
-                        break
+                    delivery=guidance_delivery(unavailable_code='GUIDANCE_QUALITY_TIMEOUT')
                     context={'fields':structured_fields or {},'care_priorities':care_priorities or [],
                         'user_context':user_context,'user_sources':user_sources or {},
                         'knowledge':reviewable_knowledge,'costs':structured_costs or {},
@@ -228,31 +226,27 @@ def draft_report(material: str, reviewable_knowledge: list[dict], user_context: 
                                 if alias in cited and anchor_size+len(source)<=4000:
                                     anchors.append(source);anchor_size+=len(source)
                         context['case_anchors']=anchors
-                    try:
-                        quality,quality_usage=review_guidance_quality(client,parsed.model_dump(mode='json'),context,
-                            timeout=(10,min(60,remaining-10)))
-                    except (ValidationError,ValueError,KeyError):
-                        failure={'code':'REPORT_GUIDANCE_QUALITY_UNAVAILABLE','retryable':True}
-                        break
-                    request_usages.append(quality_usage)
-                    quality_reviews.append({'accepted':quality.accepted,'assessment':quality.model_dump(),
-                                            'usage':quality_usage})
-                    if not quality.accepted:
-                        failure={'code':'REPORT_GUIDANCE_QUALITY_REJECTED','retryable':False}
-                        if attempt==0:
-                            messages += [{'role':'assistant','content':content},{'role':'user','content':
-                                '阅读质量检查未通过。结合已有事实、真实用户关切和知识解释改进这些问题；不能新增医学事实或个人治疗决定。'
-                                '重新输出完整JSON，保留来源引用：'+json.dumps(quality.model_dump(),ensure_ascii=False)}]
-                            repairing=True
-                            continue
-                        break
+                    if remaining>10:
+                        try:
+                            quality,quality_usage=review_guidance_quality(client,parsed.model_dump(mode='json'),context,
+                                timeout=(10,min(60,remaining-10)))
+                        except (requests.RequestException,ValueError,KeyError,TypeError,IndexError) as exc:
+                            delivery=guidance_delivery(unavailable_code=guidance_review_error(exc))
+                        else:
+                            request_usages.append(quality_usage)
+                            quality_reviews.append({'accepted':quality.accepted,'assessment':quality.model_dump(),
+                                                    'usage':quality_usage})
+                            delivery=guidance_delivery(quality)
+                else:
+                    delivery=guidance_delivery()
                 return {"status": "completed", "draft": parsed.model_dump(mode="json"),
                         "raw_output": first_payload, "repaired_output": repaired_payload,
                         "usage_metadata": {**payload.get("usage", {}),
                                            **{key:sum(usage.get(key,0) or 0 for usage in request_usages)
                                               for key in ('prompt_tokens','completion_tokens','total_tokens')},
                                            'request_usages':request_usages,"request_attempts": diagnostics,
-                                           'guidance_quality_reviews':quality_reviews}}
+                                           'guidance_quality_reviews':quality_reviews,
+                                           'guidance_delivery':delivery}}
             except (ValidationError,ValueError) as exc:
                 failure = {"code": "REPORT_MODEL_SCHEMA_INVALID", "retryable": False}
                 anchor_errors=[]

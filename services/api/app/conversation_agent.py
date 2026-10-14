@@ -24,13 +24,13 @@ from .inline_citations import InlineCitation, bind_citations, canonical_analysis
 from .care_voice import CARE_VOICE
 from .knowledge_retrieval import KnowledgeRetriever
 from .knowledge_assembler import KnowledgeAssemblerError
-from .guidance_quality import GUIDANCE_INSTRUCTION, review_guidance_quality, guidance_requirements, enforce_guidance_requirements, GuidanceQuality
+from .guidance_quality import GUIDANCE_INSTRUCTION, review_guidance_quality, guidance_requirements, enforce_guidance_requirements, GuidanceQuality, guidance_delivery, guidance_review_error
 from .model_workloads import is_qianfan
 from .contracts.knowledge import DiseaseCode
 
 
 PROMPT_VERSION = 'conversation-agent-v3'
-ANALYSIS_PROMPT_VERSION = 'patient-analysis-narrative-v14-concept-explanations'
+ANALYSIS_PROMPT_VERSION = 'patient-analysis-narrative-v16-quality-advisory'
 ANALYSIS_INSTRUCTION = """
 本轮是暖暖看完资料后，对用户讲清这次就医情况。遵循上面的对话语气，读起来要像人在耐心讲解。
 表达顺序：开头两三句抓住这次就医的整体情况；然后用编号分主题解释；最后单独写“**接下来，可以这样做**”。
@@ -202,11 +202,12 @@ class CareTools:
         report = get_material_report(self.conn,self.actor_id,self.conversation_id)
         if report.get('status') != 'available':
             return None
-        row = self.conn.execute('''SELECT candidates->'patient_analysis' AS draft
+        row = self.conn.execute('''SELECT candidates->'patient_analysis' AS draft,usage_metadata
             FROM model_extractions WHERE run_id=%s AND prompt_version=%s
             AND model_id=%s AND provider=%s AND status='completed' ORDER BY created_at DESC LIMIT 1''',
             (report['run_id'],report_prompt,os.environ.get('LLM_MODEL_ID',''),
              os.environ.get('LLM_PROVIDER','openai_compatible'))).fetchone()
+        self.draft_guidance_delivery=(row.get('usage_metadata') or {}).get('guidance_delivery') if row else None
         return row['draft'] if row else None
 
     def guidance_context(self,case_text):
@@ -424,6 +425,7 @@ def run_agent(history, question, attachments, tools, model=None, on_event=None, 
     review_seconds = 0
     guidance_context={}
     quality_assessments=[]
+    delivery=guidance_delivery()
     if analysis_mode:
         # Read source pages before drafting: the six-section projection can omit
         # treatment facts and is not a suitable outline for a personal explanation.
@@ -518,7 +520,11 @@ def run_agent(history, question, attachments, tools, model=None, on_event=None, 
             presentation=enforce_guidance_requirements(GuidanceQuality(**{
                 key:True for key in GuidanceQuality.model_fields if key not in {'issues','explanations'}}),
                 {'patient_analysis':normalized},guidance_context)
-            if not presentation.accepted:raise ValueError('CACHED_GUIDANCE_TOO_BRIEF')
+            cached_delivery=getattr(tools,'draft_guidance_delivery',None) if isinstance(tools,CareTools) else None
+            if isinstance(cached_delivery,dict) and cached_delivery.get('status') in {'passed','needs_improvement','unchecked'}:
+                delivery=cached_delivery
+            if not presentation.accepted:
+                delivery=guidance_delivery(presentation)
             tools.validate_reply(AgentReply.model_validate(normalized))
             seed = {'content':json.dumps(normalized,ensure_ascii=False)}
         except (ValueError,TypeError):
@@ -636,19 +642,18 @@ def run_agent(history, question, attachments, tools, model=None, on_event=None, 
         if (analysis_mode and (not reused_draft or partial_delivery) and getattr(type(model),'review_guidance',None) is not None
                 and is_qianfan(getattr(getattr(model,'config',None),'base_url',None))):
             if on_event:on_event(events)
-            quality=model.review_guidance(reply.model_dump(mode='json'),
-                {**guidance_context,'facts_independently_reviewed':True,
-                 'case_anchors':[source for page in packed for alias,source in page['spans']
-                     if aliases.get(alias) in {str(ref) for ref in reply.evidence_refs}][:24],
-                 'knowledge':[{'entry_id':page['document'],'content':'\n'.join(span[1] for span in page['spans'])}
-                     for page in knowledge_pages if page['document'] in reply.knowledge_refs]})
-            quality_assessments.append(quality.model_dump())
-            if not quality.accepted:
-                if round_index>=1:raise ValueError('GUIDANCE_QUALITY_REJECTED')
-                messages.extend([{'role':'assistant','content':json.dumps(reply.model_dump(mode='json'),ensure_ascii=False)},
-                    {'role':'user','content':'解释质量检查未通过。使用已有原文和知识讲清楚这些问题，不增加个体诊疗决定，重新输出完整JSON：'+
-                     json.dumps(quality.model_dump(),ensure_ascii=False)}])
-                continue
+            try:
+                quality=model.review_guidance(reply.model_dump(mode='json'),
+                    {**guidance_context,'facts_independently_reviewed':True,
+                     'case_anchors':[source for page in packed for alias,source in page['spans']
+                         if aliases.get(alias) in {str(ref) for ref in reply.evidence_refs}][:24],
+                     'knowledge':[{'entry_id':page['document'],'content':'\n'.join(span[1] for span in page['spans'])}
+                         for page in knowledge_pages if page['document'] in reply.knowledge_refs]})
+            except (requests.RequestException,ValueError,KeyError,TypeError,IndexError) as exc:
+                delivery=guidance_delivery(unavailable_code=guidance_review_error(exc))
+            else:
+                quality_assessments.append(quality.model_dump())
+                delivery=guidance_delivery(quality)
         result = {**reply.model_dump(mode='json'),
                   'prompt_version': ANALYSIS_PROMPT_VERSION if analysis_mode else PROMPT_VERSION}
         if isinstance(tools,CareTools):
@@ -657,6 +662,7 @@ def run_agent(history, question, attachments, tools, model=None, on_event=None, 
                 if key in tools.knowledge_sources[ref]}
                 for ref in dict.fromkeys(reply.knowledge_refs)]
         if analysis_mode:
+            result['guidance_delivery']=delivery
             result['performance'] = {'source_fragments':len(aliases), 'source_characters':size,
                 'source_read_complete':offset is None and not truncated,
                 'model_input_characters':sum(len(m.get('content') or '') for m in messages),

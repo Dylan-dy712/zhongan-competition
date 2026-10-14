@@ -66,6 +66,7 @@ export interface Conversation {
   created_at: string; updated_at: string;
 }
 export interface ChatAnswer {text: string; evidence_refs: string[]; history_refs: string[];
+  guidance_delivery?:{status:'passed'|'needs_improvement'|'unchecked';notice?:string};
   prompt_version?:string; analysis_run_id?:string; knowledge_refs?:string[]; knowledge_sources?:KnowledgeSource[]; citations?:InlineCitation[]}
 export interface InlineCitation {quote:string;source_refs:string[]}
 export interface KnowledgeSource {entry_id:string;title:string;source:string;source_path?:string;scope:string;version:string;reference_policy?:string;content?:string;retrieval_provider?:string;retrieved_at?:string;published_at?:string}

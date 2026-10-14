@@ -750,6 +750,7 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
                 "report_version": report_version, "prompt_version": REPORT_PROMPT_VERSION,
                 "policy_version": REPORT_POLICY_VERSION,
                 "validation_errors": report_errors, "model_status": report_model_result['status'],
+                "reading_quality": report_model_result.get('usage_metadata',{}).get('guidance_delivery'),
             }}
             result_status = 'failed' if report_model_result['status'] == 'failed' else ('waiting_review' if waiting_review else 'completed')
             conn.execute(
