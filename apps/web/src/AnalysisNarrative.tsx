@@ -31,6 +31,8 @@ export default function AnalysisNarrative({turn,onEvidence}:{turn:ChatTurn;onEvi
             </section>
           : <p key={i}>{cited(block.text)}</p>)}
     </div>
+    {turn.answer.guidance_delivery?.status!=='passed' && turn.answer.guidance_delivery?.notice &&
+      <p className="muted analysis-reading-notice" role="note">{turn.answer.guidance_delivery.notice}</p>}
     {!turn.answer.citations?.length && turn.answer.evidence_refs.length>0 && <small className="muted">此历史解读尚无逐条引用，可重新分析材料以生成带来源角标的解读。</small>}
   </article>;
 }

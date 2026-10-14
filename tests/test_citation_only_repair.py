@@ -108,7 +108,9 @@ class CitationOnlyRepairTests(unittest.TestCase):
         bad={k:True for k in GuidanceQuality.model_fields if k not in {'issues','explanations'}}|{'issues':['未讲清楚'],'explanation_clear':False}
         result,call=self.execute([report(),{'repairs':[{'citation_index':1,'quote':None}]},bad])
         self.assertEqual(call.call_count,3)
-        self.assertEqual(result['error_code'],'REPORT_GUIDANCE_QUALITY_REJECTED')
+        self.assertEqual(result['status'],'completed')
+        self.assertEqual(result['draft']['patient_analysis']['text'],analysis()['text'])
+        self.assertEqual(result['usage_metadata']['guidance_delivery']['status'],'needs_improvement')
         self.assertEqual(sum(c.kwargs['workload'] in {'narrative','citation_repair'} for c in call.call_args_list),2)
 
     def test_citation_repair_has_small_output_budget_without_changing_report_budget(self):

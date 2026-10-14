@@ -1,6 +1,7 @@
 """Explanation quality review, separate from factual review and human blind scoring."""
 import json
 import re
+import requests
 from typing import Literal
 from pydantic import BaseModel,ConfigDict,Field
 
@@ -55,6 +56,23 @@ class GuidanceQuality(BaseModel):
     @property
     def accepted(self):
         return all(getattr(self,key) for key in type(self).model_fields if key not in {'issues','explanations'})
+
+
+def guidance_delivery(quality=None, *, unavailable_code=None):
+    """Reading quality is advisory; this never grants factual/clinical approval."""
+    if quality is not None:
+        if quality.accepted:
+            return {'status':'passed'}
+        return {'status':'needs_improvement',
+                'notice':'报告已生成，部分内容的解释仍可完善。你可以继续提问，让暖暖帮你逐项讲清楚。'}
+    return {'status':'unchecked',
+            'notice':'报告已生成，本次未完成阅读质量检查。你可以继续提问，让暖暖帮你把不清楚的地方讲明白。',
+            **({'error_code':unavailable_code} if unavailable_code else {})}
+
+
+def guidance_review_error(exc):
+    # Only safe classifications, never provider messages or patient text.
+    return 'GUIDANCE_QUALITY_TIMEOUT' if isinstance(exc,requests.Timeout) else 'GUIDANCE_QUALITY_UNAVAILABLE'
 
 
 class ExplanationChoice(BaseModel):

@@ -1,4 +1,4 @@
-import json,os,unittest
+import json,os,unittest,requests
 from unittest.mock import patch
 from services.api.app.guidance_context import care_priorities,select_guidance_knowledge
 from services.api.app.guidance_quality import GuidanceQuality,guidance_requirements,enforce_guidance_requirements
@@ -104,25 +104,55 @@ class GuidanceGenerationTests(unittest.TestCase):
 
     def run_report(self,responses):
         with patch.dict(os.environ,{'LLM_BASE_URL':'https://qianfan.baidubce.com/v2','LLM_API_KEY':'synthetic','LLM_MODEL_ID':'glm-5.3-flash'}), \
-             patch.object(OpenAiCompatibleExtractor,'_call',side_effect=[({'usage':{'total_tokens':10}},json.dumps(item)) for item in responses]) as call:
+             patch.object(OpenAiCompatibleExtractor,'_call',side_effect=[item if isinstance(item,Exception) else
+                 ({'usage':{'total_tokens':10}},json.dumps(item)) for item in responses]) as call:
             result=draft_report('诊断肺炎',[],None,analysis_sources=[{'document':'D1','page':0,'spans':[['S1','诊断肺炎']]}],
                                 care_priorities=[{'label':'EXP_TERMINOLOGY_BARRIER','status':'candidate_requires_confirmation'}])
         return result,call
 
-    def test_quality_review_repairs_insufficient_explanation_once_and_records_cost(self):
-        result,call=self.run_report([draft(),assessment(explanation_clear=False,issues=['没有解释术语']),
-                                    draft('本次记录为肺炎，术语的含义需要结合提供的知识说明。'),assessment()])
+    def test_quality_review_delivers_original_draft_and_records_cost_without_rewriting(self):
+        result,call=self.run_report([draft(),assessment(explanation_clear=False,issues=['没有解释术语'])])
         self.assertEqual(result['status'],'completed')
-        self.assertEqual(call.call_count,4)
-        self.assertEqual(result['usage_metadata']['total_tokens'],40)
-        self.assertEqual(len(result['usage_metadata']['guidance_quality_reviews']),2)
+        self.assertEqual(result['draft'],draft())
+        self.assertEqual(call.call_count,2)
+        self.assertEqual(result['usage_metadata']['total_tokens'],20)
+        self.assertEqual(len(result['usage_metadata']['guidance_quality_reviews']),1)
+        self.assertFalse(result['usage_metadata']['guidance_quality_reviews'][0]['accepted'])
+        self.assertEqual(result['usage_metadata']['guidance_delivery']['status'],'needs_improvement')
         self.assertEqual(call.call_args.kwargs['timeout'],(10,60))
 
-    def test_quality_failure_is_not_marked_as_completed(self):
+    def test_quality_failure_does_not_mark_report_as_failed(self):
         bad=assessment(recovery_actionable=False,issues=['只有笼统安慰，没有准备方向'])
-        result,_=self.run_report([draft(),bad,draft(),bad])
+        result,call=self.run_report([draft(),bad])
+        self.assertEqual(result['status'],'completed')
+        self.assertNotIn('error_code',result)
+        self.assertEqual(call.call_count,2)
+
+    def test_quality_timeout_bad_format_and_provider_error_preserve_the_valid_draft(self):
+        for issue in [requests.ReadTimeout('private provider content'),requests.HTTPError('private key'),
+                      {'not_the_quality_schema':True}]:
+            with self.subTest(issue=type(issue).__name__):
+                result,call=self.run_report([draft(),issue])
+                self.assertEqual(result['status'],'completed')
+                self.assertEqual(result['draft'],draft())
+                self.assertEqual(call.call_count,2)
+                self.assertEqual(result['usage_metadata']['guidance_delivery']['status'],'unchecked')
+                self.assertNotIn('private',json.dumps(result['usage_metadata']))
+
+    def test_exhausted_quality_budget_delivers_valid_draft_without_another_request(self):
+        with patch('services.api.app.report_llm.time.monotonic',side_effect=[0,0,0,0,235]):
+            result,call=self.run_report([draft()])
+        self.assertEqual(result['status'],'completed')
+        self.assertEqual(result['draft'],draft())
+        self.assertEqual(call.call_count,1)
+        self.assertEqual(result['usage_metadata']['guidance_delivery']['status'],'unchecked')
+
+    def test_unauthorized_sources_remain_a_real_failure_without_quality_approval(self):
+        bad=draft();bad['patient_analysis']['citations'][0]['source_refs']=['forged']
+        result,call=self.run_report([bad,bad])
         self.assertEqual(result['status'],'failed')
-        self.assertEqual(result['error_code'],'REPORT_GUIDANCE_QUALITY_REJECTED')
+        self.assertTrue(all(c.kwargs['workload']=='narrative' for c in call.call_args_list))
+        self.assertEqual(result['usage_metadata']['guidance_quality_reviews'],[])
 
     def test_optional_polishing_does_not_override_all_passing_quality_criteria(self):
         self.assertTrue(GuidanceQuality.model_validate(assessment(issues=['可选：进一步精简一句话'])).accepted)
