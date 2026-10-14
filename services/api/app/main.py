@@ -43,7 +43,7 @@ from .conversation_agent import CareTools, run_agent, ANALYSIS_PROMPT_VERSION
 from .material_report import get_material_report
 from . import accounts
 from .document_quality import inspect_photo
-from .tencent_ocr import TencentOcr
+from .ocr import create_ocr
 
 app = FastAPI(title="众安·暖愈智护", version="0.1.0")
 
@@ -315,7 +315,7 @@ async def inspect_material(file: Annotated[UploadFile, File()], subject_id: Anno
         if not data or len(data) > document_size_limit():
             raise HTTPException(status_code=413, detail='请选择非空且不超过 10 MB 的图片。')
         try:
-            result = await run_in_threadpool(inspect_photo, data, TencentOcr)
+            result = await run_in_threadpool(inspect_photo, data, create_ocr)
         except (ValueError, OSError) as exc:
             raise HTTPException(status_code=422, detail='图片无法读取，请重新选择有效图片。') from exc
         # Consent can be withdrawn while OCR is in flight.
