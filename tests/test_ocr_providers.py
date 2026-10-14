@@ -77,6 +77,7 @@ class OcrProviderTests(unittest.TestCase):
         _, kwargs = post.call_args
         self.assertEqual(parse_qs(kwargs['data'].decode())['filter_thresh'], ['0'])
         self.assertFalse(kwargs['allow_redirects'])
+        self.assertEqual(kwargs['timeout'],(90,30))
         self.assertIn('/cn-north-1/cv/request', kwargs['headers']['Authorization'])
         self.assertEqual(post.call_count, 1)
 
