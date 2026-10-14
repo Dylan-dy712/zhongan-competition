@@ -1,0 +1,24 @@
+[Unit]
+Description=Zhongan Competition Judge Account Entry
+After=network.target postgresql.service
+Requires=postgresql.service
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/zhongan-judge-demo
+Environment=PYTHONPATH=/home/ubuntu/zhongan-app
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=/home/ubuntu/.config/zhongan/database.env
+EnvironmentFile=/home/ubuntu/.config/zhongan/judge-demo.env
+ExecStart=/home/ubuntu/zhongan-app/.venv/bin/uvicorn app:app --app-dir /home/ubuntu/zhongan-judge-demo/services/judge_demo --host 127.0.0.1 --port 8010 --workers 2 --limit-concurrency 100
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+
+[Install]
+WantedBy=multi-user.target
