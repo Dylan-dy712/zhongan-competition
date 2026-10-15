@@ -1,3 +1,8 @@
+import type {MemorySettingsResponse,MemoryListResponse,MemoryCandidateCreate,MemoryCandidateResponse,MemoryConfirm,
+  ConversationMemoryResponse} from './api/generated/memory';
+export type {MemorySettingsResponse,MemoryListResponse,MemoryCandidateCreate,MemoryCandidateResponse,MemoryItemResponse,
+  ConversationMemoryResponse} from './api/generated/memory';
+
 import type { AssistantAnswer, Evidence, Report, Conversation, ChatSnapshot, ChatSubject, ChatTurn,
   DeliveryNotice, DeliveryReceipt, FeedbackType, FeedbackResult,
   RecommendationResponse } from "./types";
@@ -201,3 +206,19 @@ export const replaceChatDocument=(token:string,conversationId:string,documentId:
  const data=new FormData();data.append('file',file);
  return chatRequest<{document_id:string;source_ref:string}>(`/v1/conversations/${encodeURIComponent(conversationId)}/documents/${encodeURIComponent(documentId)}/replacement`,token,'POST',data);
 };
+
+export const getMemorySettings=(token:string,subject:string)=>chatRequest<MemorySettingsResponse>(`/v1/me/members/${encodeURIComponent(subject)}/memory-settings`,token);
+export const changeMemorySettings=(token:string,subject:string,enabled:boolean,version:number,key:string)=>
+  chatRequest<MemorySettingsResponse>(`/v1/me/members/${encodeURIComponent(subject)}/memory-settings`,token,'PATCH',{enabled,expected_version:version},key);
+export const listMemories=(token:string,subject:string)=>chatRequest<MemoryListResponse>(`/v1/me/members/${encodeURIComponent(subject)}/memories`,token);
+export const createMemoryCandidate=(token:string,subject:string,body:MemoryCandidateCreate)=>
+  chatRequest<MemoryCandidateResponse>(`/v1/me/members/${encodeURIComponent(subject)}/memory-candidates`,token,'POST',body);
+export const confirmMemoryCandidate=(token:string,subject:string,id:string,body:MemoryConfirm,key:string)=>
+  chatRequest(`/v1/me/members/${encodeURIComponent(subject)}/memory-candidates/${encodeURIComponent(id)}/confirm`,token,'POST',body,key);
+export const dismissMemoryCandidate=(token:string,subject:string,id:string,version:number)=>
+  chatRequest(`/v1/me/members/${encodeURIComponent(subject)}/memory-candidates/${encodeURIComponent(id)}`,token,'DELETE',{expected_version:version});
+export const revokeMemory=(token:string,subject:string,id:string,version:number)=>
+  chatRequest(`/v1/me/members/${encodeURIComponent(subject)}/memories/${encodeURIComponent(id)}`,token,'DELETE',{expected_version:version});
+export const getConversationMemorySettings=(token:string,id:string)=>chatRequest<ConversationMemoryResponse>(`/v1/conversations/${encodeURIComponent(id)}/memory-settings`,token);
+export const changeConversationMemorySettings=(token:string,id:string,read:boolean,exportEnabled:boolean,version:number,reportEnabled=false)=>
+  chatRequest<ConversationMemoryResponse>(`/v1/conversations/${encodeURIComponent(id)}/memory-settings`,token,'PATCH',{read_enabled:read,export_enabled:exportEnabled,report_enabled:reportEnabled,expected_version:version});

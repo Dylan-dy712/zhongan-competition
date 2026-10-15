@@ -12,7 +12,9 @@ class ReleaseVerificationTests(unittest.TestCase):
                 return SimpleNamespace(status_code=redirect_status,headers={'Location':'/#/claim'})
             if url.endswith('/health'):return SimpleNamespace(status_code=200,json=lambda:{'status':'ok'})
             if url.endswith('/openapi.json'):
-                paths={p:{} for p in ('/v1/auth/register','/v1/auth/login','/v1/auth/logout','/v1/me/consents')} if routes else {}
+                paths={p:{} for p in ('/v1/auth/register','/v1/auth/login','/v1/auth/logout','/v1/me/consents',
+                    '/v1/me/members/{subject_id}/memory-settings','/v1/conversations/{conversation_id}/memory-settings',
+                    '/v1/cases/{case_id}/reports/{version}/memory-sources')} if routes else {}
                 return SimpleNamespace(status_code=200,json=lambda:{'paths':paths})
             return SimpleNamespace(status_code=200,text=marker+'\n')
         return get

@@ -21,8 +21,10 @@ def check(base, revision):
         if response.status_code!=302 or target.path!='/' or target.fragment!='/claim':
             raise RuntimeError(f'{path}: expected unified redirect, received HTTP {response.status_code}, path={target.path!r}, fragment={target.fragment!r}')
     paths=get('/openapi.json').json()['paths']
-    if not all(path in paths for path in ('/v1/auth/register','/v1/auth/login','/v1/auth/logout','/v1/me/consents')):
-        raise RuntimeError('Account API routes missing')
+    if not all(path in paths for path in ('/v1/auth/register','/v1/auth/login','/v1/auth/logout','/v1/me/consents',
+        '/v1/me/members/{subject_id}/memory-settings','/v1/conversations/{conversation_id}/memory-settings',
+        '/v1/cases/{case_id}/reports/{version}/memory-sources')):
+        raise RuntimeError('Account or memory API routes missing')
 
 
 def main():

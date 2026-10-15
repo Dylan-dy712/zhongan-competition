@@ -2,7 +2,9 @@
 from typing import Literal
 from uuid import UUID
 
+from datetime import datetime
 from pydantic import Field
+from .contracts.memory import MemoryKind, MemoryField
 from .contracts.core import Contract
 from .report_builder import POLICY_VERSION
 from .report_llm import PROMPT_VERSION
@@ -22,6 +24,29 @@ class ChatContext(Contract):
     turns:list[UserTurn]=Field(max_length=12)
 
 
+class ReportMemoryItem(Contract):
+    memory_id:UUID
+    version:int=Field(ge=1)
+    kind:MemoryKind
+    field_key:MemoryField
+    scope:Literal['patient','case']
+    content:str=Field(min_length=2,max_length=1000)
+    source_turn_id:UUID
+    source_case_id:UUID
+    source_recorded_at:datetime
+    confirmed_at:datetime
+    expires_at:datetime | None
+    requires_reconciliation:bool=False
+
+
+class ReportMemoryContext(Contract):
+    actor_id:UUID
+    subject_id:UUID
+    conversation_id:UUID
+    settings_version:int=Field(ge=1)
+    items:list[ReportMemoryItem]=Field(min_length=1,max_length=5)
+
+
 class ContextSnapshot(Contract):
     version:Literal['care-context-v1']='care-context-v1'
     consent_id:UUID
@@ -30,10 +55,11 @@ class ContextSnapshot(Contract):
     prompt_version:str
     case_user_context:dict | None=None
     chat:ChatContext | None=None
+    memory:ReportMemoryContext | None=None
 
 
 def capture_context(conn,case_id,actor_id,conversation_id=None,turn_id=None):
-    scope=conn.execute("""SELECT c.user_context,c.consent_id,co.version FROM cases c
+    scope=conn.execute("""SELECT c.user_context,c.consent_id,c.subject_id,co.version FROM cases c
         JOIN consents co ON co.consent_id=c.consent_id AND co.subject_id=c.subject_id
         WHERE c.case_id=%s FOR SHARE OF c,co""",(case_id,)).fetchone()
     if not scope:
@@ -56,9 +82,14 @@ def capture_context(conn,case_id,actor_id,conversation_id=None,turn_id=None):
             chat=ChatContext(conversation_id=conversation_id,actor_id=actor_id,
                 sharing_version=current['report_context_version'],anchor_turn_id=turn_id,truncated=len(rows)>12,
                 turns=[UserTurn(turn_id=row['turn_id'],text=row['question']) for row in reversed(rows[:12])])
-    return ContextSnapshot(consent_id=scope['consent_id'],consent_version=scope['version'],
+    from .report_memory import capture
+    memory=capture(conn,actor_id,scope['subject_id'],conversation_id)
+    result=ContextSnapshot(consent_id=scope['consent_id'],consent_version=scope['version'],
         policy_version=POLICY_VERSION,prompt_version=PROMPT_VERSION,case_user_context=scope['user_context'],
-        chat=chat).model_dump(mode='json')
+        chat=chat,memory=memory).model_dump(mode='json')
+    if result['memory'] is None:
+        result.pop('memory')
+    return result
 
 
 def context_sources(conn,run,*,lock=False):
@@ -68,6 +99,9 @@ def context_sources(conn,run,*,lock=False):
         row=conn.execute('SELECT user_context FROM cases WHERE case_id=%s',(run['case_id'],)).fetchone()
         return {'case:user_context':str(row['user_context'])} if row and row['user_context'] else {}
     snap=ContextSnapshot.model_validate(raw)
+    if lock:
+        from .report_memory import lock_snapshot
+        lock_snapshot(conn,raw)
     if snap.policy_version!=POLICY_VERSION:
         raise ValueError('report context policy changed; regenerate')
     scope=conn.execute("""SELECT 1 FROM cases c JOIN consents co ON co.consent_id=c.consent_id AND co.subject_id=c.subject_id
@@ -78,6 +112,8 @@ def context_sources(conn,run,*,lock=False):
     if not scope:
         raise ValueError('REPORT_CONTEXT_UNAUTHORIZED')
     sources={'case:user_context':str(snap.case_user_context)} if snap.case_user_context else {}
+    from .report_memory import sources as memory_sources
+    sources.update(memory_sources(conn,run['case_id'],snap.memory,lock=lock))
     if snap.chat:
         chat=snap.chat
         allowed=conn.execute("""SELECT 1 FROM conversations v JOIN cases c ON c.case_id=v.case_id

@@ -21,8 +21,9 @@ AUTHORIZED = """ FROM conversations v JOIN cases c ON c.case_id=v.case_id
     WHERE v.actor_id=%s """
 
 
-def require_conversation(conn, actor_id, conversation_id):
-    row = conn.execute("SELECT v.*,c.subject_id" + AUTHORIZED + " AND v.conversation_id=%s",
+def require_conversation(conn, actor_id, conversation_id, *, locked=False):
+    row = conn.execute("SELECT v.*,c.subject_id" + AUTHORIZED + " AND v.conversation_id=%s" +
+                       (" FOR SHARE OF v,ac,a,p" if locked else ""),
                        (actor_id, conversation_id)).fetchone()
     if not row:
         raise AccessDenied()
@@ -57,7 +58,7 @@ def available_subjects(conn, actor_id):
         ORDER BY co.created_at DESC""", (actor_id,)).fetchall()
 
 
-def create_conversation(conn, actor_id, conversation_id, case_id=None, subject_id=None, recall_enabled=True):
+def create_conversation(conn, actor_id, conversation_id, case_id=None, subject_id=None, recall_enabled=False):
     with conn.transaction():
         conn.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s,0))", (str(conversation_id),))
         old = conn.execute("SELECT * FROM conversations WHERE conversation_id=%s", (conversation_id,)).fetchone()
@@ -68,7 +69,8 @@ def create_conversation(conn, actor_id, conversation_id, case_id=None, subject_i
                 raise IdempotencyConflict()
             return found
         if case_id:
-            if not get_case(conn, actor_id=actor_id, case_id=case_id):
+            selected_case = get_case(conn, actor_id=actor_id, case_id=case_id)
+            if not selected_case or (subject_id and selected_case.subject_id != subject_id):
                 raise AccessDenied()
         else:
             choices = available_subjects(conn, actor_id)
@@ -89,18 +91,28 @@ def create_conversation(conn, actor_id, conversation_id, case_id=None, subject_i
 def get_turns(conn, actor_id, conversation_id, before=None):
     require_conversation(conn, actor_id, conversation_id)
     # A cursor lets the UI recover ALL history, without an unbounded response.
-    return conn.execute("""SELECT * FROM (SELECT turn_id,request_id,question,input_kind,attachments,
+    rows = conn.execute("""SELECT * FROM (SELECT turn_id,request_id,question,input_kind,attachments,
         CASE WHEN status='running' AND lease_expires_at<=now() THEN 'failed' ELSE status END AS status,
         answer,tool_events,error_code,created_at,finished_at FROM conversation_turns
         WHERE conversation_id=%s AND (%s::uuid IS NULL OR (created_at,turn_id)<
           (SELECT created_at,turn_id FROM conversation_turns WHERE conversation_id=%s AND turn_id=%s))
         ORDER BY created_at DESC,turn_id DESC LIMIT 50) t ORDER BY created_at,turn_id""",
         (conversation_id, before, conversation_id, before)).fetchall()
+    from .memory_repository import references_available, history_references_available
+    for row in rows:
+        refs = (row.get('answer') or {}).get('memory_refs') or []
+        history_refs = (row.get('answer') or {}).get('history_source_refs') or []
+        if not references_available(conn, actor_id, conversation_id, refs, strict_epoch=False) or not history_references_available(conn, actor_id, conversation_id, history_refs, strict_epoch=False):
+            row['answer'] = {'text': '这条回答引用的历史记忆已变化，请重新提问。',
+                             'evidence_refs': [], 'history_refs': [], 'memory_unavailable': True}
+    return rows
 
 
 def begin_turn(conn, actor_id, conversation_id, request_id, question, document_ids, input_kind='user', attachment_ids=()):
     with conn.transaction():
         conversation = require_conversation(conn, actor_id, conversation_id)
+        from .memory_repository import lock_scope
+        lock_scope(conn, actor_id, conversation['subject_id'])
         conn.execute("SELECT conversation_id FROM conversations WHERE conversation_id=%s FOR UPDATE", (conversation_id,))
         attachments = []
         for document_id in document_ids:
@@ -120,6 +132,10 @@ def begin_turn(conn, actor_id, conversation_id, request_id, question, document_i
         if old and (old['question'] != question or old['attachments'] != attachments or old['input_kind'] != input_kind):
             raise IdempotencyConflict()
         if old and old['status'] == 'completed':
+            from .memory_repository import references_available, history_references_available, MemoryChanged
+            if (not references_available(conn, actor_id, conversation_id, (old.get('answer') or {}).get('memory_refs') or [], strict_epoch=False)
+                    or not history_references_available(conn, actor_id, conversation_id, (old.get('answer') or {}).get('history_source_refs') or [], strict_epoch=False)):
+                raise MemoryChanged()
             return old
         busy = conn.execute("""SELECT 1 FROM conversation_turns WHERE conversation_id=%s
             AND status='running' AND lease_expires_at>now()""", (conversation_id,)).fetchone()
@@ -144,7 +160,17 @@ def begin_turn(conn, actor_id, conversation_id, request_id, question, document_i
 
 def finish_turn(conn, actor_id, conversation_id, turn, answer=None, events=None, error=None):
     with conn.transaction():
-        require_conversation(conn, actor_id, conversation_id)
+        current = require_conversation(conn, actor_id, conversation_id)
+        from .memory_repository import lock_scope
+        lock_scope(conn, actor_id, current['subject_id'])
+        require_conversation(conn, actor_id, conversation_id, locked=True)
+        if answer and answer.get('memory_suggestions'):
+            from .memory_service import suggestions_allowed
+            if not suggestions_allowed(conn, actor_id, conversation_id):
+                answer = {**answer, 'memory_suggestions': []}
+        if answer and (answer.get('memory_refs') or answer.get('history_source_refs')):
+            from .memory_service import persist_refs
+            persist_refs(conn, actor_id, conversation_id, turn['turn_id'], answer.get('memory_refs') or [], answer.get('history_source_refs') or [])
         if answer and answer.get('patient_updates'):
             # Store the self-report atomically with its successful source turn;
             # retries cannot create duplicate profile entries or partial writes.
@@ -159,6 +185,9 @@ def finish_turn(conn, actor_id, conversation_id, turn, answer=None, events=None,
         if not row:
             raise TurnBusy()
         conn.execute('UPDATE conversations SET updated_at=now() WHERE conversation_id=%s', (conversation_id,))
+        if answer and not error:
+            from .memory_service import propose_from_answer
+            propose_from_answer(conn, actor_id, conversation_id, turn, answer)
         if not error:
             try:
                 from .conversation_titles import enqueue
@@ -170,7 +199,7 @@ def finish_turn(conn, actor_id, conversation_id, turn, answer=None, events=None,
 
 
 def get_patient_context(conn, actor_id, conversation_id):
-    """Project a bounded profile from source turns, respecting live recall/consent.
+    """Project current-session statements; cross-session facts use confirmed memory.
 
     Keeping statements on their original turn also avoids a second store that
     could outlive a revoked consent or a disabled conversation recall setting.
@@ -180,11 +209,11 @@ def get_patient_context(conn, actor_id, conversation_id):
         t.created_at,v.case_id """ + AUTHORIZED.replace(' WHERE v.actor_id=%s',
         ' JOIN conversation_turns t ON t.conversation_id=v.conversation_id WHERE v.actor_id=%s') + """
         AND c.subject_id=%s AND t.status='completed' AND t.input_kind='user'
-        AND (v.conversation_id=%s OR (%s AND v.recall_enabled=true))
+        AND v.conversation_id=%s
         AND jsonb_typeof(t.answer->'patient_updates')='array'
         AND t.answer->'patient_updates'<>'[]'::jsonb
         ORDER BY t.created_at DESC,t.turn_id DESC LIMIT 20""",
-        (actor_id, current['subject_id'], conversation_id, current['recall_enabled'])).fetchall()
+        (actor_id, current['subject_id'], conversation_id)).fetchall()
     context, seen, size = [], set(), 0
     for row in rows:
         updates = source_patient_updates([PatientUpdate.model_validate(item) for item in row['updates']], row['question'])
@@ -204,14 +233,21 @@ def get_patient_context(conn, actor_id, conversation_id):
 
 def search_history(conn, actor_id, conversation_id, query):
     current = require_conversation(conn, actor_id, conversation_id)
-    if not current['recall_enabled']:
+    from .memory_repository import settings, lock_scope, memory_consent_version
+    lock_scope(conn, actor_id, current['subject_id'])
+    state = settings(conn, actor_id, current['subject_id'])
+    if not current['recall_enabled'] or not state['enabled']:
         return {'status': 'disabled', 'messages': []}
     pattern = '%' + query.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_') + '%'
-    rows = conn.execute("""SELECT t.turn_id,t.question,t.answer,t.created_at,v.title,v.case_id
+    rows = conn.execute("""SELECT t.turn_id,t.question,t.answer,t.created_at,v.title,v.case_id,co.version AS consent_version,v.memory_settings_version AS source_version
         """ + AUTHORIZED.replace(' WHERE v.actor_id=%s',
-        " JOIN conversation_turns t ON t.conversation_id=v.conversation_id WHERE v.actor_id=%s") + """
-        AND c.subject_id=%s AND v.recall_enabled=true AND t.status='completed'
+        " JOIN conversation_turns t ON t.conversation_id=v.conversation_id JOIN consents co ON co.consent_id=c.consent_id WHERE v.actor_id=%s") + """
+        AND c.subject_id=%s AND v.memory_export_enabled=true AND t.status='completed'
+        AND co.subject_id=c.subject_id
+        AND COALESCE(t.answer->'memory_refs','[]'::jsonb)='[]'::jsonb
+        AND COALESCE(t.answer->'history_source_refs','[]'::jsonb)='[]'::jsonb
         AND (t.question ILIKE %s OR t.answer->>'text' ILIKE %s)
         ORDER BY t.created_at DESC LIMIT 12""", (actor_id, current['subject_id'], pattern, pattern)).fetchall()
-    return {'status': 'found' if rows else 'empty', 'messages': rows,
+    return {'status': 'found' if rows else 'empty', 'messages': rows, 'policy_epoch': state['epoch'],
+            'memory_consent_version': memory_consent_version(conn, actor_id, current['subject_id']),
             'notice': '历史自述和回答不是新的医学证据，须核对原始材料和最新报告。'}

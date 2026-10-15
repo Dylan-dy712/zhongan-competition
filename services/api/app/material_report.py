@@ -23,6 +23,9 @@ def build_material_sections(report, evidence, sources, structured_dates=None):
         items, seen = [], set()
         pending = 0
         for claim in section.claims:
+            if any(ref.startswith('memory:') for ref in claim.source_refs):
+                pending += 1
+                continue  # Private historical statements never become checked medical material.
             if claim.review_status == 'not_required' and claim.claim_type in {'case_fact', 'patient_statement'}:
                 items.append({'text': claim.text, 'kind': 'checked',
                               'evidence_refs': [str(x) for x in claim.evidence_refs]})
@@ -65,7 +68,7 @@ def get_material_report(conn, actor_id, conversation_id):
     consent = conn.execute('SELECT c.consent_id,co.version FROM cases c JOIN consents co ON co.consent_id=c.consent_id WHERE c.case_id=%s',
                            (case_id,)).fetchone()
     refs = report['consent_refs']
-    if (report['policy_version'] != POLICY_VERSION or report['memory_refs'] or len(refs) != 1
+    if (report['policy_version'] != POLICY_VERSION or len(refs) != 1
             or refs[0]['consent_id'] != str(consent['consent_id']) or refs[0]['version'] != consent['version']
             or refs[0]['purpose'] != 'case_guidance'):
         return {'status': 'outdated'}
@@ -77,9 +80,14 @@ def get_material_report(conn, actor_id, conversation_id):
             or report['input_hash'] != run['input_hash']):
         return {'status': 'outdated'}
     try:
+        memory=(run.get('context_snapshot') or {}).get('memory')
+        if memory and str(actor_id)!=memory['actor_id']:
+            return {'status':'unavailable'}
+        from .report_memory import check_report_refs
+        check_report_refs(conn,run,report['memory_refs'])
         sources = context_sources(conn, run)
     except ValueError:
-        return {'status': 'outdated'}
+        return {'status': 'outdated','notice':'报告引用的历史来源或授权已变化，请重新生成报告。'}
     evidence = {str(e['evidence_id']): e['text_value'] or '' for e in conn.execute(
         'SELECT evidence_id,text_value FROM evidence WHERE case_id=%s AND run_id=%s',
         (case_id, run['run_id'])).fetchall()}

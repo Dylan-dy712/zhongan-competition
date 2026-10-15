@@ -7,6 +7,7 @@ import {replaceChatDocument} from './api';
 import AnalysisFlow,{analysisView,type UploadProgress} from './AnalysisFlow';
 import AnalysisNarrative,{currentNarrative} from './AnalysisNarrative';
 import ChatFollowups from './ChatFollowups';
+import {PatientMemory} from './PatientMemory';
 import MedicalServiceCards from './MedicalServices';
 import type {ChatSnapshot, ChatSubject, ChatTurn, Conversation, Evidence, ToolEvent, DeliveryNotice, FeedbackType,ReportSection} from './types';
 import {CareReport,EvidencePanel,brand} from './CarePages';
@@ -65,6 +66,7 @@ function UploadSourceIcon({kind}:{kind:'image'|'document'}) {
 }
 
 export default function App() {
+  const [memoryPanel,setMemoryPanel]=useState<{conversationId:string;subjectId:string;sourceTurn?:ChatTurn}>();
   const [token,setToken] = useState(()=>sessionStorage.getItem('zhongan_chat_token') || '');
   const [connected,setConnected] = useState(false);
   const [conversations,setConversations] = useState<Conversation[]>([]);
@@ -657,15 +659,17 @@ export default function App() {
       : <><main className="chat-scroll inline-report-thread"><OriginalChatWelcome/>
         {(snapshot.analysis.run_id || analysisSubmitting || uploadProgress || analysisError) && !narrative && <button className="analysis-card" onClick={()=>setAnalysisOpen(true)}><span className="analysis-card-icon" aria-hidden="true">✦</span><span className="analysis-card-copy"><strong>{progressView.title}</strong><small>{`${progressView.detail}${progressView.percent!==null?` · ${progressView.percent}%`:''}`}</small></span><span className="analysis-card-arrow" aria-hidden="true">›</span></button>}
         {hasOlder && turns.length>0 && <button className="load-history" onClick={()=>void loadOlder()}>查看更早的聊天</button>}
-        <div className="nuan-chat-heading"><span><DemoIcon name="chat"/>和暖暖聊聊</span><small>有疑问，接着问</small></div>
+        <div className="nuan-chat-heading"><span><DemoIcon name="chat"/>和暖暖聊聊</span><button className="memory-open" onClick={()=>setMemoryPanel({conversationId:snapshot.conversation.conversation_id,subjectId:snapshot.conversation.subject_id})}>本对话的关怀记忆</button><small>有疑问，接着问</small></div>
         <div className="messages">{turns.length===0 && <div className="message-row assistant"><div className="avatar">✦</div><div className="message-bubble"><div className="nuan-reply-label"><DemoIcon name="leaf"/>暖暖</div><p>你好，我是暖暖。你可以从最想说的事情聊起，不用一下子把所有事情讲清楚。如果有看不懂的病历或发票，我也会陪你一点点看。</p></div></div>}
           {turns.map(t=><div className="chat-turn" key={t.turn_id} id={`turn-${t.turn_id}`}>
             {t.input_kind==='analysis_ready' ? <p className="analysis-continuation">材料已整理 · 暖暖为你解读</p> : isClaimSubmission(t) ? <p className="analysis-continuation">材料已提交 · 暖暖为你整理</p> : <div className="message-row user"><div className="message-bubble"><p>{t.question}</p>
-            {sentMessages.find(item=>item.turn.request_id===t.request_id)?.files.length ? <ChatSentAttachments files={sentMessages.find(item=>item.turn.request_id===t.request_id)!.files}/> : t.attachments.map(a=><span className="attachment" key={a.document_id}>▤ {a.name}</span>)}</div></div>}
+            {sentMessages.find(item=>item.turn.request_id===t.request_id)?.files.length ? <ChatSentAttachments files={sentMessages.find(item=>item.turn.request_id===t.request_id)!.files}/> : t.attachments.map(a=><span className="attachment" key={a.document_id}>▤ {a.name}</span>)}{t.status==='completed'&&<button className="memory-open" onClick={()=>setMemoryPanel({conversationId:snapshot.conversation.conversation_id,subjectId:snapshot.conversation.subject_id,sourceTurn:t})}>选择这条消息作为记忆来源</button>}</div></div>}
             <div className="message-row assistant"><span className="nuan-avatar" aria-hidden="true">✦</span><div className={`message-bubble ${t.input_kind==='analysis_ready'?'narrative-bubble':''}`}><div className="nuan-reply-label"><DemoIcon name="leaf"/>暖暖{t.input_kind==='analysis_ready' && <span>· 材料解读</span>}</div>{t.input_kind!=='analysis_ready' && <ToolActivity events={t.tool_events}/>}
               {t.answer ? <>{t.input_kind==='analysis_ready'?<AnalysisNarrative turn={t} onEvidence={id=>void showEvidence(id)} onServiceAsk={message=>send(undefined,message)} disabled={working}/>:<><p><CitedText text={t.answer.text} citations={t.answer.citations} sources={t.answer.knowledge_sources} onEvidence={id=>void showEvidence(id)}/></p></>}
 
                 {t.answer.medical_services&&<MedicalServiceCards services={t.answer.medical_services} onAsk={message=>send(undefined,message)} disabled={working} canAskForLocation={t.turn_id===latestAnswered}/>}
+                {!!t.answer.memory_refs?.length&&<small className="memory-used">本轮提供了 {t.answer.memory_refs.length} 条该就诊人允许使用的记忆作为背景</small>}
+                {t.answer.memory_status==='retrieval_unavailable'&&<small className="memory-used">本轮历史记忆检索暂不可用</small>}
                 {t.answer.history_refs.length>0 && <small className="history-reference">参考了 {t.answer.history_refs.length} 条你允许回忆的历史记录</small>}
                 {!!t.answer.patient_updates?.length&&<small className="patient-update-notice">已记录你的补充 · 作为用户自述供后续交流参考</small>}
                 {t.status==='completed'&&t.turn_id===latestAnswered&&<ChatFollowups answer={t.answer} disabled={working} onSend={message=>send(undefined,message)}/>}</>
@@ -697,6 +701,7 @@ export default function App() {
         <button aria-current={['account','records'].includes(panel)?'page':undefined} onClick={()=>setPanel('account')}><DemoIcon name="user"/>我的</button>
         </nav>}
     </section>
+    {connected && memoryPanel && snapshot?.conversation.conversation_id===memoryPanel.conversationId && snapshot.conversation.subject_id===memoryPanel.subjectId && <PatientMemory key={`${token}:${memoryPanel.subjectId}:${memoryPanel.conversationId}`} token={token} subjectId={memoryPanel.subjectId} name={members.find(member=>member.subject_id===memoryPanel.subjectId)?.name||'当前就诊人'} conversationId={memoryPanel.conversationId} sourceTurn={memoryPanel.sourceTurn} onClose={()=>setMemoryPanel(undefined)}/>}
     {connected && consentMember && members.find(m=>m.subject_id===consentMember) && <MemberConsentDialog key={consentMember} token={token} member={members.find(m=>m.subject_id===consentMember)!} onClose={()=>{setConsentMember(undefined);pendingReportMember.current='';}} onChanged={refreshAccess}/>}
     {connected && !needsProfile && memberPicker && <MemberPicker members={members} title={memberPicker==='report'?'选择解读报告所属人员':memberPicker==='claim'?'选择就医资料所属人员':'选择对话所属人员'} onSelect={chooseBusinessMember} onClose={()=>setMemberPicker(undefined)}/>}
     {connected&&snapshot&&reportUploadConversation===snapshot.conversation.conversation_id&&<ReportUploadDialog person={members.find(member=>member.subject_id===snapshot.conversation.subject_id)?.name||'当前人员'} onClose={()=>setReportUploadConversation('')} onSubmit={files=>{

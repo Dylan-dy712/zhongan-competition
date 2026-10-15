@@ -1,4 +1,5 @@
 import {useEffect,useState} from 'react';
+import {PatientMemory} from './PatientMemory';
 import {getConversation,getEvidence,listMedicalRecords,type MemberResponse} from './api';
 import {encounterSummary,type EncounterSummary} from './encounterSummary';
 import {DemoIcon} from './DemoPages';
@@ -18,6 +19,7 @@ export default function AccountPage({token,members,member,onSelect,onSaved,onRec
   const [retry,setRetry]=useState(0);
   const [mode,setMode]=useState<'switch'|'manage'|'add'|'edit'>();
   const [editing,setEditing]=useState<MemberResponse>();
+  const [memoryOpen,setMemoryOpen]=useState(false);
   useEffect(()=>{let active=true;setLoading(true);setSummary(undefined);setRecords([]);setError('');
     setRecordGroup(undefined);
     listMedicalRecords(token,member.subject_id).then(async result=>{
@@ -61,7 +63,9 @@ export default function AccountPage({token,members,member,onSelect,onSaved,onRec
         <p className="member-visit-saved">{recordGroup?`已汇集 ${recordGroup.cases.length} 批资料 · ${recordGroup.conversation_count} 段对话`:`已保存 ${recent.items.length} 段对话`}{!summary?.diagnosis?' · 疾病信息待材料确认':''}</p>
         <button className="records-detail-action" onClick={()=>onRecords(recordGroup?.record_id||recent.case_id)}>查看详情<DemoIcon name="arrow"/></button></>:<><h3>还没有就医记录</h3><p>为 {member.name} 整理材料，后续资料和对话会留在这里。</p><button className="records-detail-action" onClick={onNew}>整理就医材料<DemoIcon name="arrow"/></button></>}
     </section>
+    <section className="records-detail-card"><h2>关怀记忆</h2><p>管理为 {member.name} 确认保存的偏好与背景，与其他家人分开。</p><button className="records-detail-action" onClick={()=>setMemoryOpen(true)}>查看与管理记忆<DemoIcon name="arrow"/></button></section>
     <button className="member-logout" onClick={()=>void onLogout()}>退出登录</button>
+    {memoryOpen&&<PatientMemory key={`${token}:${member.subject_id}`} token={token} subjectId={member.subject_id} name={member.name} onClose={()=>setMemoryOpen(false)}/>}
     {mode==='switch'&&<MemberPicker members={members} currentId={member.subject_id} title="切换查看人员" onClose={()=>setMode(undefined)} onSelect={id=>{onSelect(id);setMode(undefined);}} onAdd={()=>setMode('add')}/>}
     {mode==='manage'&&<MemberDialog title="管理家庭成员" onClose={()=>setMode(undefined)}><div className="member-picker-heading"><h2>管理家庭成员</h2><p>点击成员编辑资料</p></div><MemberList members={members} editing onSelect={id=>{setEditing(members.find(value=>value.subject_id===id));setMode('edit');}}/><button className="member-add" onClick={()=>setMode('add')}>添加家人</button></MemberDialog>}
     {(mode==='add'||mode==='edit')&&<MemberDialog title={mode==='add'?'添加家人':'编辑人员资料'} onClose={()=>setMode(undefined)}><MemberEditor key={mode==='add'?'new':editing?.subject_id} token={token} member={mode==='edit'?editing:undefined} onSaved={saved} onCancel={()=>setMode(undefined)}/></MemberDialog>}

@@ -1,0 +1,624 @@
+{
+  "MemoryCandidateCreate": {
+    "additionalProperties": false,
+    "properties": {
+      "kind": {
+        "enum": [
+          "communication_preference",
+          "confirmed_context"
+        ],
+        "title": "Kind",
+        "type": "string"
+      },
+      "field_key": {
+        "enum": [
+          "communication_style",
+          "care_preference",
+          "followup_time",
+          "followup_location",
+          "medication",
+          "allergy",
+          "recovery_status"
+        ],
+        "title": "Field Key",
+        "type": "string"
+      },
+      "content": {
+        "maxLength": 1000,
+        "minLength": 2,
+        "title": "Content",
+        "type": "string"
+      },
+      "source_turn_id": {
+        "format": "uuid",
+        "title": "Source Turn Id",
+        "type": "string"
+      },
+      "scope": {
+        "default": "case",
+        "enum": [
+          "patient",
+          "case"
+        ],
+        "title": "Scope",
+        "type": "string"
+      },
+      "expires_at": {
+        "anyOf": [
+          {
+            "format": "date-time",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expires At"
+      }
+    },
+    "required": [
+      "kind",
+      "field_key",
+      "content",
+      "source_turn_id"
+    ],
+    "title": "MemoryCandidateCreate",
+    "type": "object"
+  },
+  "MemoryConfirm": {
+    "additionalProperties": false,
+    "properties": {
+      "confirmation": {
+        "const": true,
+        "title": "Confirmation",
+        "type": "boolean"
+      },
+      "expected_version": {
+        "minimum": 1,
+        "title": "Expected Version",
+        "type": "integer"
+      },
+      "replaces_memory_id": {
+        "anyOf": [
+          {
+            "format": "uuid",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Replaces Memory Id"
+      },
+      "replaces_version": {
+        "anyOf": [
+          {
+            "minimum": 1,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Replaces Version"
+      }
+    },
+    "required": [
+      "confirmation",
+      "expected_version"
+    ],
+    "title": "MemoryConfirm",
+    "type": "object"
+  },
+  "MemoryRevoke": {
+    "additionalProperties": false,
+    "properties": {
+      "expected_version": {
+        "minimum": 1,
+        "title": "Expected Version",
+        "type": "integer"
+      }
+    },
+    "required": [
+      "expected_version"
+    ],
+    "title": "MemoryRevoke",
+    "type": "object"
+  },
+  "MemoryConsentChange": {
+    "additionalProperties": false,
+    "properties": {
+      "enabled": {
+        "title": "Enabled",
+        "type": "boolean"
+      },
+      "expected_version": {
+        "minimum": 0,
+        "title": "Expected Version",
+        "type": "integer"
+      }
+    },
+    "required": [
+      "enabled",
+      "expected_version"
+    ],
+    "title": "MemoryConsentChange",
+    "type": "object"
+  },
+  "ConversationMemoryChange": {
+    "additionalProperties": false,
+    "properties": {
+      "read_enabled": {
+        "title": "Read Enabled",
+        "type": "boolean"
+      },
+      "export_enabled": {
+        "title": "Export Enabled",
+        "type": "boolean"
+      },
+      "report_enabled": {
+        "default": false,
+        "title": "Report Enabled",
+        "type": "boolean"
+      },
+      "expected_version": {
+        "minimum": 0,
+        "title": "Expected Version",
+        "type": "integer"
+      }
+    },
+    "required": [
+      "read_enabled",
+      "export_enabled",
+      "expected_version"
+    ],
+    "title": "ConversationMemoryChange",
+    "type": "object"
+  },
+  "MemorySettingsResponse": {
+    "additionalProperties": false,
+    "properties": {
+      "subject_id": {
+        "format": "uuid",
+        "title": "Subject Id",
+        "type": "string"
+      },
+      "enabled": {
+        "title": "Enabled",
+        "type": "boolean"
+      },
+      "version": {
+        "title": "Version",
+        "type": "integer"
+      },
+      "epoch": {
+        "title": "Epoch",
+        "type": "integer"
+      },
+      "purpose": {
+        "const": "continuous_care_memory",
+        "default": "continuous_care_memory",
+        "title": "Purpose",
+        "type": "string"
+      }
+    },
+    "required": [
+      "subject_id",
+      "enabled",
+      "version",
+      "epoch"
+    ],
+    "title": "MemorySettingsResponse",
+    "type": "object"
+  },
+  "MemoryListResponse": {
+    "$defs": {
+      "MemoryCandidateResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "candidate_id": {
+            "format": "uuid",
+            "title": "Candidate Id",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          },
+          "kind": {
+            "enum": [
+              "communication_preference",
+              "confirmed_context"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "field_key": {
+            "enum": [
+              "communication_style",
+              "care_preference",
+              "followup_time",
+              "followup_location",
+              "medication",
+              "allergy",
+              "recovery_status"
+            ],
+            "title": "Field Key",
+            "type": "string"
+          },
+          "content": {
+            "title": "Content",
+            "type": "string"
+          },
+          "scope": {
+            "enum": [
+              "patient",
+              "case"
+            ],
+            "title": "Scope",
+            "type": "string"
+          },
+          "case_id": {
+            "format": "uuid",
+            "title": "Case Id",
+            "type": "string"
+          },
+          "source_turn_id": {
+            "format": "uuid",
+            "title": "Source Turn Id",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          }
+        },
+        "required": [
+          "candidate_id",
+          "version",
+          "kind",
+          "field_key",
+          "content",
+          "scope",
+          "case_id",
+          "source_turn_id",
+          "status",
+          "expires_at"
+        ],
+        "title": "MemoryCandidateResponse",
+        "type": "object"
+      },
+      "MemoryItemResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "memory_id": {
+            "format": "uuid",
+            "title": "Memory Id",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          },
+          "kind": {
+            "enum": [
+              "communication_preference",
+              "confirmed_context"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "field_key": {
+            "enum": [
+              "communication_style",
+              "care_preference",
+              "followup_time",
+              "followup_location",
+              "medication",
+              "allergy",
+              "recovery_status"
+            ],
+            "title": "Field Key",
+            "type": "string"
+          },
+          "content": {
+            "title": "Content",
+            "type": "string"
+          },
+          "scope": {
+            "enum": [
+              "patient",
+              "case"
+            ],
+            "title": "Scope",
+            "type": "string"
+          },
+          "source_case_id": {
+            "format": "uuid",
+            "title": "Source Case Id",
+            "type": "string"
+          },
+          "source_turn_id": {
+            "format": "uuid",
+            "title": "Source Turn Id",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          },
+          "confirmed_at": {
+            "format": "date-time",
+            "title": "Confirmed At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "memory_id",
+          "version",
+          "kind",
+          "field_key",
+          "content",
+          "scope",
+          "source_case_id",
+          "source_turn_id",
+          "status",
+          "expires_at",
+          "confirmed_at"
+        ],
+        "title": "MemoryItemResponse",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "memories": {
+        "items": {
+          "$ref": "#/$defs/MemoryItemResponse"
+        },
+        "title": "Memories",
+        "type": "array"
+      },
+      "candidates": {
+        "items": {
+          "$ref": "#/$defs/MemoryCandidateResponse"
+        },
+        "title": "Candidates",
+        "type": "array"
+      }
+    },
+    "required": [
+      "memories",
+      "candidates"
+    ],
+    "title": "MemoryListResponse",
+    "type": "object"
+  },
+  "MemoryReference": {
+    "additionalProperties": false,
+    "properties": {
+      "memory_id": {
+        "format": "uuid",
+        "title": "Memory Id",
+        "type": "string"
+      },
+      "version": {
+        "title": "Version",
+        "type": "integer"
+      },
+      "epoch": {
+        "title": "Epoch",
+        "type": "integer"
+      }
+    },
+    "required": [
+      "memory_id",
+      "version",
+      "epoch"
+    ],
+    "title": "MemoryReference",
+    "type": "object"
+  },
+  "ConversationMemoryResponse": {
+    "additionalProperties": false,
+    "properties": {
+      "read_enabled": {
+        "title": "Read Enabled",
+        "type": "boolean"
+      },
+      "export_enabled": {
+        "title": "Export Enabled",
+        "type": "boolean"
+      },
+      "report_enabled": {
+        "title": "Report Enabled",
+        "type": "boolean"
+      },
+      "version": {
+        "title": "Version",
+        "type": "integer"
+      }
+    },
+    "required": [
+      "read_enabled",
+      "export_enabled",
+      "report_enabled",
+      "version"
+    ],
+    "title": "ConversationMemoryResponse",
+    "type": "object"
+  },
+  "ReportMemorySourcesResponse": {
+    "$defs": {
+      "ReportMemorySourceResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "source_ref": {
+            "title": "Source Ref",
+            "type": "string"
+          },
+          "memory_id": {
+            "format": "uuid",
+            "title": "Memory Id",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          },
+          "kind": {
+            "enum": [
+              "communication_preference",
+              "confirmed_context"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "field_key": {
+            "enum": [
+              "communication_style",
+              "care_preference",
+              "followup_time",
+              "followup_location",
+              "medication",
+              "allergy",
+              "recovery_status"
+            ],
+            "title": "Field Key",
+            "type": "string"
+          },
+          "content": {
+            "title": "Content",
+            "type": "string"
+          },
+          "scope": {
+            "enum": [
+              "patient",
+              "case"
+            ],
+            "title": "Scope",
+            "type": "string"
+          },
+          "source_case_id": {
+            "format": "uuid",
+            "title": "Source Case Id",
+            "type": "string"
+          },
+          "source_turn_id": {
+            "format": "uuid",
+            "title": "Source Turn Id",
+            "type": "string"
+          },
+          "source_recorded_at": {
+            "format": "date-time",
+            "title": "Source Recorded At",
+            "type": "string"
+          },
+          "confirmed_at": {
+            "format": "date-time",
+            "title": "Confirmed At",
+            "type": "string"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          },
+          "requires_reconciliation": {
+            "title": "Requires Reconciliation",
+            "type": "boolean"
+          },
+          "source_kind": {
+            "const": "user_confirmed_statement",
+            "default": "user_confirmed_statement",
+            "title": "Source Kind",
+            "type": "string"
+          },
+          "medical_verification": {
+            "const": false,
+            "default": false,
+            "title": "Medical Verification",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "source_ref",
+          "memory_id",
+          "version",
+          "kind",
+          "field_key",
+          "content",
+          "scope",
+          "source_case_id",
+          "source_turn_id",
+          "source_recorded_at",
+          "confirmed_at",
+          "expires_at",
+          "requires_reconciliation"
+        ],
+        "title": "ReportMemorySourceResponse",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "report_id": {
+        "format": "uuid",
+        "title": "Report Id",
+        "type": "string"
+      },
+      "report_version": {
+        "title": "Report Version",
+        "type": "integer"
+      },
+      "sources": {
+        "items": {
+          "$ref": "#/$defs/ReportMemorySourceResponse"
+        },
+        "title": "Sources",
+        "type": "array"
+      }
+    },
+    "required": [
+      "report_id",
+      "report_version",
+      "sources"
+    ],
+    "title": "ReportMemorySourcesResponse",
+    "type": "object"
+  }
+}
