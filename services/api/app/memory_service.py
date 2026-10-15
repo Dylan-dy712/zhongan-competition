@@ -5,11 +5,8 @@ import os
 from pathlib import Path
 import subprocess
 from uuid import uuid4
-from fastapi import HTTPException
 
 from . import memory_repository as memories
-from .contracts.memory import MemoryCandidateCreate
-from .repository import AccessDenied
 
 PROTOCOL = 'zhongan-memory-rank-v1'
 UPSTREAM = '5e546dcb69b7545e9fba9f95f9464c0ddd6f9cff'
@@ -49,6 +46,13 @@ def rank_documents(query, rows):
 
 
 def prepare_context(conn, actor, conversation_id, question, history):
+    snapshot, safe_history = _prepare_confirmed_context(conn, actor, conversation_id, question, history)
+    snapshot['allow_suggestions'] = False
+    from .automatic_memory import extend_context
+    return extend_context(conn, actor, conversation_id, question, snapshot, safe_history)
+
+
+def _prepare_confirmed_context(conn, actor, conversation_id, question, history):
     from .conversation_repository import require_conversation
     current = require_conversation(conn, actor, conversation_id)
     empty = {'items': [], 'refs': [], 'history_refs': [], 'status': 'disabled', 'allow_suggestions': False}
@@ -144,34 +148,9 @@ def persist_refs(conn, actor, conversation_id, turn_id, refs, history_refs=()):
 
 
 def suggestions_allowed(conn, actor, conversation_id):
-    from .conversation_repository import require_conversation
-    current = require_conversation(conn, actor, conversation_id)
-    return (current['memory_export_enabled'] and
-            bool(conn.execute('SELECT 1 FROM user_accounts WHERE actor_id=%s', (actor,)).fetchone()) and
-            memories.settings(conn, actor, current['subject_id'])['enabled'])
+    return False  # Manual candidate collection has been retired.
 
 
 def propose_from_answer(conn, actor, conversation_id, turn, answer):
-    """Unconfirmed suggestions only; never promote model output into active memory."""
-    if not answer.get('memory_suggestions'):
-        return
-    from .conversation_repository import require_conversation
-    current = require_conversation(conn, actor, conversation_id)
-    if (turn['input_kind'] != 'user' or not current['memory_export_enabled']
-            or not conn.execute('SELECT 1 FROM user_accounts WHERE actor_id=%s', (actor,)).fetchone()
-            or not memories.settings(conn, actor, current['subject_id'])['enabled']):
-        return
-    for item in (answer.get('memory_suggestions') or [])[:2]:
-        if item['content'] != turn['question'].strip():
-            continue  # Automatic extraction must preserve all negation, people and time qualifiers.
-        if item['field_key'] not in {'communication_style', 'care_preference', 'allergy'}:
-            continue  # Dynamic medical context requires explicit scope and expiry in the editor.
-        body = MemoryCandidateCreate(**item, source_turn_id=turn['turn_id'], scope='patient')
-        try:
-            with conn.transaction():
-                memories.create_candidate(conn, actor, current['subject_id'], body)
-        except AccessDenied:
-            continue  # A concurrently disabled source must not turn a successful chat into a failure.
-        except HTTPException as exc:
-            if exc.status_code != 409:
-                raise
+    """Compatibility hook: source turns themselves are the automatic memory."""
+    return

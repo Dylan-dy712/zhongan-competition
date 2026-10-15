@@ -510,19 +510,14 @@ def main():
         check(not next(c for c in client.get('/v1/conversations',headers=headers).json()
                        if c['conversation_id']==follow_id).get('has_interpretation_report'),
               'report badge belongs to its conversation rather than every chat for the same case')
-        memory_path=f'/v1/me/members/{subject}/memory-settings'
-        granted=client.patch(memory_path,headers={**headers,'Idempotency-Key':'memory-grant'},json={'enabled':True,'expected_version':0})
-        check(granted.status_code==200,'cross-session history requires separate patient memory consent')
         def memory_flags(conversation,read,export):
             path=f'/v1/conversations/{conversation}/memory-settings'
             current=client.get(path,headers=headers).json()
             changed=client.patch(path,headers=headers,json={'read_enabled':read,'export_enabled':export,'expected_version':current['version']})
-            check(changed.status_code==200,'conversation memory read and source export set independently')
-        memory_flags(conversation_id,False,True)
-        memory_flags(follow_id,True,False)
+            check(changed.status_code==200,'legacy source withdrawal remains effective')
         with connection() as conn:
             found=chats.search_history(conn,actor,follow_id,'费用')
-            check(bool(found['messages']),'new conversation finds prior topic')
+            check(bool(found['messages']),'new conversation automatically finds prior topic without memory setup')
             check(not chats.search_history(conn,actor,follow_id,'%')['messages'],'history query treats wildcard as literal')
         def memory_answer(messages):
             result=json.loads(next(m['content'] for m in reversed(messages) if m['role']=='tool'))

@@ -279,6 +279,13 @@ def list_memories(conn, actor, subject):
 def history_references_available(conn, actor, conversation_id, refs, *, locked=False, strict_epoch=True):
     if not refs:
         return True
+    from . import automatic_memory
+    automatic = [ref for ref in refs if ref.get('memory_consent_version') == 0]
+    if automatic and not automatic_memory.available(conn, actor, conversation_id, automatic, locked=locked):
+        return False
+    refs = [ref for ref in refs if ref.get('memory_consent_version') != 0]
+    if not refs:
+        return True
     from .conversation_repository import require_conversation
     current = require_conversation(conn, actor, conversation_id)
     lock_scope(conn, actor, current['subject_id'])

@@ -58,6 +58,9 @@ class MemoryContractTests(unittest.TestCase):
 class MemoryDatabaseTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        cls.policy=patch.dict(os.environ,{'ZHONGAN_AUTOMATIC_HISTORY_ENABLED':'1' if getattr(cls,'automatic_mode',False) else '0'})
+        cls.policy.start()
+        cls.addClassCleanup(cls.policy.stop)
         cls.dsn=os.environ['ZHONGAN_MEMORY_TEST_DATABASE_URL']
         cls.schema='memory_test_'+uuid4().hex
         with connect(cls.dsn) as conn: conn.execute(f'CREATE SCHEMA {cls.schema}')
@@ -99,14 +102,17 @@ class MemoryDatabaseTests(unittest.TestCase):
         self.family=family.json()['subject_id']
         care=self.client.post('/v1/me/consents?subject_id='+self.family,headers={**self.headers,'Idempotency-Key':uuid4().hex},json={'confirmation':True,'expected_version':0})
         self.assertEqual(care.status_code,200,care.text)
-        self.enable(self.subject)
-        self.enable(self.family)
+        if not getattr(self,'automatic_mode',False):
+            self.enable(self.subject)
+            self.enable(self.family)
         with self.connection() as conn:
             self.actor=conn.execute('SELECT actor_id FROM user_accounts WHERE subject_id=%s',(self.subject,)).fetchone()['actor_id']
         self.source=self.conversation(self.subject)
-        self.set_conversation(self.source,False,True)
+        if not getattr(self,'automatic_mode',False):
+            self.set_conversation(self.source,False,True)
         self.target=self.conversation(self.subject)
-        self.set_conversation(self.target,True,False)
+        if not getattr(self,'automatic_mode',False):
+            self.set_conversation(self.target,True,False)
 
     def tearDown(self):
         self.client.close()
@@ -457,7 +463,7 @@ class MemoryDatabaseTests(unittest.TestCase):
         self.assertEqual(response.status_code,200,response.text)
         self.assertEqual(response.json(),{'memories':[],'candidates':[]})
 
-    def test_automatic_suggestions_remain_unconfirmed_and_preserve_negation(self):
+    def test_model_suggestions_no_longer_create_manual_candidates(self):
         text='【合成】我并没有确认过药物过敏。'
         model=MagicMock();model.complete.return_value=answer(memory_suggestions=[{'kind':'confirmed_context','field_key':'allergy','content':text}])
         with patch('services.api.app.conversation_agent.AgentModel',return_value=model):
@@ -466,7 +472,7 @@ class MemoryDatabaseTests(unittest.TestCase):
         self.assertEqual(response.status_code,200,response.text)
         items=self.client.get(self.base()+'/memories',headers=self.headers).json()
         self.assertEqual(items['memories'],[])
-        self.assertEqual(items['candidates'][0]['content'],text)
+        self.assertEqual(items['candidates'],[])
         response,_=self.send(message='药物过敏')
         self.assertEqual(response.json()['answer']['memory_refs'],[])
         self.assertEqual(response.json()['answer']['memory_suggestions'],[])
@@ -581,6 +587,185 @@ class MemoryDatabaseTests(unittest.TestCase):
             self.assertTrue(store.active_rows(first,self.actor,UUID(self.subject)))
             with self.assertRaises(store.AccessDenied):
                 store.references_available(first,self.actor,UUID(self.target),refs)
+
+
+@unittest.skipUnless(os.getenv('ZHONGAN_MEMORY_TEST_DATABASE_URL'),'Isolated memory test database not configured')
+class AutomaticHistoryTests(unittest.TestCase):
+    automatic_mode=True
+    # Reuse only fixture/helpers, not the legacy policy's test cases.
+    setUpClass=MemoryDatabaseTests.__dict__['setUpClass']
+    tearDownClass=MemoryDatabaseTests.__dict__['tearDownClass']
+    connection=MemoryDatabaseTests.__dict__['connection']
+    setUp=MemoryDatabaseTests.setUp
+    tearDown=MemoryDatabaseTests.tearDown
+    conversation=MemoryDatabaseTests.conversation
+    source_turn=MemoryDatabaseTests.source_turn
+    send=MemoryDatabaseTests.send
+    base=MemoryDatabaseTests.base
+    enable=MemoryDatabaseTests.enable
+
+    def separate_source_consent(self):
+        with self.connection() as conn:
+            consent=uuid4()
+            conn.execute("INSERT INTO consents(consent_id,subject_id,notice_version,version) VALUES (%s,%s,'synthetic-history-test',1)",(consent,self.subject))
+            conn.execute("INSERT INTO consent_purposes(consent_id,purpose,status,granted_at) VALUES (%s,'case_guidance','active',now())",(consent,))
+            conn.execute('UPDATE cases SET consent_id=%s WHERE case_id=(SELECT case_id FROM conversations WHERE conversation_id=%s)',(consent,self.source))
+
+    def context(self,model):
+        return [item for message in model.complete.call_args.args[0]
+                if message['role']=='user' and message['content'].startswith('{')
+                for item in json.loads(message['content']).get('care_memory',[])]
+
+    def test_default_automatic_history_needs_no_settings_or_confirmation(self):
+        text='【合成】请叫我小竹，我希望解释时少用缩写。'
+        turn=self.source_turn(text)
+        response,model=self.send('你记得我希望怎么解释吗')
+        self.assertEqual(response.status_code,200,response.text)
+        self.assertIn(text,[item['content'] for item in self.context(model)])
+        self.assertEqual(response.json()['answer']['memory_suggestions'],[])
+        self.assertIn(turn,[ref['source_turn_id'] for ref in response.json()['answer']['history_source_refs']])
+        with self.connection() as conn:
+            self.assertEqual(conn.execute('SELECT count(*) AS n FROM care_memory_candidates WHERE actor_id=%s',(self.actor,)).fetchone()['n'],0)
+            self.assertIsNone(conn.execute('SELECT 1 FROM patient_memory_settings WHERE actor_id=%s',(self.actor,)).fetchone())
+
+    def test_retired_manual_candidate_endpoints_do_not_accept_old_ui_writes(self):
+        source=self.source_turn('【合成】希望简单解释。')
+        body={'source_turn_id':source,'kind':'communication_preference','field_key':'communication_style','content':'【合成】希望简单解释。','scope':'patient'}
+        created=self.client.post(self.base()+'/memory-candidates',headers=self.headers,json=body)
+        self.assertEqual(created.status_code,410,created.text)
+        confirmed=self.client.post(self.base()+'/memory-candidates/'+str(uuid4())+'/confirm',
+            headers={**self.headers,'Idempotency-Key':uuid4().hex},json={'confirmation':True,'expected_version':1})
+        self.assertEqual(confirmed.status_code,410,confirmed.text)
+
+    def test_patient_and_shared_patient_account_isolation_happen_before_ranking(self):
+        own='【合成】本人记录竹叶。';family='【合成】家人记录松果。'
+        self.source_turn(own)
+        self.source_turn(family,self.conversation(self.family))
+        with self.connection() as conn:
+            other=conn.execute('SELECT actor_id FROM user_accounts WHERE subject_id=%s',(self.other_subject,)).fetchone()['actor_id']
+            conn.execute('INSERT INTO actor_subject_access VALUES (%s,%s,true,true)',(other,self.subject))
+            conn.execute("INSERT INTO account_members(actor_id,subject_id,name,relationship) VALUES (%s,%s,'Synthetic shared','other')",(other,self.subject))
+            conversation=chats.create_conversation(conn,other,uuid4(),subject_id=UUID(self.subject))
+            turn=chats.begin_turn(conn,other,conversation['conversation_id'],uuid4(),'【合成】另一账号私密记录石头。',[])
+            chats.finish_turn(conn,other,conversation['conversation_id'],turn,answer={'text':'synthetic'})
+        real_rank=memory_service.rank_documents
+        captured=[]
+        def rank(query,rows):
+            captured.extend(row['content'] for row in rows)
+            return real_rank(query,rows)
+        with patch.object(memory_service,'rank_documents',side_effect=rank):
+            response,model=self.send('家人松果与另一账号石头')
+        self.assertEqual(response.status_code,200,response.text)
+        self.assertEqual(set(captured),{own})
+        self.assertEqual([item['content'] for item in self.context(model)],[own])
+        response,model=self.send('旧记录',conversation=self.conversation(self.family))
+        self.assertEqual([item['content'] for item in self.context(model)],[family])
+
+    def test_model_can_cite_automatically_supplied_history_without_a_tool_round(self):
+        source=self.source_turn('【合成】我希望少用缩写。')
+        model=MagicMock();model.complete.side_effect=lambda *args,**kwargs:answer(history_refs=[source])
+        response,_=self.send('我希望怎么解释',model=model)
+        self.assertEqual(response.status_code,200,response.text)
+        self.assertEqual(response.json()['answer']['history_refs'],[source])
+
+    def test_long_original_turn_and_latest_correction_preserve_qualifiers(self):
+        text='【合成】青霉素过敏情况：'+'需要进一步核对。'*180+'最后说明，这只是替朋友提问，我本人并没有确认过敏。'
+        self.source_turn(text)
+        corrected='【合成】更正刚才的说法，我不确定，需要核对原记录。'
+        self.source_turn(corrected)
+        response,model=self.send('青霉素过敏')
+        self.assertEqual(response.status_code,200,response.text)
+        contents=[item['content'] for item in self.context(model)]
+        self.assertEqual(contents,[text,corrected])
+        self.assertIn('不能把提问或他人情况当作',json.dumps(model.complete.call_args.args[0],ensure_ascii=False))
+
+    def test_older_topic_remains_searchable_beyond_recent_window(self):
+        needle='【合成】我给费用核对起的代号是青竹742。'
+        self.source_turn(needle)
+        for number in range(36):self.source_turn('【合成】普通聊天'+str(number))
+        response,model=self.send('青竹742代号')
+        self.assertEqual(response.status_code,200,response.text)
+        self.assertIn(needle,[item['content'] for item in self.context(model)])
+
+    def test_source_withdrawal_masks_old_answers_and_does_not_reenter_new_context(self):
+        self.source_turn('【合成】旧背景向日葵。')
+        response,_=self.send('向日葵')
+        self.assertEqual(response.status_code,200,response.text)
+        turn_id=response.json()['turn_id']
+        path=f'/v1/conversations/{self.source}/memory-settings'
+        withdrawn=self.client.patch(path,headers=self.headers,json={'read_enabled':False,'export_enabled':False,'report_enabled':False,'expected_version':0})
+        self.assertEqual(withdrawn.status_code,200,withdrawn.text)
+        saved=self.client.get(f'/v1/conversations/{self.target}',headers=self.headers)
+        old=next(row for row in saved.json()['turns'] if row['turn_id']==turn_id)
+        self.assertTrue(old['answer']['memory_unavailable'])
+        response,model=self.send('还记得向日葵吗')
+        self.assertEqual(response.status_code,200,response.text)
+        self.assertNotIn('旧背景向日葵',json.dumps(model.complete.call_args.args[0],ensure_ascii=False))
+
+    def test_inflight_source_consent_withdrawal_rejects_delivery(self):
+        self.separate_source_consent()
+        self.source_turn('【合成】旧背景紫丁香。')
+        def withdraw(messages,**kwargs):
+            with self.connection() as conn:
+                conn.execute("UPDATE consent_purposes SET status='revoked' WHERE purpose='case_guidance' AND consent_id=(SELECT c.consent_id FROM conversations v JOIN cases c USING(case_id) WHERE v.conversation_id=%s)",(self.source,))
+            return answer()
+        model=MagicMock();model.complete.side_effect=withdraw
+        response,_=self.send('紫丁香',model=model)
+        self.assertEqual(response.status_code,409,response.text)
+        self.assertEqual(response.json()['code'],'MEMORY_CONTEXT_CHANGED')
+
+    def test_history_tool_uses_original_user_text_and_tracks_automatic_dependencies(self):
+        text='【合成】我不知道复查时间，尚未确定。'
+        source=self.source_turn(text)
+        def model_response(messages,**kwargs):
+            tool_messages=[message for message in messages if message['role']=='tool']
+            if not tool_messages:
+                return {'content':None,'tool_calls':[{'id':'history-call','type':'function','function':{'name':'search_history','arguments':'{"query":"复查"}'}}]}
+            result=json.loads(tool_messages[-1]['content'])
+            self.assertEqual(result['messages'][0]['question'],text)
+            self.assertIsNone(result['messages'][0]['answer'])
+            return answer(history_refs=[source])
+        model=MagicMock();model.complete.side_effect=model_response
+        response,_=self.send('复查时间',model=model)
+        self.assertEqual(response.status_code,200,response.text)
+        refs=response.json()['answer']['history_source_refs']
+        self.assertEqual(refs[0]['memory_consent_version'],0)
+
+    def test_ranker_failure_is_fail_open_without_unverified_history(self):
+        self.source_turn('【合成】旧记录银杏。')
+        with patch.object(memory_service,'rank_documents',side_effect=OSError('synthetic offline')):
+            response,model=self.send('银杏')
+        self.assertEqual(response.status_code,200,response.text)
+        self.assertEqual(self.context(model),[])
+        self.assertEqual(response.json()['answer']['memory_status'],'retrieval_unavailable')
+
+    def test_regrant_does_not_revive_pre_withdrawal_history(self):
+        self.source_turn('【合成】撤回前的记录白桦。')
+        path='/v1/me/consents?subject_id='+self.subject
+        current=self.client.get(path,headers=self.headers).json()
+        for confirmation in (False,True):
+            changed=self.client.post(path,headers={**self.headers,'Idempotency-Key':uuid4().hex},
+                json={'confirmation':confirmation,'expected_version':current['version']})
+            self.assertEqual(changed.status_code,200,changed.text)
+            current=changed.json()
+        response,model=self.send('白桦')
+        self.assertEqual(response.status_code,200,response.text)
+        self.assertEqual(self.context(model),[])
+        self.source_turn('【合成】重新授权后补充的新记录兰花。')
+        response,model=self.send('兰花')
+        self.assertEqual(response.status_code,200,response.text)
+        self.assertEqual([item['content'] for item in self.context(model)],['【合成】重新授权后补充的新记录兰花。'])
+
+    def test_expired_consent_and_non_user_turns_are_excluded(self):
+        self.separate_source_consent()
+        self.source_turn('【合成】过期来源红叶。')
+        with self.connection() as conn:
+            conn.execute("UPDATE consent_purposes SET expires_at=now()-interval '1 second' WHERE purpose='case_guidance' AND consent_id=(SELECT c.consent_id FROM conversations v JOIN cases c USING(case_id) WHERE v.conversation_id=%s)",(self.source,))
+            turn=chats.begin_turn(conn,self.actor,UUID(self.target),uuid4(),'【合成】系统续答不能成为用户事实。',[],input_kind='analysis_ready')
+            chats.finish_turn(conn,self.actor,UUID(self.target),turn,answer={'text':'synthetic'})
+        response,model=self.send('红叶',conversation=self.conversation(self.subject))
+        self.assertEqual(response.status_code,200,response.text)
+        self.assertEqual(self.context(model),[])
 
 
 if __name__=='__main__':unittest.main()

@@ -9,6 +9,11 @@ from .contracts.memory import (MemoryCandidateCreate, MemoryCandidateResponse, M
 
 
 def register_memory_routes(app, current_actor, database):
+    def require_manual_mode():
+        from .automatic_memory import enabled
+        if enabled():
+            raise HTTPException(410, '已改为自动承接历史对话，无需提交或确认记忆。')
+
     def public(model, row):
         return model.model_validate({key: row[key] for key in model.model_fields if key in row})
 
@@ -62,12 +67,14 @@ def register_memory_routes(app, current_actor, database):
 
     @app.post('/v1/me/members/{subject_id}/memory-candidates', response_model=MemoryCandidateResponse, status_code=201)
     def post_candidate(subject_id: UUID, body: MemoryCandidateCreate, actor=Depends(current_actor), conn=Depends(database)):
+        require_manual_mode()
         return public(MemoryCandidateResponse, store.create_candidate(conn, actor, subject_id, body))
 
     @app.post('/v1/me/members/{subject_id}/memory-candidates/{candidate_id}/confirm')
     def confirm(subject_id: UUID, candidate_id: UUID, body: MemoryConfirm,
                 idempotency_key: str = Header(min_length=1, max_length=128),
                 actor=Depends(current_actor), conn=Depends(database)):
+        require_manual_mode()
         return store.confirm_candidate(conn, actor, subject_id, candidate_id, body, idempotency_key)
 
     @app.delete('/v1/me/members/{subject_id}/memory-candidates/{candidate_id}')

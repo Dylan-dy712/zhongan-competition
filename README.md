@@ -1,10 +1,10 @@
 # 众安·暖愈智护
 
-2026-10-16：新增按账号＋就诊人隔离的确认记忆和报告来源闭环，默认关闭，分别授权聊天读入、来源导出和报告使用。需迁移 028 / 029 并同时部署检索器，详见[记忆与报告接入说明](docs/reviews/patient-memory-reports.md)。
+2026-10-16：改为按账号＋就诊人自动承接历史对话，移除记忆管理板块和逐条确认，现有历史无需手动迁入。详见[自动历史承接说明](docs/reviews/automatic-patient-history.md)。既有正式报告来源闭环保留版本约束。
 
 统一应用位于 `apps/web`：账号注册/登录 → 理赔资料整理 → 上传与关怀对话 → 就医记录与已发布报告。已复用原 Demo 的品牌素材与三步资料流程，资料通过真实 API 保存。`output_dir/product-design/home-proposal.html` 保留为设计参考。部署配置将旧 `/mobile-demo/` 入口跳转到统一应用 `/#/claim`；这项代码变更尚未表示服务器已更新。
 
-账号功能使用数据库迁移 `020_accounts.sql`，启动前执行 `python -m scripts.migrate_database`。密码采用随机盐 scrypt 哈希；登录为 12 小时可撤销会话。注册可暂不授权关怀，登录后在“我的”中单独授权或撤回；不捆绑资源匹配、长期记忆与评测用途。新对话默认关闭历史回忆。理赔资料整理会创建关怀记录，不会向保险公司提交理赔申请。仅使用合成资料。
+账号功能使用数据库迁移 `020_accounts.sql`，启动前执行 `python -m scripts.migrate_database`。密码采用随机盐 scrypt 哈希；登录为 12 小时可撤销会话。注册可暂不授权关怀，登录后确认资料用途；关怀有效时自动参考当前账号为当前就诊人留下的历史对话，家人记录分开，资源匹配和评测用途仍独立。旧 `recall_enabled` 字段保留兼容，普通聊天不再要求手动开启。理赔资料整理会创建关怀记录，不会向保险公司提交理赔申请。仅使用合成资料。
 
 切片设计与验收范围见 [账号与统一入口](docs/requirements/accounts-and-unified-entry.md)。前端验证运行 `npm run test:auth`、`npm run test:navigation`；账号测试为 `python -m unittest discover -s tests -p test_accounts.py -v`。配置专用 `ZHONGAN_AUTH_TEST_DATABASE_URL` 后，测试将在独立临时 PostgreSQL schema 中执行注册、主体隔离、授权、撤回、登录、退出与过期校验；未配置会明确跳过数据库测试。
 
