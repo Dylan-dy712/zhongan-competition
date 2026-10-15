@@ -23,7 +23,7 @@ export default function HomeReminders({token,member,onOpen,onClaim}:{token:strin
     let active=true,request=0,timer:ReturnType<typeof setTimeout>|undefined;
     setData(previous=>previous?.owner===owner?previous:undefined);setEvidence(null);setLoading(true);setError('');
     const load=async()=>{
-      const generation=++request;clearTimeout(timer);++sourceRequest.current;setEvidence(null);setSourceError('');
+      const generation=++request;clearTimeout(timer);++sourceRequest.current;setEvidence(null);setSourceError('');setLoading(true);
       const current=cached.current?.owner===owner?cached.current:undefined;
       try {
         if(!member){setData({owner,snapshots:[],records:[]});return;}
