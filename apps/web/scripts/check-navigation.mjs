@@ -69,7 +69,7 @@ try {
   await flush();assert.equal(document.querySelector('dialog.source-sheet'),null,'Late evidence must not reopen a modal on another page');
   assert.match(document.body.textContent,/提交理赔材料/);
   await click('问暖暖');
-  await click('新的关怀对话');assert.match(document.body.textContent,/开始新的对话/);
+  await click('新建对话');assert.match(document.body.textContent,/开始新的对话/);
   assert.equal(document.querySelector('dialog'),null,'New chat must open directly without a member picker');
   assert.equal(document.querySelector('.connect-form select').value,'');
   assert.equal(button('开始新的对话').disabled,true,'A member must still be selected before starting');

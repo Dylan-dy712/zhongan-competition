@@ -90,7 +90,7 @@ def get_turns(conn, actor_id, conversation_id, before=None):
         (conversation_id, before, conversation_id, before)).fetchall()
 
 
-def begin_turn(conn, actor_id, conversation_id, request_id, question, document_ids, input_kind='user'):
+def begin_turn(conn, actor_id, conversation_id, request_id, question, document_ids, input_kind='user', attachment_ids=()):
     with conn.transaction():
         conversation = require_conversation(conn, actor_id, conversation_id)
         conn.execute("SELECT conversation_id FROM conversations WHERE conversation_id=%s FOR UPDATE", (conversation_id,))
@@ -102,6 +102,11 @@ def begin_turn(conn, actor_id, conversation_id, request_id, question, document_i
             doc, _ = found
             attachments.append({'document_id': str(doc.document_id), 'document_version': doc.document_version,
                                 'name': doc.source_ref})
+        for attachment_id in dict.fromkeys(attachment_ids):
+            from .chat_attachments import get_attachment
+            item = get_attachment(conn, actor_id, conversation_id, attachment_id)
+            attachments.append({'document_id': str(item['attachment_id']), 'document_version': 1,
+                                'name': item['name'], 'kind': 'chat_attachment'})
         old = conn.execute("SELECT * FROM conversation_turns WHERE conversation_id=%s AND request_id=%s",
                            (conversation_id, request_id)).fetchone()
         if old and (old['question'] != question or old['attachments'] != attachments or old['input_kind'] != input_kind):

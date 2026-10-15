@@ -138,10 +138,18 @@ class ChatMessage(Contract):
     request_id: UUID
     message: str = Field(min_length=1, max_length=4000)
     document_ids: list[UUID] = Field(default_factory=list)
+    attachment_ids: list[UUID] = Field(default_factory=list)
 
 
 class AnalysisRequest(ChatMessage):
     force_new: bool = False
+
+
+class ChatAttachment(Contract):
+    attachment_id: UUID
+    name: str
+    media_type: str
+    byte_size: int
 
 
 class RecallSetting(Contract):
@@ -840,6 +848,44 @@ async def replace_chat_document(conversation_id: UUID, document_id: UUID, respon
         conn=conn,storage_root=storage_root)
 
 
+@app.post('/v1/conversations/{conversation_id}/attachments', response_model=ChatAttachment, status_code=201)
+async def chat_attachment_upload(conversation_id: UUID, response: Response, file: Annotated[UploadFile, File()],
+                                 actor_id: UUID = Depends(current_actor), conn=Depends(database),
+                                 storage_root: Path = Depends(document_storage_root)):
+    from .chat_attachments import register_attachment
+    chats.require_conversation(conn, actor_id, conversation_id)
+    media_type = (file.content_type or '').lower()
+    if media_type not in ALLOWED_MEDIA_TYPES:
+        raise HTTPException(415, '请选择 JPG、PNG、PDF 或 UTF-8 文本。')
+    temp_root = storage_root / '.tmp'
+    temp_root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    descriptor, name = tempfile.mkstemp(prefix='chat-', dir=temp_root)
+    os.close(descriptor)
+    path, digest, size = Path(name), hashlib.sha256(), 0
+    limit = document_size_limit()
+    try:
+        with path.open('wb') as output:
+            while chunk := await file.read(1024 * 1024):
+                size += len(chunk)
+                if size > limit:
+                    raise HTTPException(413, '附件超过允许大小，请拆分后发送。')
+                output.write(chunk)
+                digest.update(chunk)
+        if not size:
+            raise HTTPException(422, '附件为空，请重新选择。')
+        validate_file_signature(path, media_type)
+        result, created = register_attachment(conn, actor_id, conversation_id,
+            name=(file.filename or '聊天附件').replace('\\', '/').rsplit('/', 1)[-1][:200],
+            media_type=media_type, byte_size=size, source_hash=digest.hexdigest(),
+            temp_path=path, storage_root=storage_root)
+        if not created:
+            response.status_code = 200
+        return result
+    finally:
+        await file.close()
+        path.unlink(missing_ok=True)
+
+
 @app.post('/v1/conversations/{conversation_id}/messages')
 def chat_message(conversation_id: UUID, body: ChatMessage,
                  actor_id: UUID = Depends(current_actor), conn=Depends(database)):
@@ -852,6 +898,8 @@ def submit_chat_analysis(conversation_id: UUID, body: AnalysisRequest,
     """Persist the user's request and queue material processing without a model round."""
     if not body.message.strip():
         raise HTTPException(422, '分析请求不能为空')
+    if body.attachment_ids:
+        raise HTTPException(422, '请通过解读报告入口上传报告材料。')
     turn = chats.begin_turn(conn, actor_id, conversation_id, body.request_id,
                             body.message.strip() + ('\n（重新分析当前材料）' if body.force_new else ''), body.document_ids, 'user')
     conn.commit()
@@ -878,7 +926,8 @@ def process_chat_message(conversation_id, body, actor_id, conn, input_kind='user
     question = body.message.strip()
     if not question:
         raise HTTPException(422, '消息不能为空')
-    turn = chats.begin_turn(conn, actor_id, conversation_id, body.request_id, question, body.document_ids, input_kind)
+    turn = chats.begin_turn(conn, actor_id, conversation_id, body.request_id, question, body.document_ids, input_kind,
+                            attachment_ids=body.attachment_ids)
     # Persist the input before a slow provider call; interrupted turns can be retried with the same ID.
     conn.commit()
     if turn['status'] == 'completed':
@@ -889,6 +938,7 @@ def process_chat_message(conversation_id, body, actor_id, conn, input_kind='user
         conn.commit()
     history = [t for t in chats.get_turns(conn, actor_id, conversation_id) if t['turn_id'] != turn['turn_id']]
     tools = CareTools(conn, actor_id, conversation_id,turn['turn_id'])
+    tools.allow_analysis = input_kind == 'analysis_ready'
     events = []
 
     def progress(current_events):
@@ -901,6 +951,13 @@ def process_chat_message(conversation_id, body, actor_id, conn, input_kind='user
         conn.commit()
 
     try:
+        attachment_ids = [item['document_id'] for item in turn['attachments'] if item.get('kind') == 'chat_attachment']
+        if attachment_ids:
+            from .chat_attachments import read_attachments
+            def attachment_progress():
+                progress([{'tool': 'read_chat_attachments', 'status': 'running'}])
+            tools.message_materials = read_attachments(conn, actor_id, conversation_id, attachment_ids, attachment_progress)
+            progress([{'tool': 'read_chat_attachments', 'status': tools.message_materials['status']}])
         answer, events = run_agent(history, question, turn['attachments'], tools, on_event=progress,
                                   analysis_mode=input_kind == 'analysis_ready',
                                   initial_analysis=tools.reusable_analysis() if input_kind == 'analysis_ready' else None)

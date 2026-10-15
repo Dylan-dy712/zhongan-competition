@@ -74,7 +74,7 @@ export interface ToolEvent {tool: string; status: string; run_id?: string}
 export interface ChatTurn {
   turn_id: string; request_id: string; question: string;
   input_kind: 'user'|'analysis_ready';
-  attachments: {document_id:string; name:string}[];
+  attachments: {document_id:string; name:string;kind?:'chat_attachment'}[];
   status: 'running'|'completed'|'failed'; answer: ChatAnswer|null;
   tool_events: ToolEvent[]; created_at: string; error_code: string|null;
 }

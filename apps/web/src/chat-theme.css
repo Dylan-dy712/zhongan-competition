@@ -197,3 +197,25 @@
 .analysis-narrative-closing h3{margin:0 0 10px;color:#202824;font-size:15px;font-weight:650;line-height:1.6}
 .chat-original .analysis-narrative-point p:last-child{margin-bottom:0}
 @media(max-width:480px){.analysis-narrative-point{gap:8px;padding:14px 0}.analysis-point-number{width:23px;height:23px}.chat-original .analysis-narrative-copy p{line-height:1.8}}
+
+.chat-sidebar .new-report{margin-bottom:8px;background:#e8f7ef;color:#166d51}
+.chat-draft-attachments{display:flex;gap:10px;overflow:auto;padding:8px 0 12px;max-height:190px}
+.chat-draft-attachments article{display:flex;align-items:center;gap:10px;flex:none;min-width:0;max-width:300px;background:#f5f8f6;border:1px solid #dce7e0;border-radius:12px;padding:10px}
+.chat-draft-attachments img,.chat-file-icon{flex:none;width:48px;height:48px;border-radius:8px;object-fit:cover}
+.chat-file-icon{display:grid;place-items:center;background:#e4eee8;color:#47725b;font-size:24px}
+.chat-draft-attachments article>span:not(.chat-file-icon){min-width:0}
+.chat-draft-attachments strong{display:block;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
+.chat-draft-attachments small{display:block;color:#62776a;font-size:11px;margin-top:5px}
+.chat-draft-attachments button{flex:none;background:transparent;border:0;padding:5px;font:inherit;font-size:20px;color:#62776a;cursor:pointer}
+.report-upload-dialog{box-sizing:border-box;width:min(600px,calc(100vw - 32px));max-height:calc(100dvh - 32px);padding:26px;border:1px solid #e0eee6;border-radius:22px;color:#1e2926;background:#fff;font:inherit;overflow:auto}
+.report-upload-dialog::backdrop{background:#18362b66}
+.report-upload-dialog header{display:flex;align-items:flex-start;justify-content:space-between;gap:18px}
+.report-upload-dialog h2{font-size:22px;line-height:1.5;margin:8px 0}
+.report-upload-dialog header small{color:#47725b;font-size:12px}
+.report-upload-dialog header>button{background:#f0f5f2;border:0;border-radius:50%;width:34px;height:34px;flex:none;font-size:22px;cursor:pointer}
+.report-upload-dialog>p{font-size:14px;line-height:1.8;color:#62776a}
+.report-upload-pick{display:flex;flex-direction:column;align-items:center;gap:7px;width:100%;padding:22px;margin:18px 0 8px;border:1px dashed #9bbfa9;border-radius:14px;background:#f7fbf8;color:#246749;font:inherit;cursor:pointer}
+.report-upload-pick>span{font-size:30px;line-height:1}.report-upload-pick small{font-size:12px;color:#62776a}
+.report-upload-dialog .chat-draft-attachments{flex-direction:column;overflow:auto;max-height:260px}.report-upload-dialog .chat-draft-attachments article{max-width:none;flex-shrink:0}.report-upload-dialog .chat-draft-attachments article>span:not(.chat-file-icon){flex:1}
+.report-upload-dialog footer{display:flex;justify-content:flex-end;gap:10px;margin-top:20px}.report-upload-dialog footer button{padding:11px 15px;border:1px solid #dce7e0;border-radius:10px;background:#fff;color:#47725b;font:inherit;font-size:13px;cursor:pointer}.report-upload-dialog footer .care-primary{background:#167b59;color:#fff;border-color:#167b59}.report-upload-dialog button:disabled{opacity:.45;cursor:not-allowed}
+@media(max-width:480px){.report-upload-dialog{padding:20px}.report-upload-dialog h2{font-size:20px}.chat-draft-attachments article{max-width:260px}}
