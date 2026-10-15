@@ -25,6 +25,8 @@ class ConversationTitleTests(unittest.TestCase):
             self.assertEqual(titles.generate_title([{'role':'user','content':'合成术后问题'}]),('术后复查与康复安排','synthetic-model'))
         self.assertEqual(model._call.call_args.kwargs,{'timeout':(10,25),'workload':'title'})
         self.assertEqual(workload_options('https://qianfan.baidubce.com/v2','glm-5.3-flash','title'),
+                         {'max_tokens':2048,'thinking':{'type':'enabled'},'reasoning_effort':'low'})
+        self.assertEqual(workload_options('https://api.deepseek.com','deepseek-flash','title'),
                          {'max_tokens':128,'thinking':{'type':'disabled'}})
 
     def test_invalid_model_titles_are_not_persisted(self):
