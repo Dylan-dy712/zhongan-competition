@@ -131,7 +131,7 @@ class NewConversation(Contract):
     conversation_id: UUID
     case_id: UUID | None = None
     subject_id: UUID | None = None
-    recall_enabled: bool = True
+    recall_enabled: bool = False
 
 
 class ChatMessage(Contract):
@@ -811,8 +811,11 @@ def conversation_history(conversation_id: UUID, before: UUID | None = None,
 @app.patch('/v1/conversations/{conversation_id}/recall')
 def conversation_recall(conversation_id: UUID, body: RecallSetting,
                         actor_id: UUID = Depends(current_actor), conn=Depends(database)):
-    chats.require_conversation(conn, actor_id, conversation_id)
-    conn.execute('UPDATE conversations SET recall_enabled=%s WHERE conversation_id=%s', (body.enabled, conversation_id))
+    from .contracts.memory import ConversationMemoryChange
+    current = memory_repository.conversation_settings(conn, actor_id, conversation_id)
+    memory_repository.change_conversation_settings(conn, actor_id, conversation_id,
+        ConversationMemoryChange(read_enabled=body.enabled, export_enabled=current['export_enabled'],
+            report_enabled=current['report_enabled'] and body.enabled, expected_version=current['version']))
     return {'recall_enabled': body.enabled}
 
 
@@ -938,6 +941,10 @@ def process_chat_message(conversation_id, body, actor_id, conn, input_kind='user
                      (turn['turn_id'], turn['lease_token']))
         conn.commit()
     history = [t for t in chats.get_turns(conn, actor_id, conversation_id) if t['turn_id'] != turn['turn_id']]
+    if input_kind == 'analysis_ready':
+        history = [t for t in history if not (t.get('answer') or {}).get('memory_refs')
+                   and not (t.get('answer') or {}).get('history_source_refs')
+                   and not (t.get('answer') or {}).get('memory_unavailable')]
     tools = CareTools(conn, actor_id, conversation_id,turn['turn_id'])
     tools.allow_analysis = input_kind == 'analysis_ready'
     events = []
@@ -952,6 +959,22 @@ def process_chat_message(conversation_id, body, actor_id, conn, input_kind='user
         conn.commit()
 
     try:
+        memory_snapshot = None
+        if input_kind == 'user':
+            memory_snapshot, history = memory_service.prepare_context(conn, actor_id, conversation_id, question, history)
+            tools.memory_snapshot = memory_snapshot
+        elif analysis_run_id is not None:
+            from .report_memory import check_report_refs, references
+            frozen=conn.execute('SELECT case_id,context_snapshot FROM analysis_runs WHERE run_id=%s AND case_id=%s',
+                (analysis_run_id,chats.require_conversation(conn,actor_id,conversation_id)['case_id'])).fetchone()
+            if frozen and references(frozen['context_snapshot']):
+                check_report_refs(conn,frozen,references(frozen['context_snapshot']))
+                memory=frozen['context_snapshot']['memory']
+                state=memory_repository.settings(conn,actor_id,UUID(memory['subject_id']))
+                memory_snapshot={'refs':[{'memory_id':item['memory_id'],'version':item['version'],'epoch':state['epoch']}
+                    for item in memory['items']], 'items':[], 'history_refs':[], 'status':'available', 'allow_suggestions':False}
+                tools.memory_snapshot=memory_snapshot
+                conn.commit()
         attachment_ids = [item['document_id'] for item in turn['attachments'] if item.get('kind') == 'chat_attachment']
         if attachment_ids:
             from .chat_attachments import read_attachments
@@ -962,7 +985,8 @@ def process_chat_message(conversation_id, body, actor_id, conn, input_kind='user
         answer, events = run_agent(history, question, turn['attachments'], tools, on_event=progress,
                                   analysis_mode=input_kind == 'analysis_ready',
                                   initial_analysis=tools.reusable_analysis() if input_kind == 'analysis_ready' else None,
-                                  patient_context=chats.get_patient_context(conn, actor_id, conversation_id))
+                                  patient_context=chats.get_patient_context(conn, actor_id, conversation_id),
+                                  memory_context=memory_snapshot['items'] if memory_snapshot else None)
         if analysis_run_id is not None:
             # Recheck the actual current case and run after slow model generation.
             current = chats.require_conversation(conn, actor_id, conversation_id)
@@ -983,6 +1007,11 @@ def process_chat_message(conversation_id, body, actor_id, conn, input_kind='user
         conn.commit()
         return {'turn_id': turn['turn_id'], 'answer': answer, 'tool_events': events}
     except (RuntimeError, ValueError, KeyError, TypeError, requests.RequestException) as exc:
+        if isinstance(exc, memory_repository.MemoryChanged):
+            conn.rollback()
+            chats.finish_turn(conn, actor_id, conversation_id, turn, events=events, error='MEMORY_CONTEXT_CHANGED')
+            conn.commit()
+            raise HTTPException(409, '历史记忆或授权已变化，请重新提问。') from None
         if isinstance(exc, ValueError) and str(exc) in {'ANALYSIS_SUPERSEDED', 'ANALYSIS_MATERIALS_CHANGED'}:
             chats.finish_turn(conn, actor_id, conversation_id, turn, events=events, error='ANALYSIS_SUPERSEDED')
             conn.commit()
@@ -1029,3 +1058,8 @@ def continue_analysis(conversation_id: UUID, run_id: UUID,
     return process_chat_message(conversation_id, ChatMessage(request_id=request_id,
         message='请结合本次实际材料和我关注的问题，写一份温和清楚、连贯自然的文字分析，直接在对话里解释；内容重点由材料决定，有不确定的地方就说明。'),
         actor_id=actor_id, conn=conn, input_kind='analysis_ready', analysis_run_id=run_id)
+
+
+from . import memory_repository, memory_service
+from .memory_routes import register_memory_routes
+register_memory_routes(app, current_actor, database)

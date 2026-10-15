@@ -64,6 +64,7 @@ export interface Conversation {
   conversation_id: string; case_id: string; title: string; recall_enabled: boolean;
   title_pending?:boolean;
   has_interpretation_report?:boolean;
+  memory_export_enabled?:boolean; memory_settings_version?:number;
   report_context_enabled?:boolean; report_context_version?:number;
   created_at: string; updated_at: string;
 }
@@ -71,6 +72,7 @@ export type PatientField='followup_time'|'followup_location'|'medication'|'aller
 export interface ClarificationQuestion {field:PatientField;question:string;options:{label:string;message:string}[]}
 export interface PatientUpdate {field:PatientField;statement:string}
 export interface ChatAnswer {text: string; evidence_refs: string[]; history_refs: string[];
+  memory_refs?:{memory_id:string;version:number;epoch:number}[];memory_status?:string;memory_unavailable?:boolean;
   clarification_questions?:ClarificationQuestion[];suggested_questions?:string[];patient_updates?:PatientUpdate[];
   service_guide?:{text:string;policy_status:'demo_assumed_midhigh'};medical_services?:MedicalServices;
   guidance_delivery?:{status:'passed'|'needs_improvement'|'unchecked';notice?:string};

@@ -220,6 +220,10 @@ def create_analysis_run(conn, *, actor_id: UUID, case_id: UUID,
                         document_versions: list[DocumentVersionRef],
                         pipeline_version: str, force_new: bool, conversation_id=None, turn_id=None) -> tuple[AnalysisRun, bool]:
     with conn.transaction():
+        from .memory_repository import lock_scope
+        memory_scope=conn.execute('SELECT subject_id FROM cases WHERE case_id=%s',(case_id,)).fetchone()
+        if memory_scope:
+            lock_scope(conn,actor_id,memory_scope['subject_id'])
         allowed = conn.execute(
             """SELECT 1 FROM cases c JOIN actor_subject_access a
                ON a.subject_id = c.subject_id AND a.actor_id = %s
@@ -449,15 +453,17 @@ def get_report(conn, *, actor_id: UUID, case_id: UUID, version: int, patient_vie
                              (row['run_id'],row['case_id'])).fetchone()
             if not run:
                 return None
+            from .report_memory import check_report_refs
+            check_report_refs(conn,run,row['memory_refs'])
             context_sources(conn,run)
         except ValueError:
             return None
-    if (patient_view or row['role']!='medical_reviewer') and not patient_report_visible(conn,row):
+    if (patient_view or row['role']!='medical_reviewer') and not patient_report_visible(conn,row,actor_id):
         return None
     return _to_report(row)
 
 
-def patient_report_visible(conn, row) -> bool:
+def patient_report_visible(conn, row, actor_id=None) -> bool:
     if row['status'] not in {'published','superseded'} or row['policy_version']!=POLICY_VERSION:
         return False
     allowed = conn.execute("""SELECT 1 FROM report_releases rel JOIN cases c ON c.case_id=rel.case_id
@@ -466,7 +472,7 @@ def patient_report_visible(conn, row) -> bool:
           AND p.status='active' AND (p.expires_at IS NULL OR p.expires_at>clock_timestamp())
         WHERE rel.report_id=%s AND rel.case_id=%s AND rel.consent_id=co.consent_id
           AND rel.consent_version=co.version""",(row['report_id'],row['case_id'])).fetchone()
-    if not allowed or row['memory_refs']:
+    if not allowed:
         return False
     if any(c['review_status'] in {'pending','rejected'} for s in row['sections'] for c in s['claims']):
         return False
@@ -475,6 +481,11 @@ def patient_report_visible(conn, row) -> bool:
                          (row['run_id'],row['case_id'])).fetchone()
         if not run:
             return False
+        memory=(run.get('context_snapshot') or {}).get('memory')
+        if memory and str(actor_id)!=memory['actor_id']:
+            return False  # Same patient access does not share an account's private memory.
+        from .report_memory import check_report_refs
+        check_report_refs(conn,run,row['memory_refs'])
         context_sources(conn,run)
         material = '\n'.join(e['text_value'] or '' for e in conn.execute(
             'SELECT text_value FROM evidence WHERE case_id=%s AND run_id=%s',

@@ -56,6 +56,9 @@ def list_reviews(conn, *, actor_id: UUID, status: str, limit: int,
         if row['target_type']=='report':
             try:
                 report_sources(conn,row['case_id'],row['run_id'])
+                from .report_memory import check_report_refs
+                frozen=conn.execute('SELECT case_id,context_snapshot FROM analysis_runs WHERE run_id=%s',(row['run_id'],)).fetchone()
+                check_report_refs(conn,frozen,row['report_payload']['memory_refs'])
             except ValueError:
                 continue
         accessible.append(row)
@@ -81,6 +84,11 @@ def decide_review(conn, *, actor_id: UUID, review_id: UUID, expected_version: in
             WHERE t.review_id=%s""", (actor_id,review_id)).fetchone()
         if not scope:
             raise ReviewNotFound()
+        # Memory scope precedes case locks across submission, worker, review and release.
+        if conn.execute("SELECT 1 FROM review_tasks WHERE review_id=%s AND target_type='report'",(review_id,)).fetchone():
+            from .report_memory import lock_run
+            target_run=conn.execute('SELECT run_id FROM review_tasks WHERE review_id=%s',(review_id,)).fetchone()
+            lock_run(conn,scope['case_id'],target_run['run_id'])
         # Use the worker's case lock before row locks and version allocation.
         conn.execute('SELECT pg_advisory_xact_lock(hashtextextended(%s,0))',
                      (f"case-report:{scope['case_id']}",))
@@ -185,6 +193,9 @@ def _decide_report(conn, task, target, decision, corrections):
         'SELECT evidence_id,text_value FROM evidence WHERE case_id=%s AND run_id=%s',
         (task['case_id'], task['run_id'])).fetchall()}
     sources = report_sources(conn,task['case_id'],task['run_id'],lock=True)
+    from .report_memory import check_report_refs
+    source_run=conn.execute('SELECT case_id,context_snapshot FROM analysis_runs WHERE run_id=%s',(task['run_id'],)).fetchone()
+    check_report_refs(conn,source_run,current.memory_refs,lock=True)
     if decision=='approve':
         if set(current.validation_errors)-REVIEWABLE_REPORT_ERRORS:
             raise ValueError('report has unresolved validation errors; correct or reject it')

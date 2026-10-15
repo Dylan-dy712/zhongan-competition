@@ -19,6 +19,10 @@ def publish_report(conn, *, actor_id, case_id, version, expected_version, idempo
     with conn.transaction():
         conn.execute('SELECT pg_advisory_xact_lock(hashtextextended(%s,0))',
                      (f'release:{actor_id}:{idempotency_key}',))
+        from .report_memory import lock_run, check_report_refs
+        memory_run=conn.execute('SELECT run_id FROM reports WHERE case_id=%s AND report_version=%s',(case_id,version)).fetchone()
+        if memory_run:
+            lock_run(conn,case_id,memory_run['run_id'])
         conn.execute('SELECT pg_advisory_xact_lock(hashtextextended(%s,0))',(f'case-report:{case_id}',))
         scope = conn.execute("""SELECT c.*,ac.role,co.version AS consent_version FROM cases c
             JOIN actors ac ON ac.actor_id=%s AND ac.active=true
@@ -42,14 +46,16 @@ def publish_report(conn, *, actor_id, case_id, version, expected_version, idempo
                 raise StaleReview()
             if old['consent_id']!=scope['consent_id'] or old['consent_version']!=scope['consent_version']:
                 raise ReviewNotFound()
+            replay_run=conn.execute('SELECT case_id,context_snapshot FROM analysis_runs WHERE run_id=%s',(target['run_id'],)).fetchone()
+            check_report_refs(conn,replay_run,target['memory_refs'],lock=True)
             return _release_result(conn,old)
         report = _to_report(target)
         latest = conn.execute('SELECT max(report_version) AS version FROM reports WHERE case_id=%s',
                               (case_id,)).fetchone()['version']
         if expected_version!=version or latest!=version or report.status!='ready':
             raise StaleReview()
-        if report.policy_version!=POLICY_VERSION or report.memory_refs:
-            raise ReleaseBlocked('policy changed or memory source validation unavailable')
+        if report.policy_version!=POLICY_VERSION:
+            raise ReleaseBlocked('report policy changed')
         if (len(report.consent_refs)!=1 or report.consent_refs[0].consent_id!=scope['consent_id'] or
             report.consent_refs[0].version!=scope['consent_version'] or report.consent_refs[0].purpose!='case_guidance'):
             raise ReleaseBlocked('report authorization snapshot is stale')
@@ -57,7 +63,7 @@ def publish_report(conn, *, actor_id, case_id, version, expected_version, idempo
             raise ReleaseBlocked('unresolved report validation errors')
         if any(c.review_status in {'pending','rejected'} for s in report.sections for c in s.claims):
             raise ReleaseBlocked('report claims remain unresolved')
-        needs_review = bool(report.validation_errors) or any(
+        needs_review = bool(report.memory_refs) or bool(report.validation_errors) or any(
             c.review_status in {'approved','corrected'} for s in report.sections for c in s.claims)
         if needs_review and not conn.execute("""SELECT 1 FROM review_decisions
             WHERE target_type='report' AND target_id=%s AND target_version=%s AND decision='approve'""",
@@ -67,6 +73,7 @@ def publish_report(conn, *, actor_id, case_id, version, expected_version, idempo
                            (case_id,report.run_id)).fetchone()
         if not run or run['status']!='completed' or run['input_hash']!=report.input_hash:
             raise ReleaseBlocked('analysis is incomplete or input hash changed')
+        check_report_refs(conn,run,report.memory_refs,lock=True)
         if any(run['stage_results'].get(stage,{}).get('status')!='completed' for stage in ('parse','extract')):
             raise ReleaseBlocked('required analysis stages are incomplete')
         documents = conn.execute('SELECT * FROM documents WHERE case_id=%s AND NOT EXISTS (SELECT 1 FROM document_replacements replacement WHERE replacement.old_document_id=documents.document_id) ORDER BY document_id FOR SHARE',
@@ -134,6 +141,7 @@ def publish_report(conn, *, actor_id, case_id, version, expected_version, idempo
             AND status='active' AND (expires_at IS NULL OR expires_at>clock_timestamp())""",(scope['consent_id'],)).fetchone():
             raise ReviewNotFound()
         release_id = uuid4()
+        check_report_refs(conn,run,report.memory_refs,lock=True)  # Recheck clock-based expiry at commit.
         release = conn.execute("""INSERT INTO report_releases(release_id,report_id,case_id,report_version,released_by,
             consent_id,consent_version,input_hash,knowledge_version,policy_version,idempotency_key,request_hash)
             VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING *""",(release_id,report.report_id,

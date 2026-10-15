@@ -21,6 +21,7 @@ from services.api.app import main as api
 from services.api.app import conversation_repository as chats
 from services.api.app.conversation_agent import CareTools, ANALYSIS_PROMPT_VERSION
 from services.api.app.repository import AccessDenied, connect, token_digest
+from services.api.app.accounts import hash_password
 from services.api.app.worker import claim_run, process_run
 from services.api.app.report_builder import SECTION_TYPES
 from services.api.app.report_llm import PROMPT_VERSION as REPORT_PROMPT_VERSION
@@ -84,6 +85,9 @@ def main():
                          (actor,subject,outsider,subject))
             conn.execute("INSERT INTO consents(consent_id,subject_id,notice_version,version) VALUES (%s,%s,'test',1)", (consent,subject))
             conn.execute("INSERT INTO consent_purposes(consent_id,purpose,status,granted_at) VALUES (%s,'case_guidance','active',now())", (consent,))
+            conn.execute('''INSERT INTO user_accounts(actor_id,subject_id,username,display_name,password_hash)
+                VALUES (%s,%s,'13900000991','Synthetic memory owner',%s)''', (actor,subject,hash_password('synthetic-integration-only')))
+            conn.execute("INSERT INTO auth_sessions(token_sha256,actor_id,expires_at) VALUES (%s,%s,now()+interval '1 hour')",(token_digest(token),actor))
         api.app.dependency_overrides[api.database] = database
         client = TestClient(api.app)
         headers = {'Authorization':f'Bearer {token}'}
@@ -506,6 +510,16 @@ def main():
         check(not next(c for c in client.get('/v1/conversations',headers=headers).json()
                        if c['conversation_id']==follow_id).get('has_interpretation_report'),
               'report badge belongs to its conversation rather than every chat for the same case')
+        memory_path=f'/v1/me/members/{subject}/memory-settings'
+        granted=client.patch(memory_path,headers={**headers,'Idempotency-Key':'memory-grant'},json={'enabled':True,'expected_version':0})
+        check(granted.status_code==200,'cross-session history requires separate patient memory consent')
+        def memory_flags(conversation,read,export):
+            path=f'/v1/conversations/{conversation}/memory-settings'
+            current=client.get(path,headers=headers).json()
+            changed=client.patch(path,headers=headers,json={'read_enabled':read,'export_enabled':export,'expected_version':current['version']})
+            check(changed.status_code==200,'conversation memory read and source export set independently')
+        memory_flags(conversation_id,False,True)
+        memory_flags(follow_id,True,False)
         with connection() as conn:
             found=chats.search_history(conn,actor,follow_id,'费用')
             check(bool(found['messages']),'new conversation finds prior topic')
@@ -558,6 +572,7 @@ def main():
             print(json.dumps({'live_model':'passed','synthetic_only':True,
                 'material_tools':amount['tool_events'],'memory_tools':memory['tool_events']},ensure_ascii=False))
         check(client.patch(base+'/recall',headers=headers,json={'enabled':False}).status_code==200,'recall setting can be disabled')
+        memory_flags(conversation_id,False,False)
         with connection() as conn:
             matches=chats.search_history(conn,actor,follow_id,'费用')['messages']
             check(all(str(m['turn_id'])!=first.json()['turn_id'] for m in matches),'recall disabled source is excluded immediately')

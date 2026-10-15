@@ -16,7 +16,7 @@ from .guidance_quality import GUIDANCE_INSTRUCTION, review_guidance_quality, gui
 from .model_workloads import is_qianfan
 from .citation_repair import citation_repair_messages,apply_citation_repairs
 
-PROMPT_VERSION = "six-section-care-report-v17-patient-followups"
+PROMPT_VERSION = "six-section-care-report-v18-confirmed-memory"
 REPORT_READ_TIMEOUT = 180
 REPORT_REQUEST_BUDGET = 240
 CITATION_REPAIR_TIMEOUT = 60
@@ -129,7 +129,7 @@ def draft_report(material: str, reviewable_knowledge: list[dict], user_context: 
                  structured_costs: dict | None = None, user_sources:dict[str,str] | None=None,
                  personnel: list[dict] | None = None, normalized_dates: dict | None = None,
                  analysis_sources: list[dict] | None = None, care_priorities: list[dict] | None = None,
-                 structured_fields: dict | None = None) -> dict:
+                 structured_fields: dict | None = None, memory_context: dict | None = None) -> dict:
     client = OpenAiCompatibleExtractor()
     requirements=guidance_requirements(material,reviewable_knowledge)
     messages = [{"role": "system", "content": (
@@ -143,6 +143,9 @@ def draft_report(material: str, reviewable_knowledge: list[dict], user_context: 
         "patient_statement必须引用user_sources中的真实表达：source_quote逐字摘录用户文本，source_refs使用该映射提供的键；用户输入不能充当医学证据。"
         "用户关切、工作生活限制和明确偏好用于个性化安抚及服务建议，区分用户担心与已经发生的症状；不推断未表达的情绪。"
         "user_sources是被冻结的原始用户表达，不是病历或模型回答。保留自述时间与否定，不把旧自述当当前症状；缺少或矛盾的偏好需要确认。"
+        "memory_context是用户另行允许用于本次报告的历史记忆，来源键以memory:开头。它只提供偏好和待核实背景，"
+        "必须保留记录时间、确认时间、适用就医和有效期；不能覆盖本次病历、作为当前处方或推断复查日期。"
+        "新材料或自述冲突时标明待核实；多个历史说法不得只凭其中一项决定当前情况。"
         "行动source_quote可来自材料或user_sources，但用户要求不能标记为medical_order。service_suggestion不表示已核实，仍须审核；不要用它包装诊断、处方、费用结论或机构评价。"
         "引用存在不等于支持结论：病例事实必须保留原文的否定、疑似、既往和待确认状态；不要把住院用药写成出院处方。"
         "personnel是材料明确记载的医护人员与角色：人员角色必须按材料原文绑定，审核者/报告医师/进修/助手不得写成主管、主治、术者或接诊；"
@@ -163,6 +166,7 @@ def draft_report(material: str, reviewable_knowledge: list[dict], user_context: 
             ({"case:user_context": str(user_context)} if user_context else {}),
         "structured_costs":structured_costs, "personnel": personnel or [],
         "normalized_dates": normalized_dates or {}, "care_priorities":care_priorities or [],
+        "memory_context": memory_context,
         "structured_fields":structured_fields or {},'reading_requirements':requirements}, ensure_ascii=False, separators=(',', ':'))}]
     if analysis_sources is not None:
         from .conversation_agent import ANALYSIS_INSTRUCTION
@@ -216,7 +220,7 @@ def draft_report(material: str, reviewable_knowledge: list[dict], user_context: 
                     remaining=deadline-time.monotonic()
                     delivery=guidance_delivery(unavailable_code='GUIDANCE_QUALITY_TIMEOUT')
                     context={'fields':structured_fields or {},'care_priorities':care_priorities or [],
-                        'user_context':user_context,'user_sources':user_sources or {},
+                        'user_context':user_context,'user_sources':user_sources or {},'memory_context':memory_context,
                         'knowledge':reviewable_knowledge,'costs':structured_costs or {},
                         'dates':normalized_dates or {},'reading_requirements':requirements}
                     if analysis_sources is not None and parsed.patient_analysis:

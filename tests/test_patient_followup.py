@@ -155,8 +155,8 @@ class PatientFollowupTests(unittest.TestCase):
         self.assertEqual(len(context), 1)
         self.assertEqual(context[0]['source_kind'], 'patient_statement')
         query, parameters = conn.execute.call_args.args
-        self.assertEqual(parameters, (actor, subject, conversation, False))
-        self.assertIn('v.recall_enabled=true', query)
+        self.assertEqual(parameters, (actor, subject, conversation))
+        self.assertIn('v.conversation_id=%s', query)
         self.assertIn('t.status=\'completed\'', query)
         self.assertIn("p.status='active'", query)
         with patch.object(chats, 'require_conversation', side_effect=AccessDenied):
@@ -282,8 +282,7 @@ class PatientProfileDatabaseTests(unittest.TestCase):
 
         with self.connection() as conn:
             context = chats.get_patient_context(conn, actor, sibling)
-            self.assertEqual([item['statement'] for item in context], ['更正一下，复查时间还没定。'])
-            self.assertEqual(context[0]['source_kind'], 'patient_statement')
+            self.assertEqual(context, [])
             conn.execute('UPDATE conversations SET recall_enabled=false WHERE conversation_id=%s', (sibling,))
             self.assertEqual(chats.get_patient_context(conn, actor, sibling), [])
             # The source conversation can still use its own statements after recall is disabled.

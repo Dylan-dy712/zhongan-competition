@@ -323,7 +323,7 @@ def route_document(document: dict, path: Path, pipeline_version: str, ocr: Ocr |
 
 
 def analyze_models(material, knowledge_entries, user_context, source_refs, fact_inputs,
-                   encounter_dates, advance, knowledge_excluded=False):
+                   encounter_dates, advance, knowledge_excluded=False, memory_context=None):
     """Overlap independent network calls; SQL and release checks stay on the caller."""
     started = time.monotonic()
     timings = {}
@@ -368,7 +368,7 @@ def analyze_models(material, knowledge_entries, user_context, source_refs, fact_
             from .analysis_sources import pack_sources
             packed, aliases = pack_sources([{'evidence':fact_inputs}])
             report = measured('guidance_seconds', draft_report, material, reviewable, user_context,
-                user_sources=source_refs, structured_costs=report_cost_context(fact_inputs,fields['candidates'].get('cost_lines',[])),
+                user_sources=source_refs, memory_context=memory_context, structured_costs=report_cost_context(fact_inputs,fields['candidates'].get('cost_lines',[])),
                 personnel=fields.get('personnel',[]), normalized_dates=encounter_dates, analysis_sources=packed,
                 care_priorities=priorities, structured_fields=fields.get('candidates',{}))
             report.setdefault('usage_metadata',{})['web_search']=web_search
@@ -431,6 +431,8 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
             def checkpoint(page):
                 # Commit each successful page before another OCR/model request.
                 with conn.transaction():
+                    from .report_memory import lock_snapshot
+                    lock_snapshot(conn,run.get('context_snapshot'))
                     require_parse_scope(conn,run)
                     context_sources(conn,run,lock=True)
                     save_page(conn,document,fingerprint,page)
@@ -481,7 +483,8 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
             material, knowledge_entries,
             run['context_snapshot']['case_user_context'] if run.get('context_snapshot') else
             (case_meta["user_context"] if case_meta else None),
-            source_refs, fact_inputs, encounter_dates, advance, knowledge_excluded)
+            source_refs, fact_inputs, encounter_dates, advance, knowledge_excluded,
+            memory_context=(run.get('context_snapshot') or {}).get('memory'))
         performance['parse_prepare_seconds'] = round(parse_seconds,3)
         performance['recognition_cache']={'reused_pages':reused_pages,'processed_pages':recognized_pages}
 
@@ -493,6 +496,8 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
             for _document, pages in parsed_documents for page in pages
         )
         with conn.transaction():
+            from .report_memory import lock_snapshot, references
+            lock_snapshot(conn,run.get('context_snapshot'))
             conn.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s,0))",
                          (f"case-report:{run['case_id']}",))
             authorized = conn.execute(
@@ -645,7 +650,8 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
                 except Exception:
                     report_errors.append("INVALID_ACTION")
             has_pending_claim = any(c.review_status == "pending" for s in sections for c in s.claims)
-            report_status = "pending_review" if waiting_review or report_errors or has_pending_claim else "ready"
+            memory_refs=references(run.get('context_snapshot'))
+            report_status = "pending_review" if waiting_review or report_errors or has_pending_claim or memory_refs else "ready"
             consent_refs = [{"consent_id": str(case_meta["consent_id"]),
                              "version": case_meta["consent_version"], "purpose": "case_guidance"}]
             conn.execute("DELETE FROM reports WHERE run_id=%s", (run["run_id"],))
@@ -658,12 +664,12 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
             conn.execute(
                 """INSERT INTO reports(report_id,case_id,run_id,report_version,status,sections,actions,
                    input_hash,model_id,prompt_version,knowledge_version,policy_version,memory_refs,
-                   consent_refs,validation_errors) VALUES (%s,%s,%s,%s,%s,%s::jsonb,%s::jsonb,%s,%s,%s,%s,%s,'[]',%s::jsonb,%s::jsonb)""",
+                   consent_refs,validation_errors) VALUES (%s,%s,%s,%s,%s,%s::jsonb,%s::jsonb,%s,%s,%s,%s,%s,%s::jsonb,%s::jsonb,%s::jsonb)""",
                 (report_id, run["case_id"], run["run_id"], report_version, report_status,
                  json.dumps([s.model_dump(mode="json") for s in sections], ensure_ascii=False),
                  json.dumps(actions, ensure_ascii=False), run["input_hash"], model_id,
                  REPORT_PROMPT_VERSION, knowledge_version or "knowledge:none", REPORT_POLICY_VERSION,
-                 json.dumps(consent_refs), json.dumps(report_errors)),
+                 json.dumps(memory_refs), json.dumps(consent_refs), json.dumps(report_errors)),
             )
             if report_status == 'pending_review':
                 conn.execute("""INSERT INTO review_tasks
@@ -800,6 +806,7 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
                 "reading_quality": report_model_result.get('usage_metadata',{}).get('guidance_delivery'),
             }}
             result_status = 'failed' if report_model_result['status'] == 'failed' else ('waiting_review' if waiting_review else 'completed')
+            context_sources(conn,run,lock=True)
             conn.execute(
                 """UPDATE analysis_runs SET status=%s, current_stage='validate', stage_results=%s::jsonb,
                    finished_at=now(), error=%s::jsonb,

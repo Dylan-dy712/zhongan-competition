@@ -10,7 +10,7 @@ from pathlib import Path
 
 @unittest.skipUnless(os.name == 'posix' and shutil.which('bash'), 'Linux deployment harness')
 class FrontendDeploymentTests(unittest.TestCase):
-    def run_release(self, *, backend_change=False, catalog_change=False, fail_nginx=False, fail_backup=False):
+    def run_release(self, *, backend_change=False, catalog_change=False, ranker_change=False, fail_nginx=False, fail_backup=False):
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory); home=root/'home/ubuntu'
             app=home/'zhongan-app'; release=home/'zhongan-releases/release-fixture'; web=root/'web'; tools=root/'bin'
@@ -26,6 +26,9 @@ class FrontendDeploymentTests(unittest.TestCase):
                 write(base/'scripts/placeholder','same')
                 write(base/'contracts/medical-services/catalog.json','new' if base==release and catalog_change else 'same')
                 write(base/'REVISION',('a' if base==app else 'b')*40)
+                executable(base/'output_dir/memory-ranker/semantix-ranker',
+                    "printf '%s\\n' '{\"protocol\":\"zhongan-memory-rank-v1\",\"request_id\":\"deploy-probe\",\"hits\":[]}'"+
+                    ('\n# changed ranker' if base==release and ranker_change else ''))
             for unit in ('zhongan-api','zhongan-worker'):
                 write(release/f'deploy/{unit}.service','same unit')
                 write(root/f'etc/systemd/system/{unit}.service','same unit')
@@ -73,6 +76,12 @@ class FrontendDeploymentTests(unittest.TestCase):
 
     def test_catalog_change_is_a_runtime_release(self):
         result,log,_,_=self.run_release(catalog_change=True)
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertIn('BACKEND_CHANGED=1',result.stdout)
+        self.assertIn('systemctl restart zhongan-api zhongan-worker',log)
+
+    def test_ranker_change_is_a_runtime_release(self):
+        result,log,_,_=self.run_release(ranker_change=True)
         self.assertEqual(result.returncode,0,result.stderr)
         self.assertIn('BACKEND_CHANGED=1',result.stdout)
         self.assertIn('systemctl restart zhongan-api zhongan-worker',log)

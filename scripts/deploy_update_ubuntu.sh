@@ -12,6 +12,8 @@ test -d "$app_dir/.venv"
 test -f "$release_dir/services/api/sql/011_conversations.sql"
 test -f "$release_dir/apps/web/dist/index.html"
 test -f "$release_dir/REVISION"
+test -x "$release_dir/output_dir/memory-ranker/semantix-ranker"
+printf '%s\n' '{"protocol":"zhongan-memory-rank-v1","request_id":"deploy-probe","query":"","documents":[]}' | "$release_dir/output_dir/memory-ranker/semantix-ranker" | python3 -c 'import json,sys; r=json.load(sys.stdin); assert r["protocol"]=="zhongan-memory-rank-v1" and r["request_id"]=="deploy-probe" and r["hits"]==[]'
 revision="$(< "$release_dir/REVISION")"
 [[ "$revision" =~ ^[0-9a-f]{40}$ ]]
 mobile_dir="$release_dir/output_dir/mobile-demo/dist"
@@ -49,6 +51,9 @@ for unit in zhongan-api zhongan-worker; do
         backend_changed=1
     fi
 done
+if ! cmp -s "$release_dir/output_dir/memory-ranker/semantix-ranker" "$app_dir/output_dir/memory-ranker/semantix-ranker"; then
+    backend_changed=1
+fi
 printf 'BACKEND_CHANGED=%s\n' "$backend_changed"
 stopped=0
 changed=0
@@ -101,6 +106,8 @@ sudo install -d -m 700 -o "$(id -u)" -g "$(id -g)" /home/ubuntu/zhongan-data/web
 cp -a "$release_dir/scripts/." "$app_dir/scripts/"
 if [[ "$backend_changed" == 1 ]]; then
     cp -a "$release_dir/services" "$app_dir/"
+    install -d -m 755 "$app_dir/output_dir/memory-ranker"
+    install -m 755 "$release_dir/output_dir/memory-ranker/semantix-ranker" "$app_dir/output_dir/memory-ranker/semantix-ranker"
     cp -a "$release_dir/contracts/knowledge" "$app_dir/contracts/"
     cp -a "$release_dir/contracts/medical-services" "$app_dir/contracts/"
     cp -a "$release_dir/docs/medical/knowledge" "$app_dir/docs/medical/"
