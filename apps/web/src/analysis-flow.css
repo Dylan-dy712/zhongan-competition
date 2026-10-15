@@ -1,5 +1,7 @@
 .analysis-dialog{box-sizing:border-box;position:fixed;inset:0;margin:auto;width:min(680px,calc(100vw - 32px));max-height:calc(100dvh - 32px);overflow:auto;overscroll-behavior:contain;padding:38px 36px 28px;border:1px solid #e6fbf1;border-radius:36px;color:#153d36;background:radial-gradient(ellipse at 79% 27%,#cbffe6a8 0,transparent 39%),linear-gradient(150deg,#f1fff8 0%,#fbfffe 48%,#f8fcff 100%);box-shadow:0 24px 100px #133f3638;font-family:inherit;text-align:left;scrollbar-width:thin;scrollbar-color:#c3e5d7 transparent}
 .analysis-dialog::backdrop{background:#234d4770;backdrop-filter:blur(7px)}
+.analysis-step-summary{margin:-4px 0 13px;font-size:12px;line-height:1.6;color:#6f9289;font-variant-numeric:tabular-nums}
+.analysis-percent strong.analysis-syncing{font-size:24px}
 .analysis-dialog button{font:inherit;cursor:pointer}.analysis-dialog button:focus-visible{outline:3px solid #008b72;outline-offset:4px}
 .analysis-close{position:absolute;z-index:5;right:18px;top:16px;width:40px;height:40px;border:0;border-radius:50%;background:#ffffffba;color:#62877e;font-size:30px!important;line-height:1}
 .analysis-hero{position:relative;min-height:242px;isolation:isolate}.analysis-hero-copy{position:relative;z-index:2;width:68%}
