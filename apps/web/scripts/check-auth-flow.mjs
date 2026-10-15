@@ -123,9 +123,9 @@ try{
   await act(async()=>resolveClaimNarrative());await flush();await flush();
   assert.equal(window.location.hash,'#/chat','Claim report opens automatically once its text is ready');
   assert.ok(document.querySelector('.analysis-narrative'));
-  assert.ok(document.querySelector('#chat-topic-action'),'Claim completion must show care cards');
-  assert.ok(document.querySelector('#chat-topic-summary'));assert.ok(document.querySelector('#chat-topic-cost'));
-  assert.ok(document.querySelector('.nuan-quick-actions'),'Claim cards must have working shortcuts');
+  assert.equal(document.querySelector('#chat-topic-action, #chat-topic-summary, #chat-topic-cost'),null,'Completed interpretation does not show the removed care cards');
+  assert.equal(document.querySelector('.nuan-conversation-caption'),null,'The removed card heading stays absent');
+  assert.equal(document.querySelector('.nuan-quick-actions'),null,'The removed care cards have no footer shortcuts');
   await click('首页');await click('问暖暖');
   assert.equal(document.querySelector('#chat-topic-action'),null,'Ordinary chat visits must not retain claim-entry cards');
   assert.equal(document.querySelector('.nuan-quick-actions'),null,'No shortcuts to absent cards');
