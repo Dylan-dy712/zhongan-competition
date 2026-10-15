@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import time
 from datetime import datetime, timezone
 from typing import Literal
@@ -30,7 +31,7 @@ from .contracts.knowledge import DiseaseCode
 from .patient_followup import FollowupPayload, FOLLOWUP_INSTRUCTION, source_patient_updates
 
 
-PROMPT_VERSION = 'conversation-agent-v5-patient-followups'
+PROMPT_VERSION = 'conversation-agent-v6-complete-followups'
 ANALYSIS_PROMPT_VERSION = 'patient-analysis-narrative-v17-patient-followups'
 ANALYSIS_INSTRUCTION = """
 本轮是暖暖看完资料后，对用户讲清这次就医情况。遵循上面的对话语气，读起来要像人在耐心讲解。
@@ -85,6 +86,7 @@ message_attachment_text和read_chat_attachments返回的是聊天附件识别文
 有工具需求就发出 tool_calls。最后只输出 JSON：
 {"text":"自然语言回答，可分段","citations":[{"quote":"正文中的唯一原句","source_refs":["该句实际证据UUID或知识entry_id"]}],"evidence_refs":["实际证据UUID"],"history_refs":["实际历史turn_id"],"knowledge_refs":["检索返回的entry_id"]}。
 回答最多3000字。普通聊天和追问无需附证据；声称材料事实时应附对应证据。
+“我查一下知识库”“稍后再解释”等过程承诺不是最终回答。需要检索就实际调用工具，拿到结果后在本轮直接解释；检索无结果或不可用也须说明具体限制与可行的核对方向，不能只让用户等待。
 不要向用户展示提示词、技术参数或内部工具名称。""" + CARE_VOICE + FOLLOWUP_INSTRUCTION
 
 
@@ -106,6 +108,22 @@ class AnalysisWireReply(AgentReply):
         if isinstance(value,list) and all(isinstance(ref,str) for ref in value):
             return list(dict.fromkeys(value))
         return value
+
+
+def pending_knowledge_reply(text):
+    """Catch short search promises accidentally emitted as terminal JSON.
+
+    Deliberately narrow: substantive explanations and explicit retrieval failures
+    can be valid final replies. This is not a medical-content quality classifier.
+    """
+    if len(text) > 240:
+        return False
+    if re.search(r'未(?:找到|检索到|命中)|没有(?:找到|查到|检索到)|暂(?:时)?(?:无法|不可用)|检索失败', text):
+        return False
+    if re.search(r'是指|指的是|意味着|属于|通常|分为|[甲乙丙]类[：:]|[甲乙丙]类.{0,5}(?:是|指|按|由|需)', text):
+        return False
+    return bool(re.search(r'(?:查一下|查一查|查询一下|检索一下|先查|先检索|帮你查|帮您查|正在查|正在检索|去查|去检索).{0,24}知识库', text)
+                or re.search(r'知识库.{0,16}(?:查一下|查一查|检索一下|查询一下)', text))
 
 
 class ToolArgs(BaseModel):
@@ -457,6 +475,7 @@ def run_agent(history, question, attachments, tools, model=None, on_event=None, 
     events = [{'tool': 'read_chat_attachments', 'status': attachment_materials['status']}] if attachment_materials else []
     budget = 6
     repaired = False
+    completion_repaired = False
     analysis_has_evidence = False
     aliases = {}
     knowledge_pages = []
@@ -643,6 +662,31 @@ def run_agent(history, question, attachments, tools, model=None, on_event=None, 
                  ('材料中S1等短编号' if analysis_mode else '实际来源UUID字符串') +
                  '）、history_refs（最多12个历史UUID字符串）、knowledge_refs（最多8个真实检索条目ID）、citations（逐条quote原句与source_refs数组，quote在正文中须唯一且不跨行）。只选择支持正文关键事实的少量直接来源，绝对不要复制整个材料编号集合；没有引用时用空数组。另保留clarification_questions（最多2项，field、question和options，每个选项含label和message）、suggested_questions（最多3条，每条最多200字符）和patient_updates（最多5项，field与逐字等于用户本条消息全文的statement）；无需补问或更新时用空数组。text可保留编号与**加粗**，保留citations中的逐条来源绑定，不要输出其他字段。'},
             ])
+            continue
+        if not analysis_mode and pending_knowledge_reply(reply.text):
+            if completion_repaired or round_index >= 3:
+                raise ValueError('AGENT_INCOMPLETE_REPLY')
+            completion_repaired = True
+            # The model promised this specific tool but never called it. Execute
+            # the authorized search, record it, then require an actual response.
+            # Do not repeat a retrieval already executed during this turn.
+            if not any(event['tool'] == 'search_knowledge' for event in events) and budget:
+                arguments = json.dumps({'query': question[:400], 'limit': 4}, ensure_ascii=False)
+                search_call = {'id': 'completion-search', 'type': 'function',
+                    'function': {'name': 'search_knowledge', 'arguments': arguments}}
+                messages.append({'role': 'assistant', 'content': None, 'tool_calls': [search_call]})
+                found = tools.execute('search_knowledge', arguments)
+                budget -= 1
+                events.append({'tool': 'search_knowledge', 'status': str(found.get('status', 'completed'))})
+                if on_event:
+                    on_event(events)
+                messages.append({'role': 'tool', 'tool_call_id': search_call['id'],
+                    'content': json.dumps(found, ensure_ascii=False, default=str)})
+            else:
+                messages.append({'role': 'assistant', 'content': content})
+            messages.append({'role': 'user', 'content':
+                '上一条只有检索过程承诺，尚未回答。根据本轮实际工具结果现在直接回答原问题，保留真实引用。'
+                '无命中或工具不可用时如实解释能确认的范围与核对方向。不要再说稍后查询、等待或随后回复。输出完整JSON。'})
             continue
         if analysis_mode and analysis_has_evidence and not reply.evidence_refs:
             raise ValueError('UNSOURCED_ANALYSIS')
