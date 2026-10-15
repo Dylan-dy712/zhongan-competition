@@ -117,7 +117,8 @@ try{
   assert.ok(resolveClaimNarrative,'Explicit report entry starts text generation');
   const claimProgress=document.querySelector('.chat-workspace > dialog.analysis-dialog');
   assert.equal(claimProgress.open,true);
-  assert.ok(claimProgress.querySelector('progress').value>=95 && claimProgress.querySelector('progress').value<100);
+  assert.equal(claimProgress.querySelector('progress').value,4,'Claim narrative is the unfinished fifth step');
+  assert.equal(claimProgress.querySelector('progress').max,5);
   assert.equal(window.location.hash,'#/chat');
   await act(async()=>resolveClaimNarrative());await flush();await flush();
   assert.equal(window.location.hash,'#/chat','Claim report opens automatically once its text is ready');
