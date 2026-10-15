@@ -12,12 +12,16 @@ dom.window.HTMLElement.prototype.scrollIntoView=function(){};
 dom.window.HTMLDialogElement.prototype.showModal=function(){this.open=true;};
 dom.window.HTMLDialogElement.prototype.close=function(){this.open=false;};
 const realTimeout=globalThis.setTimeout;
+const realInterval=globalThis.setInterval,realNow=Date.now;
+let estimateTime=0;
+Date.now=()=>estimateTime;
+globalThis.setInterval=(fn,ms,...args)=>realInterval(fn,ms===250?1:ms,...args);
 globalThis.setTimeout=(fn,ms,...args)=>realTimeout(fn,ms>=1500?20:ms,...args);
 let conversation={conversation_id:'analysis-ui',subject_id:'synthetic',case_id:'case-ui',title:'合成分析流程',recall_enabled:false,updated_at:'2026-10-08T00:00:00Z'};
 let phase='initial',run='run-1',uploads=0,acceptedUploads=[],submissions=[],turns=[],resolveSecond,resolveNarrative;
 let delayNarrative=false,failNarrative=false,continuations=0,polls=0,pollOutage=false;
 const section={section_type:'cost_explanation',pending_count:1,items:[{text:'医疗总费用：120元',kind:'checked',evidence_refs:['00000000-0000-4000-8000-000000000002']}]};
-const state=()=>({conversation,turns,analysis:{status:phase==='initial'?'not_started':phase==='ready'?'waiting_review':phase==='failed'?'failed':phase==='queued'?'queued':'running',run_id:phase==='initial'?undefined:run,stage:phase==='ready'?'validate':phase},
+const state=()=>({conversation,turns,analysis:{status:phase==='initial'?'not_started':phase==='ready'?'waiting_review':phase==='failed'?'failed':phase==='queued'?'queued':'running',run_id:phase==='initial'?undefined:run,stage:phase==='ready'?'validate':phase,stage_results:{parse:{reused_pages:['initial','parse','queued'].includes(phase)?0:2}}},
   report:{status:'not_released'},material_report:{status:phase==='ready'?'available':phase==='failed'?'failed':phase,run_id:run,report_id:'material-ui',document_count:2,source_report_version:1,pending_count:1,notice:'合成自动核对提示',sections:[section]}});
 globalThis.fetch=async(url,options={})=>{
  const path=new URL(url,'http://localhost').pathname;
@@ -82,14 +86,22 @@ try{
  assert.equal(document.querySelector('.chat-workspace > dialog.analysis-dialog progress').value,0);
  for(const [next,completed] of [['parse',0],['extract',1],['insights',1],['guidance',2],['validate',3]]){
   phase=next;let displayed;
-  for(let attempt=0;attempt<12;attempt++){await flush();displayed=document.querySelector('.chat-workspace > dialog.analysis-dialog progress').value;if(displayed===completed*20)break;}
+  for(let attempt=0;attempt<12;attempt++){await flush();displayed=document.querySelector('.chat-workspace > dialog.analysis-dialog progress').value;if(displayed>=completed*20)break;}
   const progress=document.querySelector('.chat-workspace > dialog.analysis-dialog progress');
-  assert.equal(progress.max,100);assert.equal(displayed,completed*20,`Only confirmed steps count during ${next}`);
+  assert.equal(progress.max,100);assert.ok(displayed>=completed*20&&displayed<(completed+1)*20,`Estimate stays in the real stage during ${next}`);
   assert.match(progress.getAttribute('aria-valuetext'),new RegExp(`已完成 ${completed} / 5 步`));
-  assert.match(document.querySelector('.analysis-percent').textContent,new RegExp(`${completed*20}%`),'The percentage is visible as well as the step count');
+  assert.match(document.querySelector('.analysis-percent').textContent,new RegExp(`${displayed}%`),'The estimate is visible as well as the real step count');
   assert.match(document.querySelector('.analysis-step-summary').textContent,new RegExp(`已完成 ${completed} / 5 步`));
  }
- await act(async()=>new Promise(r=>realTimeout(r,300)));assert.equal(document.querySelector('.analysis-dialog progress').value,60,'Waiting alone cannot advance progress');
+ estimateTime+=6000;await flush();
+ const simulated=document.querySelector('.analysis-dialog progress').value;
+ assert.ok(simulated>60&&simulated<80,'The percentage simulates progress inside the current stage');
+ assert.equal(document.querySelectorAll('.analysis-steps .done').length,3,'Simulation never completes a step');
+ assert.match(document.querySelector('.analysis-reuse-note').textContent,/已直接使用 2 页已识别内容/);
+ assert.match(document.querySelector('.analysis-progress-note').textContent,/模拟预估/);
+ estimateTime+=86400000;
+ for(let attempt=0;attempt<12&&document.querySelector('.analysis-dialog progress').value<79;attempt++)await flush();
+ assert.equal(document.querySelector('.analysis-dialog progress').value,79,'A long wait stops before the next real stage');
  await click('收起进度，稍后查看');assert.equal(document.querySelector('.chat-workspace > dialog.analysis-dialog').open,false);
  const pollsBeforeNarrative=polls;
  delayNarrative=true;phase='ready';await flush();await flush();
@@ -157,5 +169,5 @@ try{
  assert.equal(continuations,modelsBeforeOutage);assert.equal(submissions.length,analysesBeforeOutage);
  assert.doesNotMatch(document.body.textContent,/服务暂时不可用/,'Saved report recovery clears its earlier generation failure');
  console.log('PASS: uploads, real stages, conversational AI report, adaptive paragraphs, inline source links, legacy route redirect, failure retry and completion. Synthetic fixtures only.');
-}finally{await act(async()=>root.unmount());await modules.close();dom.window.close();globalThis.setTimeout=realTimeout;}
+}finally{await act(async()=>root.unmount());await modules.close();dom.window.close();globalThis.setTimeout=realTimeout;globalThis.setInterval=realInterval;Date.now=realNow;}
 

@@ -36,6 +36,8 @@ from .llm_extractor import PROMPT_VERSION, SCHEMA_VERSION as MODEL_SCHEMA_VERSIO
 from .ocr import OCR_METHOD, OCR_VERSION, Ocr, create_ocr, page_ocr_method
 from .document_quality import classify_material
 from . import medical_records
+from .parse_cache import cached_pages,save_page,require_parse_scope,payload_digest
+from .volcengine_ocr import VolcengineOcr
 
 
 TEXT_PARSER_VERSION = "controlled-text-v1"
@@ -246,13 +248,15 @@ def ocr_page(image_bytes: bytes, width: int, height: int, base: dict, ocr: Ocr):
     return base
 
 
-def parse_pdf(path: Path, ocr: Ocr | None = None):
+def parse_pdf(path: Path, ocr: Ocr | None = None, cached=None, checkpoint=None):
     reader = PdfReader(str(path), strict=False)
     if reader.is_encrypted and reader.decrypt("") == 0:
         raise RuntimeError("PDF_ENCRYPTED")
     pages = []
     rendered_pdf = None
     for page_index, page in enumerate(reader.pages):
+        if cached and page_index in cached:
+            pages.append(cached[page_index]);continue
         text = page.extract_text() or ""
         image_count = page_image_count(page)
         text_count = len(text.strip())
@@ -282,21 +286,27 @@ def parse_pdf(path: Path, ocr: Ocr | None = None):
             image.save(output, format="JPEG", quality=92)
             parsed_page = ocr_page(output.getvalue(), image.width, image.height, parsed_page, ocr)
         pages.append(parsed_page)
+        if checkpoint:checkpoint(parsed_page)
     return pages
 
 
-def route_document(document: dict, path: Path, pipeline_version: str, ocr: Ocr | None = None):
+def route_document(document: dict, path: Path, pipeline_version: str, ocr: Ocr | None = None, cached=None, checkpoint=None):
+    def complete(pages):
+        if checkpoint:
+            for page in pages:checkpoint(page)
+        return pages
     if pipeline_version == "text-parser-v1":
         if document["media_type"] != "text/plain":
             raise RuntimeError("PARSER_NOT_IMPLEMENTED")
-        return parse_controlled_text(document, path)
+        return [cached[0]] if cached and 0 in cached else complete(parse_controlled_text(document,path))
     if pipeline_version != "document-parser-v1":
         raise RuntimeError("PARSER_NOT_IMPLEMENTED")
     if document["media_type"] == "text/plain":
-        return parse_controlled_text(document, path)
+        return [cached[0]] if cached and 0 in cached else complete(parse_controlled_text(document,path))
     if document["media_type"] == "application/pdf":
-        return parse_pdf(path, ocr)
+        return parse_pdf(path,ocr,cached,checkpoint)
     if document["media_type"] in {"image/jpeg", "image/png"}:
+        if cached and 0 in cached:return [cached[0]]
         with Image.open(path) as image:
             width, height = image.size
         page = {
@@ -308,7 +318,7 @@ def route_document(document: dict, path: Path, pipeline_version: str, ocr: Ocr |
                         "metadata": {"analysis_status": "ocr_required"}}],
             "metadata": {"media_type": document["media_type"], "image_count": 1},
         }
-        return [ocr_page(path.read_bytes(), width, height, page, ocr or create_ocr())]
+        return complete([ocr_page(path.read_bytes(),width,height,page,ocr or create_ocr())])
     raise RuntimeError("PARSER_NOT_IMPLEMENTED")
 
 
@@ -393,6 +403,13 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
     try:
         advance('parse')
         source_refs=context_sources(conn,run)
+        provider=os.environ.get('ZHONGAN_OCR_PROVIDER','tencent').strip().lower()
+        ocr_version=VolcengineOcr.version if provider=='volcengine' else OCR_VERSION
+        accepted_versions={TEXT_PARSER_VERSION,PDF_PARSER_VERSION,ocr_version}
+        fingerprint=payload_digest({'cache':'parsed-pages-v1','pipeline':run['pipeline_version'],
+            'text':TEXT_PARSER_VERSION,'pdf':PDF_PARSER_VERSION,'router':ROUTING_VERSION,
+            'ocr_provider':provider,'ocr_version':ocr_version})
+        reused_pages=recognized_pages=0
         for reference in run["document_versions"]:
             document = conn.execute(
                 """SELECT * FROM documents WHERE case_id=%s AND document_id=%s
@@ -401,14 +418,32 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
             ).fetchone()
             if document is None:
                 raise RuntimeError("DOCUMENT_VERSION_NOT_FOUND")
+            if reference.get('source_hash',document['source_hash'])!=document['source_hash']:
+                raise RuntimeError('SOURCE_HASH_MISMATCH')
             path = Path(document["storage_ref"]).resolve()
             path.relative_to(storage_root)
             raw_hash = hashlib.sha256(path.read_bytes()).hexdigest()
             if raw_hash != document["source_hash"]:
                 raise RuntimeError("SOURCE_HASH_MISMATCH")
-            pages = route_document(document, path, run["pipeline_version"])
+            with conn.transaction():
+                require_parse_scope(conn,run)
+                cached=cached_pages(conn,document,fingerprint,accepted_versions,ROUTING_VERSION,run['pipeline_version'])
+            def checkpoint(page):
+                # Commit each successful page before another OCR/model request.
+                with conn.transaction():
+                    require_parse_scope(conn,run)
+                    context_sources(conn,run,lock=True)
+                    save_page(conn,document,fingerprint,page)
+            pages = route_document(document,path,run['pipeline_version'],cached=cached,checkpoint=checkpoint)
+            reused_pages+=sum(page['page_index'] in cached for page in pages)
+            recognized_pages+=sum(page['page_index'] not in cached for page in pages)
             parsed_documents.append((document, pages))
 
+        row=conn.execute('''UPDATE analysis_runs SET stage_results=jsonb_set(stage_results,'{parse}',%s::jsonb,true)
+            WHERE run_id=%s AND lease_token=%s AND status='running' RETURNING run_id''',
+            (json.dumps({'status':'completed','reused_pages':reused_pages,'processed_pages':recognized_pages}),
+             run['run_id'],run['lease_token'])).fetchone()
+        if not row:raise RuntimeError('ANALYSIS_LEASE_LOST')
         advance('extract')
         material = "\n\n".join(
             page["text"] for _document, pages in parsed_documents for page in pages if page["text"]
@@ -448,6 +483,7 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
             (case_meta["user_context"] if case_meta else None),
             source_refs, fact_inputs, encounter_dates, advance, knowledge_excluded)
         performance['parse_prepare_seconds'] = round(parse_seconds,3)
+        performance['recognition_cache']={'reused_pages':reused_pages,'processed_pages':recognized_pages}
 
         advance('validate')
         evidence_ids = [str(row['evidence_id']) for row in fact_inputs]
@@ -732,6 +768,7 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
             performance['elapsed_seconds'] = round(time.monotonic()-run_started,3)
             result = {"performance":performance,"parse": {
                 "status": "waiting_review" if waiting_review else "completed",
+                "reused_pages":reused_pages,"processed_pages":recognized_pages,
                 "routing_version": ROUTING_VERSION, "pages": routing,
                 "document_count": len(parsed_documents), "evidence_ids": evidence_ids,
             }, "extract": {

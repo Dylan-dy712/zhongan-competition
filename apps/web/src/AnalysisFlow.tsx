@@ -6,6 +6,7 @@ import {currentNarrative} from './AnalysisNarrative';
 import mascot from '../../../output_dir/product-design/assets/reference-mascot.webp';
 import './analysis-flow.css';
 import {SourceRefs} from './SourceCitations';
+import {useAnalysisEstimate} from './useAnalysisEstimate';
 
 function AnalysisIcon({kind}:{kind:string}) {
   const paths:Record<string,React.ReactNode>={
@@ -64,6 +65,7 @@ export default function AnalysisFlow({open,snapshot,upload,submitting,error,onCl
   const titleId=useId();
   const view=analysisView(snapshot,upload,submitting,error);
   const processing=view.kind==='processing';
+  const estimated=useAnalysisEstimate(`${snapshot?.conversation.conversation_id}:${snapshot?.analysis.run_id}`,view.kind,view.index,view.percent);
   const stageKey=`${snapshot?.conversation.conversation_id}:${snapshot?.analysis.run_id}:${view.kind}:${view.index}`;
   const clock=useRef({key:'',started:0});
   const [waiting,setWaiting]=useState({key:'',elapsed:0});
@@ -78,7 +80,7 @@ export default function AnalysisFlow({open,snapshot,upload,submitting,error,onCl
   },[open,processing,stageKey,view.index]);
   const completedSteps=Math.max(0,view.index);
   const progressMax=100;
-  const progressValue=view.percent??undefined;
+  const progressValue=estimated??undefined;
   const waitingLong=processing && waiting.key===stageKey && waiting.elapsed>60;
   useEffect(()=>{
     const node=dialog.current;if(!node || !open)return;
@@ -96,14 +98,15 @@ export default function AnalysisFlow({open,snapshot,upload,submitting,error,onCl
       </div>
     </header>
     {(processing || view.percent!==null) && <section className="analysis-status-card" aria-label="材料分析进度与阶段">
-      <div className="analysis-percent">{view.percent!==null?<strong>{view.percent}<small>%</small></strong>:<strong className="analysis-syncing">同步中</strong>}<span>{view.kind==='upload'?'上传进度':processing?'整体进度':'分析完成'}</span></div>
+      <div className="analysis-percent">{estimated!==null?<strong>{estimated}<small>%</small></strong>:<strong className="analysis-syncing">同步中</strong>}<span>{view.kind==='upload'?'上传进度':processing?'预估进度':'分析完成'}</span></div>
       {processing&&<p className="analysis-step-summary">已完成 {completedSteps} / {steps.length} 步{view.index>=0?` · 当前第 ${view.index+1} 步`:''}</p>}
+      {processing&&Number(snapshot?.analysis.stage_results?.parse?.reused_pages)>0&&<p className="analysis-reuse-note">已直接使用 {snapshot?.analysis.stage_results?.parse?.reused_pages} 页已识别内容</p>}
       <div className={`analysis-progress-track ${processing || view.kind==='upload'?'active':''} ${progressValue===undefined?'indeterminate':''}`}>
-        <progress max={progressMax} value={progressValue} aria-label={view.kind==='upload'?'材料上传进度':'材料分析进度'} aria-valuetext={processing?`${view.percent!==null?`进度 ${view.percent}%，`:''}已完成 ${completedSteps} / ${steps.length} 步，${view.index>=0?`当前正在${steps[view.index][1]}`:'等待处理状态'}`:undefined}/>
+        <progress max={progressMax} value={progressValue} aria-label={view.kind==='upload'?'材料上传进度':'材料分析进度'} aria-valuetext={processing?`${estimated!==null?`预估进度 ${estimated}%，`:''}已完成 ${completedSteps} / ${steps.length} 步，${view.index>=0?`当前正在${steps[view.index][1]}`:'等待处理状态'}`:undefined}/>
         <span className="analysis-progress-fill" style={progressValue===undefined?undefined:{width:`${progressValue/progressMax*100}%`}} aria-hidden="true"/>
       </div>
       {processing && <div className="analysis-live-panel"><div className="analysis-live-note"><span aria-hidden="true"/>{waitingLong?'这一步耗时较长，可以收起窗口稍后查看':'完成当前步骤后会自动继续'}</div>
-        <p className="analysis-progress-note">百分比按实际完成步骤计算，各步骤耗时不同</p></div>}
+        <p className="analysis-progress-note">阶段内百分比为模拟预估，完成步骤以实际处理结果为准</p></div>}
       {view.kind!=='upload' && <ol className="analysis-steps">{steps.map(([key,title],i)=>{
         const status=i<view.index?'done':i===view.index?'current':'pending';
         return <li key={key} className={status} aria-current={status==='current'?'step':undefined}>
