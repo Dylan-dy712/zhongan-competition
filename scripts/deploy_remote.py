@@ -53,7 +53,7 @@ def main():
         raise SystemExit('Commit all intended changes before deploying')
     revision = subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip()
     ci_run=verified_ci_run(revision)
-    roots = ('services/', 'scripts/', 'deploy/', 'contracts/knowledge/', 'docs/medical/knowledge/')
+    roots = ('services/', 'scripts/', 'deploy/', 'contracts/knowledge/', 'contracts/medical-services/', 'docs/medical/knowledge/')
     committed = subprocess.check_output(['git','archive','--format=tar','HEAD',*roots])
     artifact = io.BytesIO()
     with tarfile.open(fileobj=artifact, mode='w:gz') as archive:

@@ -6,6 +6,7 @@ import reading from '../../../output_dir/product-design/assets/nuan-reading-v1.w
 
 import {SourceRefs} from './SourceCitations';
 import {getEvidenceImage} from './api';
+import {ReportServiceGuide} from './MedicalServices';
 export {brand,reading};
 
 export function EvidencePanel({evidence,onClose,token=''}:{evidence:Evidence;onClose:()=>void;token?:string}) {
@@ -23,8 +24,9 @@ export function EvidencePanel({evidence,onClose,token=''}:{evidence:Evidence;onC
     {imageError&&<p role="status">{imageError}</p>}
   </dialog>;
 }
-export function CareReport({report,initialSection,onEvidence}: {
+export function CareReport({report,initialSection,onEvidence,onServiceAsk,disabled=false}: {
   report:ChatSnapshot['report'];initialSection?:ReportSection['section_type'];onEvidence:(id:string)=>void;
+  onServiceAsk?:(message:string)=>Promise<boolean>;disabled?:boolean;
 }) {
   const root=useRef<HTMLDivElement>(null);
   useEffect(()=>{
@@ -41,5 +43,6 @@ export function CareReport({report,initialSection,onEvidence}: {
       <summary>{careSectionLabels[section.section_type]}<span aria-hidden="true">＋</span></summary>
       {section.claims.map(claim=><article key={claim.claim_id}><p>{claim.text}<SourceRefs refs={[...claim.evidence_refs,...(claim.knowledge_refs||[])]} catalog={catalog} onEvidence={onEvidence}/></p>{claim.claim_type==='to_confirm' && <small className="care-confirm">需要向医院或医生确认</small>}
         </article>)}</details>)}
+    <ReportServiceGuide onAsk={onServiceAsk} disabled={disabled}/>
   </div>;
 }
