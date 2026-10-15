@@ -963,6 +963,10 @@ def process_chat_message(conversation_id, body, actor_id, conn, input_kind='user
         if input_kind == 'user':
             memory_snapshot, history = memory_service.prepare_context(conn, actor_id, conversation_id, question, history)
             tools.memory_snapshot = memory_snapshot
+            for item in memory_snapshot['items']:
+                if item.get('source_kind') == 'historical_user_message':
+                    tools.history_ids.add(item['source_turn_id'])
+                    tools.history_cases.add(item['source_case_id'])
         elif analysis_run_id is not None:
             from .report_memory import check_report_refs, references
             frozen=conn.execute('SELECT case_id,context_snapshot FROM analysis_runs WHERE run_id=%s AND case_id=%s',
@@ -1011,7 +1015,7 @@ def process_chat_message(conversation_id, body, actor_id, conn, input_kind='user
             conn.rollback()
             chats.finish_turn(conn, actor_id, conversation_id, turn, events=events, error='MEMORY_CONTEXT_CHANGED')
             conn.commit()
-            raise HTTPException(409, '历史记忆或授权已变化，请重新提问。') from None
+            raise memory_repository.MemoryChanged() from None
         if isinstance(exc, ValueError) and str(exc) in {'ANALYSIS_SUPERSEDED', 'ANALYSIS_MATERIALS_CHANGED'}:
             chats.finish_turn(conn, actor_id, conversation_id, turn, events=events, error='ANALYSIS_SUPERSEDED')
             conn.commit()

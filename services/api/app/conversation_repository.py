@@ -233,6 +233,9 @@ def get_patient_context(conn, actor_id, conversation_id):
 
 def search_history(conn, actor_id, conversation_id, query):
     current = require_conversation(conn, actor_id, conversation_id)
+    from . import automatic_memory
+    if automatic_memory.enabled() and conn.execute('SELECT 1 FROM user_accounts WHERE actor_id=%s', (actor_id,)).fetchone():
+        return automatic_memory.search(conn, actor_id, conversation_id, query)
     from .memory_repository import settings, lock_scope, memory_consent_version
     lock_scope(conn, actor_id, current['subject_id'])
     state = settings(conn, actor_id, current['subject_id'])
