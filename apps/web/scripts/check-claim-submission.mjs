@@ -89,7 +89,7 @@ try{
   await click('带着这些资料问暖暖');
   assert.equal(document.querySelector('.care-primary').disabled,true,'Separate informed consent is mandatory');
   assert.equal(analysisCalls().length,0);assert.equal(consentCalls().length,0);
-  assert.match(document.querySelector('.care-privacy-card').textContent,/火山引擎.*百度千帆/);
+  assert.match(document.querySelector('.care-privacy-card').textContent,/使用 AI 识别/);
   await agree();await click('确认提交，开始解读');assert.match(document.body.textContent,/合成分析失败/);
   const authorization=consentCalls().find(call=>call.body);assert.equal(JSON.parse(authorization.body).confirmation,true);
   assert.equal(analysisCalls().length,1);assert.deepEqual(opens,[]);
