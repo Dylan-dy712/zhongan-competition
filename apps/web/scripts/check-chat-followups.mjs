@@ -16,7 +16,8 @@ const conversation={conversation_id:'synthetic-followup',subject_id:'synthetic-s
   title:'合成补问验证',recall_enabled:true,created_at:'2026-10-16',updated_at:'2026-10-16'};
 const suggestions=['票据上的医疗总费用是什么意思？','复查前需要准备哪些材料？','日常生活有哪些注意事项？'];
 const answer={text:'【合成界面测试】这次就医材料已整理。',evidence_refs:[],history_refs:[],analysis_run_id:'synthetic-run',
-  clarification_questions:[{field:'followup_time',question:'医生有交代什么时候复查吗？',options:[{label:'还不确定',message:'我还不确定复查时间。'}]}],
+  clarification_questions:[{field:'followup_time',question:'医生有交代什么时候复查吗？',options:[{label:'医生还没交代',message:'医生还没交代复查时间。'}]},
+    {field:'medication',question:'目前用药情况清楚吗？',options:[]}],
   suggested_questions:suggestions};
 const turn={turn_id:'synthetic-report',request_id:'synthetic-analysis',question:'分析完成',input_kind:'analysis_ready',
   status:'completed',attachments:[],tool_events:[],answer,created_at:'2026-10-16',error_code:null};
@@ -35,7 +36,7 @@ globalThis.fetch=async(url,options={})=>{
     if(fail)return Response.json({message:'合成失败，可重试'},{status:503});
     if(pending)await pending.promise;
     snapshot.turns.push({...turn,turn_id:'synthetic-user-'+sent.length,request_id:body.request_id,input_kind:'user',question:body.message,
-      answer:{...answer,patient_updates:body.message.includes('复查时间')?[{field:'followup_time',statement:body.message}]:[]}});
+      answer:{...answer,patient_updates:body.message.includes('复查时间')?['followup_time','medication'].map(field=>({field,statement:body.message})):[]}});
     return Response.json({answer:snapshot.turns.at(-1).answer});
   }
   if(path===`/v1/conversations/${conversation.conversation_id}`)return Response.json(snapshot);
@@ -69,26 +70,45 @@ try{
   assert.equal(document.querySelector('.composer textarea').value,'保留这条尚未发送的草稿');
   assert.match(document.querySelector('.chat-draft-attachments').textContent,/synthetic.txt/);
   assert.equal(document.querySelectorAll('.chat-followups').length,1,'Only latest reply offers interactive follow-ups');
+  const submit=()=>document.querySelector('.clarification-section form').dispatchEvent(new dom.window.Event('submit',{bubbles:true,cancelable:true}));
   await click('.clarification-choices button');
-  assert.equal(sent.at(-1).message,'我还不确定复查时间。');
-  assert.match(document.body.textContent,/已记录你的补充/);
-  await act(async()=>[...document.querySelectorAll('.clarification-choices button')].find(node=>node.textContent==='我来补充').click());
-  await type(document.querySelector('.clarification-form textarea'),'医生还没定时间，我会再确认');
+  assert.equal(sent.length,1,'Selecting the first answer must not send');
+  assert.equal(document.querySelector('.clarification-choices button').getAttribute('aria-pressed'),'true');
+  assert.match(document.querySelector('.clarification-submit').textContent,/已补充 1\/2/);
+  assert.ok(document.querySelector('.clarification-submit button').disabled);
+  await act(async()=>submit());assert.equal(sent.length,1,'Incomplete form cannot submit');
+  const medication=document.querySelectorAll('.clarification-question')[1];
+  await act(async()=>[...medication.querySelectorAll('button')].find(node=>node.textContent==='我来补充').click());
+  await type(medication.querySelector('textarea'),'药名我还没核对，稍后补充');
+  assert.equal(sent.length,1,'Typing the second answer must not send');
+  assert.match(document.querySelector('.clarification-submit').textContent,/已补充 2\/2/);
+  assert.ok(!document.querySelector('.clarification-submit button').disabled);
   fail=true;
-  await act(async()=>document.querySelector('.clarification-form').dispatchEvent(new dom.window.Event('submit',{bubbles:true,cancelable:true})));await flush();
+  await act(async()=>submit());await flush();
   const failed=sent.at(-1);
-  assert.equal(failed.message,'我补充一下复查时间：医生还没定时间，我会再确认');
-  assert.equal(document.querySelector('.clarification-form textarea').value,'医生还没定时间，我会再确认','Failed send retains clarification draft');
+  assert.equal(failed.message,'我补充一下这次的就医信息：\n复查时间：医生还没交代复查时间。\n用药情况：药名我还没核对，稍后补充');
+  assert.equal(document.querySelector('.clarification-form textarea').value,'药名我还没核对，稍后补充','Failed send retains all answers');
+  assert.equal(document.querySelector('.clarification-choices button').getAttribute('aria-pressed'),'true');
   fail=false;
-  await act(async()=>document.querySelector('.clarification-form').dispatchEvent(new dom.window.Event('submit',{bubbles:true,cancelable:true})));await flush();
+  let finish;pending={promise:new Promise(resolve=>{finish=resolve;})};
+  await act(async()=>{submit();submit();});await flush();
+  assert.equal(sent.length,3,'Double submit creates only one retry');
+  await act(async()=>finish());pending=null;await flush();
   assert.equal(sent.at(-1).request_id,failed.request_id,'Retry reuses the same durable request ID');
+  assert.match(document.body.textContent,/已记录你的补充/);
+  for(const question of document.querySelectorAll('.clarification-question')){
+    await act(async()=>[...question.querySelectorAll('button')].find(node=>node.textContent==='暂不确定').click());
+  }
+  assert.equal(sent.length,3,'Uncertainty selections stay local too');
+  await act(async()=>submit());await flush();
+  assert.equal(sent.length,4);assert.match(sent.at(-1).message,/复查时间：我暂不确定，稍后再补充。\n用药情况：我暂不确定，稍后再补充。/);
   assert.equal(document.querySelector('.composer textarea').value,'保留这条尚未发送的草稿');
   await act(async()=>root.unmount());root=createRoot(document.getElementById('root'));
   snapshot.turns=[{...turn,answer:{text:'兼容历史回答',evidence_refs:[],history_refs:[]}}];
   await act(async()=>root.render(React.createElement(modules.App)));await flush();
   assert.equal(document.querySelector('.chat-followups'),null);
   assert.match(document.body.textContent,/兼容历史回答/);
-  console.log('PASS: report follow-ups, one-click send, uncertainty, custom answers, profile receipt, draft/attachment preservation, busy protection, idempotent retry and legacy replies. Synthetic DOM fixtures only.');
+  console.log('PASS: two-question batch submit, no premature requests, uncertainty, custom answers, failed draft retention, idempotent retry, double-submit protection, one-click suggested questions, composer/attachment preservation and legacy replies. Synthetic fixtures only.');
 }finally{
   if(root)await act(async()=>root.unmount());await modules.close();dom.window.close();
 }

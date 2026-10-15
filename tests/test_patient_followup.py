@@ -76,6 +76,17 @@ class PatientFollowupTests(unittest.TestCase):
         reply, _ = run_agent([], statement, [], tools, model=model, analysis_mode=True)
         self.assertEqual(reply['patient_updates'], [])
 
+    def test_batched_answers_keep_both_fields_and_the_complete_uncertain_statement(self):
+        model, tools = MagicMock(), MagicMock()
+        statement = '我补充一下这次的就医信息：\n复查时间：医生还没交代复查时间。\n用药情况：药名我还没核对，稍后补充'
+        questions = [QUESTION, {**QUESTION, 'field': 'medication', 'question': '用药清楚吗？'}]
+        updates = [{'field': field, 'statement': statement} for field in ('followup_time', 'medication')]
+        model.complete.return_value = response(patient_updates=updates, clarification_questions=questions)
+        reply, _ = run_agent([], statement, [], tools, model=model)
+        self.assertEqual(reply['patient_updates'], updates)
+        self.assertEqual(reply['clarification_questions'], [])
+        self.assertEqual(model.complete.call_count, 1)
+
     def test_profile_is_separately_labelled_as_historical_user_data(self):
         model, tools = MagicMock(), MagicMock()
         model.complete.return_value = response()
