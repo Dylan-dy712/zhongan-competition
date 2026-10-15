@@ -26,8 +26,8 @@ class AgentTests(unittest.TestCase):
         reply, _ = run_agent([], '解释一个术语', [], tools, model=model)
         self.assertEqual(reply['citations'][0]['quote'], data['text'])
         self.assertEqual(model.complete.call_count, 2)
-        self.assertIn('CITATION_ANCHOR_NOT_UNIQUE', model.complete.call_args.args[0][-1]['content'])
-        self.assertIn('不能填知识库原文', model.complete.call_args.args[0][-1]['content'])
+        self.assertIn('paragraphs', model.complete.call_args.args[0][-1]['content'])
+        self.assertIn('不要把知识库原文当成引用位置', model.complete.call_args.args[0][-1]['content'])
         tools.execute.assert_not_called()
 
     def test_chat_citation_repair_is_bounded(self):

@@ -42,7 +42,7 @@ function requestId() {
   return `${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20)}`;
 }
 const toolLabels: Record<string,string> = {list_materials:'查看上传材料',start_analysis:'提交材料分析',
-  search_knowledge:'查阅医护与费用知识',
+  search_knowledge:'查阅医护与费用知识',search_web:'联网查阅权威资料',
   analysis_status:'查询分析进度',read_materials:'查阅原始依据',read_report:'读取分析报告',search_history:'查找以前的对话'};
 const statusLabels: Record<string,string> = {not_started:'尚未分析',queued:'材料已排队',running:'正在分析材料',
   waiting_review:'材料已解析，部分结论待专业复核',completed:'材料分析已完成',failed:'材料分析失败',cancelled:'分析已取消',

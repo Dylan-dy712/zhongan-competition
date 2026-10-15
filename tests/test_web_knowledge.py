@@ -3,7 +3,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import Mock,patch
 import requests
-from services.api.app.web_knowledge import WebKnowledge,safe_concepts,supplement_knowledge,approved_url,CONCEPTS
+from services.api.app.web_knowledge import WebKnowledge,safe_concepts,supplement_knowledge,approved_url,CONCEPTS,chat_concepts
 from services.api.app.knowledge_retrieval import KnowledgeRetriever
 
 
@@ -19,6 +19,29 @@ def response(term='胆囊结石',**changes):
 
 
 class WebKnowledgeTests(unittest.TestCase):
+    def test_cost_question_sends_only_a_fixed_public_query_and_keeps_official_links(self):
+        question='姓名张三，电话13800000000，费用清单上甲类、乙类、丙类是什么意思？'
+        concepts=chat_concepts(question)
+        self.assertEqual(concepts,[{'term':'医保目录分类','slot':'COST'}])
+        doc=response(Title='医保药品目录分类解读',Url='https://www.nhsa.gov.cn/test',
+            Content='甲类和乙类药品的一般含义。'+'这是合成的公开政策解释，具体待遇应核对当地政策及参保情况。'*5)
+        post=Mock(return_value=doc)
+        service=WebKnowledge(post=post)
+        found=service.search(concepts[0])
+        self.assertEqual(found['status'],'available')
+        self.assertEqual(found['results'][0]['retrieval_provider'],'volcengine')
+        self.assertEqual(post.call_args.kwargs['json']['Filter']['Sites'],'nhsa.gov.cn')
+        self.assertNotIn('张三',json.dumps(post.call_args.kwargs['json'],ensure_ascii=False))
+        self.assertNotIn('13800000000',json.dumps(post.call_args.kwargs['json']))
+        self.assertIsNotNone(service.resolve(found['results'][0]['entry_id']))
+        self.assertEqual(service.search(concepts[0])['calls'],0)
+
+    def test_arbitrary_chat_and_private_queries_cannot_reach_provider(self):
+        post=Mock();service=WebKnowledge(post=post)
+        self.assertEqual(chat_concepts('张三的电话和住址是什么？'),[])
+        self.assertEqual(service.search({'term':'张三13800000000','slot':'COST'})['status'],'unsafe_query')
+        post.assert_not_called()
+
     def setUp(self):
         root=Path(__file__).resolve().parents[1]/'output_dir/web-search-tests'
         root.mkdir(parents=True,exist_ok=True)
