@@ -762,7 +762,8 @@ def chat_subjects(actor_id: UUID = Depends(current_actor), conn=Depends(database
 
 @app.get('/v1/conversations')
 def conversations(subject_id: UUID | None = None, actor_id: UUID = Depends(current_actor), conn=Depends(database)):
-    return chats.list_conversations(conn, actor_id, subject_id)
+    from .conversation_titles import prepare_list
+    return prepare_list(conn, chats.list_conversations(conn, actor_id, subject_id))
 
 
 @app.get('/v1/medical-records')

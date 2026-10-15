@@ -145,6 +145,14 @@ def finish_turn(conn, actor_id, conversation_id, turn, answer=None, events=None,
         if not row:
             raise TurnBusy()
         conn.execute('UPDATE conversations SET updated_at=now() WHERE conversation_id=%s', (conversation_id,))
+        if not error:
+            try:
+                from .conversation_titles import enqueue
+                with conn.transaction():
+                    enqueue(conn, [conversation_id])
+            except Exception:
+                import logging
+                logging.getLogger(__name__).warning('CONVERSATION_TITLE_QUEUE_UNAVAILABLE')
 
 
 def search_history(conn, actor_id, conversation_id, query):

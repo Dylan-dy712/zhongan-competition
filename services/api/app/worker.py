@@ -797,6 +797,8 @@ def main() -> None:
     signal.signal(signal.SIGINT, request_stop)
     # Separate connection/thread: record organization never delays report delivery or OCR.
     threading.Thread(target=medical_records.worker_loop,args=(dsn,lambda:stop_requested),name='medical-records',daemon=True).start()
+    from . import conversation_titles
+    threading.Thread(target=conversation_titles.worker_loop,args=(dsn,lambda:stop_requested),name='conversation-titles',daemon=True).start()
     while not stop_requested:
         try:
             with connect(dsn) as conn:

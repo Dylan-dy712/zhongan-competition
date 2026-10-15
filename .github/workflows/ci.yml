@@ -44,6 +44,7 @@ jobs:
         env:
           ZHONGAN_REPLACEMENT_TEST_DATABASE_URL: ${{ env.ZHONGAN_DATABASE_URL }}
       - run: python -m scripts.check_conversation_integration
+      - run: python -m scripts.check_conversation_titles
       - run: python -m scripts.check_knowledge_vectors_integration
       - run: python -m scripts.check_release_integration
       - run: for script in scripts/*.sh; do bash -n "$script"; done

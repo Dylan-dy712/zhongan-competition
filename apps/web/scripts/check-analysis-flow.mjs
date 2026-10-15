@@ -41,6 +41,7 @@ globalThis.fetch=async(url,options={})=>{
   continuations++;
   if(delayNarrative)await new Promise(r=>resolveNarrative=r);
   if(failNarrative){failNarrative=false;return Response.json({detail:'合成解读失败'},{status:503});}
+  conversation={...conversation,title:'票据费用与支付金额核对'};
   turns=[...turns.filter(t=>t.input_kind!=='analysis_ready'),{turn_id:'continue-ui',input_kind:'analysis_ready',status:'completed',question:'解释材料',attachments:[],tool_events:[],
    answer:{text:'我先帮你把这张票据理清楚。材料记载医疗总费用：120元。\n\n这张票据没有说明保险赔付金额，我们先把它与票据上的费用区分开。你最想先核对哪一项？',evidence_refs:['00000000-0000-4000-8000-000000000002'],history_refs:[],citations:[{quote:'材料记载医疗总费用：120元。',source_refs:['00000000-0000-4000-8000-000000000002']}],analysis_run_id:run,
     guidance_delivery:{status:'needs_improvement',notice:'报告已生成，部分内容的解释仍可完善。'}}}];
@@ -96,6 +97,7 @@ try{
  assert.equal(window.location.hash,'#/chat','Analysis stays in the conversation');
  assert.match(document.body.textContent,/医疗总费用：120元/);
  assert.ok(document.querySelector('.analysis-narrative'),'AI free text is the report');
+ assert.match(document.querySelector('.history-list').textContent,/票据费用与支付金额核对/,'Report completion refreshes sidebar titles');
  assert.match(document.querySelector('.analysis-reading-notice').textContent,/报告已生成.*仍可完善/);
  assert.doesNotMatch(document.body.textContent,/生成没有完成|解读暂时没能完成/,'Advisory quality never becomes a failure screen');
  assert.equal(document.querySelectorAll('.analysis-narrative-copy p').length,2,'Paragraphs follow the model text, not six fixed sections');
