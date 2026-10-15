@@ -17,7 +17,7 @@ const modules=await loadTestModules();const {App}=modules;
 const sample={sample_id:'synthetic-01',version:'v1',data_origin:'official_deidentified',title:'合成病例流程测试',summary:'测试',notice:'合成测试，非患者资料',file_count:4,page_count:13,
   claim_info:{kind:'住院医疗',cause:'待确认',diagnosis:'合成肩部损伤样例',start:'2026-09-20',end:'2026-09-25',total:'1200.00',social:'待确认',other:'待确认'},
   documents:[{id:'discharge',name:'合成出院记录.pdf',document_type:'出院记录',page_count:2},{id:'diagnosis',name:'合成诊断证明.pdf',document_type:'诊断证明',page_count:1},{id:'costs',name:'合成费用清单.pdf',document_type:'费用清单',page_count:5},{id:'outpatient',name:'合成复诊病历.pdf',document_type:'门诊病历',page_count:5}]};
-const calls=[];let uploadCount=0,failSecond=true,failSelection=true,conversation;
+const calls=[];let uploadCount=0,failSecond=true,failSelection=true,conversation,turns=[];
 globalThis.fetch=async(url,options={})=>{
   const p=new URL(url,'http://localhost').pathname;
   const body=typeof options.body==='string'?JSON.parse(options.body):options.body;
@@ -38,13 +38,18 @@ globalThis.fetch=async(url,options={})=>{
     if(options.method==='POST')conversation={conversation_id:body.conversation_id,case_id:'synthetic-case',subject_id:'synthetic-subject',title:'合成测试记录',created_at:'2026-10-01',updated_at:'2026-10-01'};
     return Response.json(options.method==='POST'?{}:conversation?[conversation]:[]);
   }
-  if(conversation&&p==='/v1/conversations/'+conversation.conversation_id)return Response.json({conversation,turns:[],analysis:{status:'queued',run_id:'synthetic-run'},report:{status:'not_generated',actions:[],sections:[]}});
+  if(conversation&&p==='/v1/conversations/'+conversation.conversation_id)return Response.json({conversation,turns,analysis:{status:'queued',run_id:'synthetic-run'},report:{status:'not_generated',actions:[],sections:[]}});
   if(p.endsWith('/documents')){
     uploadCount++;
     if(uploadCount===2&&failSecond){failSecond=false;return Response.json({message:'合成上传中断'},{status:500});}
     return Response.json({document_id:'synthetic-doc-'+uploadCount});
   }
-  if(p.endsWith('/analyses'))return Response.json({turn_id:'synthetic-turn'});
+  if(p.endsWith('/analyses')){
+    const submitted={turn_id:'synthetic-turn',request_id:body.request_id,question:body.message,input_kind:'user',status:'completed',answer:{text:'材料已收到',evidence_refs:[],history_refs:[]},attachments:sample.documents.map((document,index)=>({document_id:body.document_ids[index],name:document.name})),tool_events:[{tool:'start_analysis',status:'queued',run_id:'synthetic-run'}]};
+    turns=[submitted,{...submitted,turn_id:'ordinary-claim',question:body.message.replace(/^这是一组主办方比赛样例的脱敏体验资料，不代表账号使用者本人病史。/,'')},
+      {...submitted,turn_id:'manual-followup',question:'我想确认用户填写的信息和材料分类是否正确。',attachments:[{document_id:'manual-doc',name:'自行补充的合成票据.pdf'}],tool_events:[]}];
+    return Response.json({turn_id:'synthetic-turn'});
+  }
   throw Error('Unexpected request '+p);
 };
 let root=createRoot(document.getElementById('root'));
@@ -95,7 +100,21 @@ try{
   await click('查看相关报告');
   const analysis=calls.find(call=>call.path.endsWith('/analyses'));
   assert.equal(analysis.body.document_ids.length,4);assert.match(analysis.body.message,/不代表账号使用者本人病史/);
+  assert.match(analysis.body.message,/用户填写的信息：.*已核对的合成诊断.*；材料分类：/,'The backend retains all form context');
   assert.equal(window.location.hash,'#/chat');
+  const checkChat=()=>{
+    const messages=document.querySelector('.messages');assert.ok(messages);
+    assert.equal(messages.querySelectorAll('.analysis-continuation').length,2,'Sample and ordinary claim submissions use the concise receipt');
+    assert.match(messages.textContent,/材料已提交 · 暖暖为你整理/);
+    assert.doesNotMatch(messages.textContent,/主办方比赛样例|用户填写的信息：|材料分类：|个人补充信息|"kind"|合成出院记录\.pdf|合成费用清单\.pdf/,'Internal prompts, JSON and generated attachment lists stay hidden');
+    assert.match(messages.textContent,/我想确认用户填写的信息和材料分类是否正确。/,'Normal messages remain visible');
+    assert.match(messages.textContent,/自行补充的合成票据\.pdf/,'Normal message attachments remain visible');
+    assert.equal(turns[0].question,analysis.body.message,'Presentation does not alter saved analysis context');
+  };
+  checkChat();
+  await act(async()=>root.unmount());root=createRoot(document.getElementById('root'));
+  await act(async()=>root.render(React.createElement(App)));await flush();
+  checkChat();
   await act(async()=>root.unmount());
   root=createRoot(document.getElementById('root'));
   sessionStorage.setItem('zhongan_chat_token','ordinary');window.location.hash='/home';conversation=undefined;
@@ -105,7 +124,7 @@ try{
   await act(async()=>document.querySelector('dialog.member-dialog .member-list button').click());await flush();
   assert.equal(document.querySelector('[data-claim-field="diagnosis"]').value,'','Ordinary claim entry stays blank');
   assert.equal(document.querySelector('.claim-sample-status'),null);
-  console.log('PASS: one-click judge entry auto-fills claim and files, no duplicate import card/member picker, preparation retry, draft preservation, preview, confirmed multipart upload, upload retry, explicit report generation, ordinary account isolation.');
+  console.log('PASS: one-click judge entry, upload retry, explicit analysis, concise submission display for new and saved sample/ordinary claims, backend context and manual chat attachments preserved, ordinary account isolation.');
 }finally{
   await act(async()=>root.unmount());dom.window.close();URL.createObjectURL=oldCreate;URL.revokeObjectURL=oldRevoke;
   await modules.close();
