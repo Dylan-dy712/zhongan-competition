@@ -30,13 +30,13 @@ from .guidance_quality import GUIDANCE_INSTRUCTION, review_guidance_quality, gui
 from .model_workloads import is_qianfan
 from .contracts.knowledge import DiseaseCode
 from .patient_followup import FollowupPayload, FOLLOWUP_INSTRUCTION, source_patient_updates
-from .medical_services import MedicalServiceArgs, SERVICE_INSTRUCTION, SERVICE_INVITATION, recommend_services
+from .medical_services import MedicalServiceArgs, SERVICE_INSTRUCTION, SERVICE_INVITATION, recommend_services, pending_service_reply, separate_service_citations
 from .chat_reply import CHAT_REPLY_INSTRUCTION, decode_chat_reply
 from .web_knowledge import WebKnowledge, chat_concepts, CONCEPTS, COST_TOPICS
 
 
 MEMORY_INSTRUCTION = '可额外返回memory_suggestions数组（最多2项），仅在当前消息明确表达需要长期承接的沟通偏好、必要背景时提出候选。每项kind为communication_preference或confirmed_context，field_key为communication_style/care_preference或allergy，content必须逐字等于当前用户消息全文且不超过1000字。用户尚未确认保存，不能声称已长期记住。涉及他人、人物不明、问句、推测时不提炼。没有候选时用空数组。'
-PROMPT_VERSION = 'conversation-agent-v9-patient-memory'
+PROMPT_VERSION = 'conversation-agent-v10-patient-memory-services'
 ANALYSIS_PROMPT_VERSION = 'patient-analysis-narrative-v18-memory-boundary'
 ANALYSIS_INSTRUCTION = """
 本轮是暖暖看完资料后，对用户讲清这次就医情况。遵循上面的对话语气，读起来要像人在耐心讲解。
@@ -223,6 +223,31 @@ class AgentModel:
         self.usage.append(payload.get('usage', {}))
         message=payload['choices'][0]['message']
         return decode_analysis_tool(message) if strict_format else message
+
+    def plan_medical_services(self,messages):
+        """Repair a service promise with validated model-selected arguments.
+
+        Some providers return terminal prose despite a named tool choice. This
+        bounded JSON request still leaves route/clinical choices with the model.
+        """
+        instruction=('上一条已承诺查询医疗服务但未实际调用工具。本次只输出JSON对象，格式为'
+            '{"service_request":参数对象或null}，不要输出段落、承诺或解释。'
+            '根据当前用户问题及本对话选择推荐参数；location只摘录用户明确说出的地点，未知留空。'
+            '复查不替代为体检；需要急诊用urgent，线下评估用offline_assessment；不适不明可返回null并留给后续澄清。'
+            '只有不涉及医疗服务或需要先澄清症状才返回null。参数必须符合以下JSON Schema：'+
+            json.dumps(MedicalServiceArgs.model_json_schema(),ensure_ascii=False))
+        message=self.complete([*messages,{'role':'system','content':instruction}],allow_tools=False)
+        calls=message.get('tool_calls') or []
+        if calls:
+            if len(calls)!=1 or calls[0].get('function',{}).get('name')!='recommend_medical_services':
+                raise ValueError('INVALID_SERVICE_PLAN_TOOL')
+            return MedicalServiceArgs.model_validate_json(calls[0]['function'].get('arguments','{}'))
+        content=(message.get('content') or '').strip()
+        if content.startswith('```'):
+            content=content.split('\n',1)[-1].rsplit('```',1)[0].strip()
+        data=json.loads(content)
+        if not isinstance(data,dict) or 'service_request' not in data:raise ValueError('INVALID_SERVICE_PLAN')
+        return None if data['service_request'] is None else MedicalServiceArgs.model_validate(data['service_request'])
 
 
     def review_analysis(self, packed, text, citations=None):
@@ -593,6 +618,8 @@ def run_agent(history, question, attachments, tools, model=None, on_event=None, 
     budget = 6
     repaired = False
     completion_repaired = False
+    service_completion_repaired = False
+    service_planning_calls = 0
     analysis_has_evidence = False
     aliases = {}
     knowledge_pages = []
@@ -722,6 +749,8 @@ def run_agent(history, question, attachments, tools, model=None, on_event=None, 
     # A rejected shared draft uses the first round; allow its replacement one
     # schema repair as well, without weakening the independent source review.
     for round_index in range(3 if analysis_mode else 5):
+        if not analysis_mode and round_index+service_planning_calls>=5:
+            raise RuntimeError('AGENT_TOOL_LIMIT')
         if analysis_mode and on_event:
             on_event(events)
         model_started = time.monotonic()
@@ -732,7 +761,7 @@ def run_agent(history, question, attachments, tools, model=None, on_event=None, 
             if isinstance(tools,CareTools) and getattr(tools,'memory_snapshot',None) is not None:
                 tools.validate_runtime()
                 tools.conn.commit()
-            message = model.complete(messages, allow_tools=not analysis_mode and round_index < 4 and budget > 0)
+            message = model.complete(messages, allow_tools=not analysis_mode and round_index+service_planning_calls < 4 and budget > 0)
         model_seconds += time.monotonic() - model_started
         calls = message.get('tool_calls') or []
         if calls:
@@ -803,6 +832,30 @@ def run_agent(history, question, attachments, tools, model=None, on_event=None, 
                  '）、history_refs（最多12个历史UUID字符串）、knowledge_refs（最多8个真实检索条目ID）、citations（逐条quote原句与source_refs数组，quote在正文中须唯一且不跨行）。只选择支持正文关键事实的少量直接来源，绝对不要复制整个材料编号集合；没有引用时用空数组。另保留clarification_questions（最多2项，field、question和options，每个选项含label和message）、suggested_questions（最多3条，每条最多200字符）和patient_updates（最多5项，field与逐字等于用户本条消息全文的statement）；无需补问或更新时用空数组。text可保留编号与**加粗**，保留citations中的逐条来源绑定，不要输出其他字段。'},
             ])
             continue
+        if (not analysis_mode and isinstance(tools,CareTools) and tools.medical_services is None
+                and pending_service_reply(reply.text)):
+            if service_completion_repaired or round_index>=3 or not budget:
+                raise ValueError('AGENT_INCOMPLETE_SERVICE_REPLY')
+            service_completion_repaired=True
+            messages.append({'role':'assistant','content':content})
+            if getattr(type(model),'plan_medical_services',None) is not None:
+                service_planning_calls+=1
+                args=model.plan_medical_services(messages)
+                if args is not None:
+                    call_id='service-completion-repair'
+                    arguments=args.model_dump_json()
+                    messages.append({'role':'assistant','content':None,'tool_calls':[{'id':call_id,'type':'function',
+                        'function':{'name':'recommend_medical_services','arguments':arguments}}]})
+                    found=tools.execute('recommend_medical_services',arguments)
+                    budget-=1
+                    events.append({'tool':'recommend_medical_services','status':str(found.get('status','completed'))})
+                    if on_event:on_event(events)
+                    messages.append({'role':'tool','tool_call_id':call_id,'content':json.dumps(found,ensure_ascii=False)})
+                else:
+                    messages.append({'role':'user','content':'当前需要先澄清症状或解释适用边界。直接补问必要信息，不声称已生成卡片或查到服务。'})
+            else:
+                messages.append({'role':'user','content':'上一条承诺查询医疗服务，但尚未实际调用工具。现在调用recommend_medical_services，依据用户需求选择参数，取得真实目录结果后简短解释。不要把未来的查询计划作为最终回答。'})
+            continue
         if not analysis_mode and pending_knowledge_reply(reply.text):
             if completion_repaired or round_index >= 3:
                 raise ValueError('AGENT_INCOMPLETE_REPLY')
@@ -832,6 +885,8 @@ def run_agent(history, question, attachments, tools, model=None, on_event=None, 
             raise ValueError('UNSOURCED_ANALYSIS')
         if analysis_mode and _unsafe(reply.text.replace("**", "")):
             raise ValueError('UNSAFE_ANALYSIS')
+        if not analysis_mode and isinstance(tools,CareTools):
+            reply=separate_service_citations(reply,tools.medical_services)
         tools.validate_reply(reply)
         # Scripted models must explicitly implement review to exercise this stage.
         # Every real AgentModel has it; no accepted draft is delivered unchecked.

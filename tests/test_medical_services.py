@@ -2,10 +2,77 @@ import json
 import unittest
 from unittest.mock import MagicMock,patch
 
-from services.api.app.medical_services import MedicalServiceArgs,recommend_services,catalog,SERVICE_INVITATION
-from services.api.app.conversation_agent import CareTools,run_agent,TOOLS
+from services.api.app.medical_services import MedicalServiceArgs,recommend_services,catalog,SERVICE_INVITATION,pending_service_reply,separate_service_citations
+from services.api.app.conversation_agent import CareTools,run_agent,TOOLS,AgentModel,AgentReply
 
 class MedicalServicesTests(unittest.TestCase):
+    def test_only_returned_catalog_metadata_is_separated_from_clinical_citations(self):
+        services=self.recommend(routes=['benefits'],needs=['checkup'])
+        identifier=services['cards'][0]['id']
+        reply=AgentReply(text='体检需要核对使用条件。',knowledge_refs=[identifier,'unverified-reference'],
+            citations=[{'quote':'体检需要核对使用条件。','source_refs':[identifier,'unverified-reference']}])
+        clean=separate_service_citations(reply,services)
+        self.assertEqual(clean.knowledge_refs,['unverified-reference'])
+        self.assertEqual(clean.citations[0].source_refs,['unverified-reference'])
+        self.assertEqual(services['cards'][0]['source'],self.recommend(routes=['benefits'],needs=['checkup'])['cards'][0]['source'])
+
+    def test_pending_service_guard_only_checks_model_draft_promises(self):
+        self.assertTrue(pending_service_reply('我按中高端服务参考帮你查一下权益类的体检入口。'))
+        self.assertTrue(pending_service_reply('我先帮你把中高端服务参考里的体检权益入口调出来。'))
+        self.assertTrue(pending_service_reply('下面卡片里有公立和私立候选机构和模拟入口，你可以先看看。'))
+        self.assertTrue(pending_service_reply('我把中高端服务参考里的体检相关内容调出来给你看。'))
+        self.assertTrue(pending_service_reply('我先把互联网医院的入口和参考信息调出来给你。'))
+        self.assertFalse(pending_service_reply('医院的普通部和特需部如何区分，要看医院公开说明。'))
+        self.assertFalse(pending_service_reply('你担心复查结果，我会陪你一起梳理想问医生的问题。'))
+
+    def test_promised_service_must_complete_a_real_tool_call_before_delivery(self):
+        tools=CareTools(MagicMock(),'actor','conversation');tools.validate_reply=MagicMock()
+        final={'text':'可以查看下方体检权益，使用时核对四选一条件。','evidence_refs':[],'history_refs':[]}
+        promise={**final,'text':'我先帮你把中高端服务参考里的体检权益入口调出来。'}
+        model=MagicMock();model.complete.side_effect=[{'content':json.dumps(promise)},
+            {'content':None,'tool_calls':[{'id':'service-repair','type':'function','function':{
+                'name':'recommend_medical_services','arguments':json.dumps({'routes':['benefits'],'needs':['checkup']})}}]},
+            {'content':json.dumps(final)}]
+        with patch('services.api.app.conversation_agent.require_conversation',return_value={'case_id':'case'}):
+            answer,events=run_agent([],'我没有症状，想了解健康体检权益。',[],tools,model=model)
+        self.assertEqual(model.complete.call_count,3)
+        self.assertIn('体检',answer['medical_services']['cards'][0]['title'])
+        self.assertEqual(events[0]['tool'],'recommend_medical_services')
+
+    def test_real_model_service_planner_validates_json_arguments(self):
+        model=AgentModel.__new__(AgentModel)
+        model.complete=MagicMock(return_value={'content':json.dumps({'service_request':{'routes':['benefits'],'needs':['checkup']}})})
+        args=model.plan_medical_services([{'role':'user','content':'我想了解体检权益'}])
+        self.assertEqual(args.needs,['checkup'])
+        self.assertFalse(model.complete.call_args.kwargs['allow_tools'])
+        model.complete.return_value={'content':'```json\n{"service_request":{"routes":["benefits"],"needs":["checkup"]}}\n```'}
+        self.assertEqual(model.plan_medical_services([]).needs,['checkup'])
+        model.complete.return_value={'content':None,'tool_calls':[{'function':{'name':'recommend_medical_services',
+            'arguments':'{"routes":["benefits"],"needs":["checkup"]}'}}]}
+        self.assertEqual(model.plan_medical_services([]).needs,['checkup'])
+        model.complete.return_value={'content':None,'tool_calls':[{'function':{'name':'search_history','arguments':'{}'}}]}
+        with self.assertRaisesRegex(ValueError,'INVALID_SERVICE_PLAN_TOOL'):model.plan_medical_services([])
+        model.complete.return_value={'content':json.dumps({'service_request':None})}
+        self.assertIsNone(model.plan_medical_services([]))
+        model.complete.return_value={'content':'{"paragraphs":[]}'}
+        with self.assertRaisesRegex(ValueError,'INVALID_SERVICE_PLAN'):model.plan_medical_services([])
+
+    def test_structured_service_repair_executes_and_persists_real_cards(self):
+        class PlanningModel(AgentModel):
+            def __init__(self):
+                self.usage=[]
+                self.complete=MagicMock(side_effect=[
+                    {'content':json.dumps({'text':'我先帮你把中高端服务参考里的体检权益入口调出来。'})},
+                    {'content':json.dumps({'service_request':{'routes':['benefits'],'needs':['checkup']}})},
+                    {'content':json.dumps({'text':'下面是体检权益的使用条件，注意四选一。'})}])
+        tools=CareTools(MagicMock(),'actor','conversation');tools.validate_reply=MagicMock()
+        model=PlanningModel()
+        with patch('services.api.app.conversation_agent.require_conversation',return_value={'case_id':'case'}):
+            answer,events=run_agent([],'我没有症状，想了解健康体检权益。',[],tools,model=model)
+        self.assertEqual(model.complete.call_count,3)
+        self.assertIn('体检',answer['medical_services']['cards'][0]['title'])
+        self.assertEqual(events,[{'tool':'recommend_medical_services','status':'available'}])
+
     def recommend(self,**kwargs):
         question=kwargs.pop('question','我在上海市浦东新区，想找复查医院。')
         values={'routes':['benefits','offline','online'],'needs':['followup'],'location':'上海市浦东新区'}
