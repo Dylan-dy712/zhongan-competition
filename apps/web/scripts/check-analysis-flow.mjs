@@ -57,6 +57,11 @@ const modules=await loadTestModules(),root=createRoot(document.getElementById('r
 const flush=()=>act(async()=>new Promise(r=>realTimeout(r,60)));
 const click=async(text)=>{const node=[...document.querySelectorAll('button')].find(n=>!n.closest('[hidden]') && (n.textContent.trim()===text || n.getAttribute('aria-label')===text));assert.ok(node,text);await act(async()=>node.click());await flush();};
 try{
+ for(const previousStatus of ['available','failed']){
+  const submitting=modules.analysisView({...state(),material_report:{status:previousStatus}},undefined,true);
+  assert.equal(submitting.index,-1,'A fresh submission cannot inherit an old report stage');
+  assert.equal(submitting.kind,'processing');
+ }
  await act(async()=>root.render(React.createElement(modules.App)));await flush();
  await click('＋ 新建解读报告');
  assert.ok(document.querySelector('dialog.member-dialog'),'A report asks for its person');
