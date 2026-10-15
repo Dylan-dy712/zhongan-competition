@@ -43,7 +43,8 @@ from .conversation_agent import CareTools, run_agent, ANALYSIS_PROMPT_VERSION
 from .material_report import get_material_report
 from . import accounts
 from .document_quality import inspect_photo
-from .tencent_ocr import TencentOcr
+from .ocr import create_ocr
+from . import medical_records
 
 app = FastAPI(title="众安·暖愈智护", version="0.1.0")
 
@@ -145,6 +146,14 @@ class AnalysisRequest(ChatMessage):
 
 class RecallSetting(Contract):
     enabled: bool
+
+class OrganizeMedicalRecords(Contract):
+    subject_id: UUID
+
+class MedicalRecordAssignment(Contract):
+    mode: Literal['join','separate','related']
+    target_record_id: UUID | None = None
+    expected_version: int = Field(ge=0)
 
 
 DOCUMENT_POLICY_VERSION = "document-policy-v1"
@@ -277,7 +286,9 @@ def post_case(body: CreateCase, response: Response,
               idempotency_key: str = Header(min_length=1, max_length=128),
               actor_id: UUID = Depends(current_actor), conn=Depends(database)) -> Case:
     if body.data_origin != DataOrigin.synthetic:
-        raise HTTPException(status_code=403, detail="Only synthetic imports are enabled")
+        from services.judge_demo.app import judge_upload_allowed
+        if not judge_upload_allowed(conn, actor_id, body):
+            raise HTTPException(status_code=403, detail="Only synthetic imports and approved judge samples are enabled")
     try:
         case, created = create_case(
             conn, actor_id=actor_id, subject_id=body.subject_id,
@@ -315,7 +326,7 @@ async def inspect_material(file: Annotated[UploadFile, File()], subject_id: Anno
         if not data or len(data) > document_size_limit():
             raise HTTPException(status_code=413, detail='请选择非空且不超过 10 MB 的图片。')
         try:
-            result = await run_in_threadpool(inspect_photo, data, TencentOcr)
+            result = await run_in_threadpool(inspect_photo, data, create_ocr)
         except (ValueError, OSError) as exc:
             raise HTTPException(status_code=422, detail='图片无法读取，请重新选择有效图片。') from exc
         # Consent can be withdrawn while OCR is in flight.
@@ -329,6 +340,11 @@ async def inspect_material(file: Annotated[UploadFile, File()], subject_id: Anno
 @app.get('/v1/knowledge/{entry_id}')
 def read_knowledge_source(entry_id: str, actor_id: UUID = Depends(current_actor)):
     from .knowledge_retrieval import KnowledgeRetriever
+    if entry_id.startswith('WEB-VOLC-'):
+        from .web_knowledge import WebKnowledge
+        item=WebKnowledge().resolve(entry_id)
+        if not item:raise HTTPException(status_code=404,detail='该网络参考资料已过期或暂不可用。')
+        return item
     retriever = KnowledgeRetriever()
     item = retriever.by_id.get(entry_id)
     if not item:
@@ -370,6 +386,10 @@ async def post_document(
         if byte_size == 0:
             raise HTTPException(status_code=422, detail="Document is empty")
         validate_file_signature(temp_path, media_type)
+        sample_case = get_case(conn, actor_id=actor_id, case_id=case_id)
+        if sample_case and sample_case.data_origin==DataOrigin.official_deidentified and (sample_case.user_context or {}).get('judge_demo'):
+            from services.judge_demo.app import verify_sample_upload
+            verify_sample_upload(conn, actor_id, sample_case, digest.hexdigest())
         page_count = 1 if media_type.startswith("image/") else None
         try:
             document, created = register_document(
@@ -737,6 +757,23 @@ def conversations(subject_id: UUID | None = None, actor_id: UUID = Depends(curre
     return chats.list_conversations(conn, actor_id, subject_id)
 
 
+@app.get('/v1/medical-records')
+def medical_record_list(subject_id:UUID,actor_id:UUID=Depends(current_actor),conn=Depends(database)):
+    return medical_records.list_records(conn,actor_id,subject_id)
+
+
+@app.post('/v1/medical-records/organize',status_code=202)
+def organize_medical_records(body:OrganizeMedicalRecords,actor_id:UUID=Depends(current_actor),conn=Depends(database)):
+    return medical_records.organize(conn,actor_id,body.subject_id)
+
+
+@app.patch('/v1/medical-records/cases/{case_id}')
+def change_medical_record(case_id:UUID,body:MedicalRecordAssignment,actor_id:UUID=Depends(current_actor),conn=Depends(database)):
+    if body.mode in ('join','related') and not body.target_record_id:raise HTTPException(422,'请选择目标就医记录。')
+    try:return medical_records.change_assignment(conn,actor_id,case_id,body.mode,body.target_record_id,body.expected_version)
+    except medical_records.StaleRecord:raise HTTPException(409,'记录已更新，请重新加载后再调整。') from None
+
+
 @app.post('/v1/conversations', status_code=201)
 def new_conversation(body: NewConversation, actor_id: UUID = Depends(current_actor), conn=Depends(database)):
     try:
@@ -865,7 +902,8 @@ def process_chat_message(conversation_id, body, actor_id, conn, input_kind='user
 
     try:
         answer, events = run_agent(history, question, turn['attachments'], tools, on_event=progress,
-                                  analysis_mode=input_kind == 'analysis_ready')
+                                  analysis_mode=input_kind == 'analysis_ready',
+                                  initial_analysis=tools.reusable_analysis() if input_kind == 'analysis_ready' else None)
         if analysis_run_id is not None:
             # Recheck the actual current case and run after slow model generation.
             current = chats.require_conversation(conn, actor_id, conversation_id)
@@ -893,9 +931,11 @@ def process_chat_message(conversation_id, body, actor_id, conn, input_kind='user
         # Log only safe classifications, never provider bodies, prompts or credentials.
         import logging
         provider_response = getattr(exc, 'response', None)
-        logging.getLogger(__name__).warning('Chat generation failed: type=%s provider_status=%s',
-            type(exc).__name__, getattr(provider_response, 'status_code', None))
-        chats.finish_turn(conn, actor_id, conversation_id, turn, events=events, error='AGENT_UNAVAILABLE')
+        from .generation_errors import generation_error_code
+        code = generation_error_code(exc)
+        logging.getLogger(__name__).warning('Chat generation failed: type=%s code=%s provider_status=%s',
+            type(exc).__name__, code, getattr(provider_response, 'status_code', None))
+        chats.finish_turn(conn, actor_id, conversation_id, turn, events=events, error=code)
         conn.commit()
         raise HTTPException(503, '暂时无法完成回答，消息已保存，可以重试。') from None
 
@@ -918,6 +958,14 @@ def continue_analysis(conversation_id: UUID, run_id: UUID,
         ORDER BY created_at DESC,run_id DESC LIMIT 1''', (run.case_id,)).fetchone()
     if latest['run_id'] != run_id:
         raise HTTPException(409, '已有更新的分析任务')
+    documents = conn.execute('''SELECT document_id,document_version,source_hash FROM documents
+        WHERE case_id=%s AND NOT EXISTS (SELECT 1 FROM document_replacements replacement
+        WHERE replacement.old_document_id=documents.document_id) ORDER BY document_id''',
+        (run.case_id,)).fetchall()
+    frozen = conn.execute('SELECT document_versions FROM analysis_runs WHERE run_id=%s',(run_id,)).fetchone()
+    actual = [{**d,'document_id':str(d['document_id'])} for d in documents]
+    if actual != sorted(frozen['document_versions'],key=lambda d:d['document_id']):
+        raise HTTPException(409,'材料已更新，请先分析最新材料。')
     request_id = uuid5(NAMESPACE_URL, f'zhongan:{ANALYSIS_PROMPT_VERSION}:{conversation_id}:{run_id}')
     return process_chat_message(conversation_id, ChatMessage(request_id=request_id,
         message='请结合本次实际材料和我关注的问题，写一份温和清楚、连贯自然的文字分析，直接在对话里解释；内容重点由材料决定，有不确定的地方就说明。'),

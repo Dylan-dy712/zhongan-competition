@@ -63,7 +63,11 @@ jobs:
       - run: npm run build --prefix apps/web
       - run: npm run test:navigation --prefix apps/web
       - run: npm run test:auth --prefix apps/web
+      - run: node apps/web/scripts/check-judge-entry.mjs
+      - run: node apps/web/scripts/check-judge-upload.mjs
       - run: npm run test:availability --prefix apps/web
+      - run: npm run test:reminders --prefix apps/web
+      - run: npm run test:medical-records --prefix apps/web
       - run: node apps/web/scripts/check-analysis-flow.mjs
       - run: node apps/web/scripts/check-overview-content.mjs
       - run: node apps/web/scripts/check-claim-submission.mjs

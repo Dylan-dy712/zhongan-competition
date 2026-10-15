@@ -5,18 +5,15 @@ import os
 import re
 import time
 from urllib.parse import urlparse
-from threading import Lock
 from typing import Literal
 
 import requests
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
-from .model_workloads import workload_options
+from .model_workloads import workload_options, model_post
 
 
 PROMPT_VERSION = "medical-fields-and-cost-labels-v4"
 SCHEMA_VERSION = "0.3.0"
-_QIANFAN_REQUEST_LOCK = Lock()
-_QIANFAN_NEXT_REQUEST = 0.0
 
 MEDICATION_PHASE = Literal["inpatient", "discharge", "outpatient", "charge_item", "plan", "unknown"]
 STAFF_ROLES = ("术者", "手术者", "手术助手", "Ⅰ助", "Ⅱ助", "麻醉医师", "主管医师",
@@ -102,29 +99,16 @@ class OpenAiCompatibleExtractor:
             raise RuntimeError('QIANFAN_MODEL_NOT_AUTHORIZED')
 
     def _call(self, messages, *, timeout=45, workload='review'):
-        global _QIANFAN_NEXT_REQUEST
-        if urlparse(self.base_url).hostname == 'qianfan.baidubce.com':
-            # The configured Qianfan models have a 60 RPM limit, including repair/classification calls.
-            with _QIANFAN_REQUEST_LOCK:
-                time.sleep(max(0, _QIANFAN_NEXT_REQUEST - time.monotonic()))
-                _QIANFAN_NEXT_REQUEST = time.monotonic() + 1.1
-        requester = requests
-        if urlparse(self.base_url).hostname == 'qianfan.baidubce.com':
-            requester = requests.Session()
-            requester.trust_env = False
-            requester.mount('https://', requests.adapters.HTTPAdapter(max_retries=2))
-        try:
-            response = requester.post(
-                f"{self.base_url}/chat/completions",
-                headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
-                json={"model": self.model_id, "messages": messages, "temperature": 0,
-                      "response_format": {"type": "json_object"},
-                      **workload_options(self.base_url,self.model_id,workload)},
-                timeout=timeout,
-            )
-        finally:
-            if requester is not requests:
-                requester.close()
+        response = model_post(
+            f"{self.base_url}/chat/completions",
+            post=requests.post,
+            headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
+            json={"model": self.model_id, "messages": messages, "temperature": 0,
+                  "response_format": {"type": "json_object"},
+                  **workload_options(self.base_url,self.model_id,workload)},
+            timeout=timeout,
+        )
+
         response.raise_for_status()
         payload = response.json()
         if getattr(self, 'provider', 'openai_compatible') == 'mock' and payload.get('execution_mode') != 'mock':

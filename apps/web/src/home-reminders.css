@@ -1,0 +1,9 @@
+.demo-pages .home-reminder-list{display:grid;gap:10px;position:relative;z-index:1}
+.demo-pages .home-reminder-item{padding:14px 13px;border:1px solid #dceee3;border-radius:13px;background:#f8fdfa}
+.demo-pages .home-reminder-label{display:block;font-size:14px;color:#007b5a}
+.demo-pages .home-reminder-time{margin:5px 0 7px;color:#285b43;font-size:15px;font-weight:650}
+.demo-pages .home-reminder-text{margin-top:7px;white-space:pre-wrap;overflow-wrap:anywhere;font-size:14px;line-height:1.8;color:#334d40}
+.demo-pages .home-reminder-source{display:flex;align-items:center;gap:5px;margin-top:9px;font-size:11px;color:#668071}
+.demo-pages .home-reminder-context{padding-right:36px;overflow-wrap:anywhere;font-size:12px}
+.demo-pages .home-reminder-empty{position:relative;z-index:1;padding:14px 13px;background:#f4fbf7;border-radius:13px;font-size:14px;line-height:1.8;color:#425e52}
+.demo-pages .home-reminder-empty p{margin-top:6px;font-size:13px}

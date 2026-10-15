@@ -9,7 +9,12 @@ User=ubuntu
 Group=ubuntu
 WorkingDirectory=/home/ubuntu/zhongan-app
 EnvironmentFile=/home/ubuntu/.config/zhongan/database.env
+EnvironmentFile=-/home/ubuntu/.config/zhongan/tencent-ocr.env
+EnvironmentFile=-/home/ubuntu/.config/zhongan/ocr.env
+Environment=ZHONGAN_OCR_RATE_LIMIT_FILE=/home/ubuntu/zhongan-data/documents/.ocr-rate.lock
 EnvironmentFile=-/home/ubuntu/.config/zhongan/llm.env
+EnvironmentFile=-/home/ubuntu/.config/zhongan/web-search.env
+Environment=ZHONGAN_WEB_SEARCH_CACHE=/home/ubuntu/zhongan-data/web-search/cache.sqlite3
 Environment=PYTHONUNBUFFERED=1
 Environment=ZHONGAN_RAG_ENABLED=1
 Environment=ZHONGAN_RAG_CACHE_DIR=/home/ubuntu/zhongan-data/embeddings

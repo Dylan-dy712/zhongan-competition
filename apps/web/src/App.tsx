@@ -538,7 +538,9 @@ export default function App() {
           currentCase={snapshot?.conversation.case_id} busy={working} onOpen={id=>void openConversation(id,token,'chat')}
           onNew={()=>requestBusiness('claim',viewMember.subject_id)} onAccount={()=>setPanel('account')}/>
       : panel==='demo' ? <DemoShowcase token={token} busy={working} canRun={subjects.some(s=>s.subject_id===viewMember?.subject_id)} onRun={file=>void runDemo(file)} onBack={()=>setPanel('home')}/>
-      : panel==='home' ? <DemoHome snapshot={snapshot} onOverview={openOverview} onChat={()=>snapshot?setPanel('chat'):requestBusiness('chat')} onReport={openReport} onClaim={()=>requestBusiness('claim')}/>
+      : panel==='home' ? <DemoHome token={token} member={viewMember} onOpen={(id,destination,section)=>{
+          void openConversation(id,token,destination).then(()=>{if(active.current===id)setReportFocus(section);});
+        }} onClaim={()=>requestBusiness('claim')}/>
       : !snapshot ? <main className="original-chat-start"><OriginalChatWelcome/><div className="nuan-message"><span className="nuan-avatar" aria-hidden="true">✦</span><div className="nuan-message-body"><p>你好，我是暖暖。你现在有什么想说的，我愿意听。想聊聊身体上的不舒服、心里的牵挂，或一起看看材料，都可以按你的节奏来。</p></div></div>
         <button className="claim-entry-link" onClick={()=>requestBusiness('claim')}>整理理赔资料，开启专属关怀</button>
         <div className="connect-form member-start-card"><label>咨询对象<select value={subject} onChange={e=>setSubject(e.target.value)}><option value="">请选择人员</option>

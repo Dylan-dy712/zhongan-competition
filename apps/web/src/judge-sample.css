@@ -1,0 +1,23 @@
+.judge-sample-card{margin:24px 18px 14px;padding:22px;border:1px solid #d5e9dc;border-radius:20px;background:linear-gradient(140deg,#f0f8ef,#fff 75%);color:#234a38}
+.judge-sample-label{font-size:12px;font-weight:650;color:#4c8260}
+.judge-sample-card h2{font-size:21px;line-height:1.45;margin:10px 0 12px;letter-spacing:-.3px}
+.judge-sample-description{font-size:14px;margin:0;color:#587560;line-height:1.7}
+.judge-sample-card ul{list-style:none;padding:0;margin:16px 0;display:flex;gap:8px;flex-wrap:wrap}
+.judge-sample-card li{display:flex;gap:8px;align-items:center;background:#fff;border:1px solid #e0ece2;border-radius:10px;padding:9px 10px;font-size:13px}
+.judge-sample-card li small{color:#758d7a;font-size:12px}
+.judge-sample-notice{font-size:13px;line-height:1.8;color:#69816d;margin:10px 0 18px}
+.judge-sample-primary{display:flex;justify-content:space-between;align-items:center;width:100%;gap:10px;padding:14px 16px;background:#347a53;color:white;border:0;border-radius:12px;font:inherit;font-size:15px;font-weight:650;cursor:pointer}
+.judge-sample-primary:disabled{opacity:.65;cursor:wait}
+.judge-sample-primary:focus-visible{outline:3px solid #95cda6;outline-offset:3px}
+.judge-sample-footnote{display:block;font-size:11px;line-height:1.7;color:#809487;margin-top:12px}
+.judge-sample-error{font-size:13px;color:#a53b35;line-height:1.7;margin:12px 0 0}
+.claim-sample-status{margin:12px 20px;font-size:13px;line-height:1.7;color:#427451}
+.claim-pdf-preview{width:min(85vw,850px);height:75dvh;border:0;background:white}
+.claim-document-preview{cursor:pointer;font:inherit}
+.claim-react>.judge-sample-card{flex:none;margin:10px 14px;padding:14px 16px;border-radius:14px}
+.claim-react>.judge-sample-card h2{font-size:17px;margin:0 0 4px}
+.claim-react>.judge-sample-card .judge-sample-description{font-size:12px;margin-bottom:10px}
+.claim-react>.judge-sample-card .judge-sample-label,.claim-react>.judge-sample-card ul,.claim-react>.judge-sample-card .judge-sample-notice{display:none}
+.claim-react>.judge-sample-card .judge-sample-primary{padding:11px 14px;font-size:14px}
+.claim-react>.judge-sample-card .judge-sample-footnote{margin-top:7px;font-size:10px}
+@media(max-width:380px){.judge-sample-card{padding:18px;margin-left:12px;margin-right:12px}.judge-sample-card h2{font-size:19px}}

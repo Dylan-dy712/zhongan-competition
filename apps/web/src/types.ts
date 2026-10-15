@@ -66,9 +66,10 @@ export interface Conversation {
   created_at: string; updated_at: string;
 }
 export interface ChatAnswer {text: string; evidence_refs: string[]; history_refs: string[];
+  guidance_delivery?:{status:'passed'|'needs_improvement'|'unchecked';notice?:string};
   prompt_version?:string; analysis_run_id?:string; knowledge_refs?:string[]; knowledge_sources?:KnowledgeSource[]; citations?:InlineCitation[]}
 export interface InlineCitation {quote:string;source_refs:string[]}
-export interface KnowledgeSource {entry_id:string;title:string;source:string;source_path?:string;scope:string;version:string;reference_policy?:string;content?:string}
+export interface KnowledgeSource {entry_id:string;title:string;source:string;source_path?:string;scope:string;version:string;reference_policy?:string;content?:string;retrieval_provider?:string;retrieved_at?:string;published_at?:string}
 export interface ToolEvent {tool: string; status: string; run_id?: string}
 export interface ChatTurn {
   turn_id: string; request_id: string; question: string;
@@ -90,6 +91,21 @@ export interface MaterialReport {
     items:{text:string; kind:'checked'|'source'; evidence_refs:string[]}[]}[];
 }
 export interface ChatSubject {subject_id:string; consent_id:string}
+
+export interface RecordValue {value:string;evidence_refs:string[]}
+export interface RecordBatch {
+  case_id:string;conversations:Conversation[];updated_at:string;
+  profile:Partial<Record<'diagnosis'|'hospital'|'period'|'kind'|'summary',RecordValue>>;
+  analysis_status:string;document_count:number;organization_status:'pending'|'ready'|'needs_confirmation'|'unavailable';
+  version:number;relation:string;assignment_source:'provisional'|'ai'|'user';
+  proposed_record_id:string|null;proposal_title?:string|null;reason?:string|null;
+}
+export interface MedicalRecord {
+  record_id:string;subject_id:string;title:string;cases:RecordBatch[];updated_at:string;
+  document_count:number;conversation_count:number;related_records:{record_id:string;title:string}[];
+  portrait?:RecordBatch['profile'];
+}
+export interface MedicalRecordsResponse {records:MedicalRecord[];unorganized_count:number;processing_count:number}
 
 export interface DeliveryNotice {
   outbox_id:string; case_id:string; report_id:string; report_version:number;

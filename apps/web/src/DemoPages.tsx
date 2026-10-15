@@ -1,13 +1,13 @@
 import {useState} from 'react';
-import {currentNarrative} from './AnalysisNarrative';
-import {overviewTabs,type OverviewTab} from './encounterPresentation';
-import type {ChatSnapshot,Conversation,ReportSection} from './types';
-import {actionTime,careStatus,encounterGroups,patientActions,publishedCare} from './carePresentation';
+import type {Conversation} from './types';
+import type {MemberResponse} from './api';
+import {encounterGroups} from './carePresentation';
+import HomeReminders,{type OpenHomeRecord} from './HomeReminders';
+import JudgeSampleEntry from './JudgeSampleEntry';
 import brand from '../../../output_dir/product-design/assets/home-brand.webp';
 import mascot from '../../../output_dir/product-design/assets/reference-mascot.webp';
 import scene from '../../../output_dir/product-design/assets/reference-scene.webp';
 import chatArt from '../../../output_dir/product-design/assets/reference-chat.webp';
-import guide from '../../../output_dir/product-design/assets/reference-guide.webp';
 import cost from '../../../output_dir/product-design/assets/reference-cost.webp';
 import './demo-original.css';
 
@@ -16,14 +16,10 @@ export function DemoIcon({name}:{name:'leaf'|'user'|'arrow'|'file'|'chat'}) {
  return <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={paths[name]}/></svg>;
 }
 
-export function DemoHome({snapshot,onChat,onReport,onClaim,onOverview}:{onOverview:(tab:OverviewTab)=>void;snapshot?:ChatSnapshot|null;onChat:()=>void;onReport:(section?:ReportSection['section_type'])=>void;onClaim:()=>void}) {
- const hasAnalysis=!!snapshot&&(!!currentNarrative(snapshot.turns,snapshot.analysis.run_id)||snapshot.material_report?.status==='available');
- const action=snapshot?patientActions(snapshot.report)[0]:undefined;
- const ready=!!snapshot&&publishedCare(snapshot.report);
- const status=snapshot?careStatus(snapshot):{title:'从这次就医开始',text:'先整理病历和费用材料，再一起核对。'};
+export function DemoHome({token,member,onOpen,onClaim}:{token:string;member?:MemberResponse;onOpen:OpenHomeRecord;onClaim:()=>void}) {
  return <main className="demo-pages"><div className="home replica-home"><div className="replica-top"><img className="replica-scene" src={scene} alt=""/><header className="brand"><img src={brand} alt="暖愈智护"/></header><div className="replica-hero"><h1>看病之后，<br/><em>安心一点</em></h1><p>暖暖陪你看懂资料，记好安排。</p></div><img className="replica-mascot" src={mascot} alt=""/><img className="replica-chat" src={chatArt} alt=""/></div>
- <section className="replica-guide"><img className="replica-guide-art" src={guide} alt=""/><div className="replica-guide-label"><DemoIcon name="leaf"/>康复指引</div><h2>下一步，一起理清楚</h2><p>{status.title}</p><button className="replica-appointment" onClick={()=>ready?onReport('next_visit_advice'):hasAnalysis?onOverview('care'):onChat()}><span><DemoIcon name="leaf"/></span><span><strong>{action?.action_text||status.text}</strong><small>{action? actionTime(action):'结合本次材料，慢慢核对'}</small></span><DemoIcon name="arrow"/></button><button className="replica-primary" onClick={()=>ready?onReport():hasAnalysis?onOverview('care'):snapshot?onChat():onClaim()}>{ready?'查看本次关怀':hasAnalysis?'查看康复指引':snapshot?'问问暖暖':'准备理赔材料'}<DemoIcon name="arrow"/></button></section>
- {hasAnalysis&&<section className="home-analysis-entry"><small>本次资料已整理</small><h2>这次就医，重点在这里</h2><p>查看病历、需要确认的事和后续安排。</p><div>{overviewTabs.map(([key,label])=><button key={key} onClick={()=>onOverview(key)}>{label}<DemoIcon name="arrow"/></button>)}</div></section>}
+ <HomeReminders key={`${token}:${member?.subject_id}`} token={token} member={member} onOpen={onOpen} onClaim={onClaim}/>
+ <JudgeSampleEntry token={token} onChoose={()=>onClaim()} />
  <section className="home-claim-section" aria-labelledby="home-claim-title"><h2 className="replica-section-title" id="home-claim-title">提交理赔材料</h2><button className="home-claim-entry" aria-label="提交理赔材料" onClick={onClaim}><span className="home-claim-copy"><strong>病历与费用资料</strong><span className="home-claim-description">诊断证明、治疗记录<br/>发票与医疗费用清单</span><span className="home-claim-action">开始提交<DemoIcon name="arrow"/></span></span><img src={cost} alt=""/></button></section></div></main>;
 }
 

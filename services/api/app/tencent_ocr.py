@@ -34,6 +34,9 @@ def normalize_bbox(item, width: int, height: int):
 
 
 class TencentOcr:
+    method = OCR_METHOD
+    version = OCR_VERSION
+
     def __init__(self):
         secret_id = os.environ.get("TENCENTCLOUD_SECRET_ID")
         secret_key = os.environ.get("TENCENTCLOUD_SECRET_KEY")

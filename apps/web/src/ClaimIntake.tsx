@@ -1,5 +1,6 @@
 import {useEffect,useLayoutEffect,useRef,useState} from 'react';
-import {createConversation,startChatAnalysis,uploadChatDocument} from './api';
+import {createConversation,startChatAnalysis,uploadChatDocument,createJudgeSampleUploadCase,type JudgeSample} from './api';
+import JudgeSampleEntry from './JudgeSampleEntry';
 import AnalysisFlow,{type UploadProgress} from './AnalysisFlow';
 import {claimTemplate,initialClaimForm,validateClaimInfo,type ClaimFile,type ClaimForm} from './claimTemplate';
 import './claim-original.css';
@@ -22,6 +23,12 @@ export default function ClaimIntake({token,subject,visible,onOpen,onAuthorize,on
   const source=useRef<HTMLDialogElement>(null);
   const preview=useRef<HTMLDialogElement>(null);
   const [previewFile,setPreviewFile]=useState<ClaimFile|null>(null);
+  const [previewPdf,setPreviewPdf]=useState('');
+  const [judgeSample,setJudgeSample]=useState<JudgeSample|null>(null);
+  useEffect(()=>{if(!previewFile||previewFile.url){setPreviewPdf('');return;}
+    const url=URL.createObjectURL(previewFile.file);setPreviewPdf(url);
+    return()=>URL.revokeObjectURL(url);
+  },[previewFile]);
   const category=useRef('record');
   const [sourceCategory,setSourceCategory]=useState('');
   const fileRef=useRef(files);fileRef.current=files;
@@ -32,7 +39,7 @@ export default function ClaimIntake({token,subject,visible,onOpen,onAuthorize,on
   const [progressOpen,setProgressOpen]=useState(false);
   const [progress,setProgress]=useState<UploadProgress>();
   const [submission,setSubmission]=useState(false);
-  const pending=useRef<{id:string;requestId:string;uploaded:Map<File,string>;analysisStarted?:boolean} | null>(null);
+  const pending=useRef<{id:string;requestId:string;uploaded:Map<File,string>;caseId?:string;analysisStarted?:boolean} | null>(null);
   const [finished,setFinished]=useState(false);
   const [locked,setLocked]=useState(false);
   const [reviewPhotos,setReviewPhotos]=useState(false);
@@ -44,7 +51,7 @@ export default function ClaimIntake({token,subject,visible,onOpen,onAuthorize,on
     const entering=visible&&!wasVisible.current;wasVisible.current=visible;
     if(!entering||!finished||running.current)return;
     fileRef.current.forEach(f=>{if(f.url)URL.revokeObjectURL(f.url);});
-    form.current=initialClaimForm();pending.current=null;
+    form.current=initialClaimForm();pending.current=null;setJudgeSample(null);
     setFiles([]);setStep(0);setConfirmed(false);setFinished(false);setLocked(false);
     setError('');setProgressOpen(false);setProgress(undefined);setPreviewFile(null);
     onDirty?.(false);
@@ -57,7 +64,7 @@ export default function ClaimIntake({token,subject,visible,onOpen,onAuthorize,on
         const activeGroups=claimTemplate(form.current,files,step).groups;
         const entries=files.filter(f=>activeGroups.some(g=>g.id===f.category));
         await startChatAnalysis(token,attempt.id,attempt.requestId,
-          `请帮我整理本次就医资料，解释费用与需要补充的材料。用户填写的信息：${JSON.stringify(form.current)}；材料分类：${JSON.stringify(activeGroups.map(group=>({category:group.title,count:entries.filter(entry=>entry.category===group.id).length})))}。这些是个人补充信息，请以材料原文核对，不代表已确认事实。`,[...attempt.uploaded.values()]);
+          `${judgeSample?'这是一组主办方比赛样例的脱敏体验资料，不代表账号使用者本人病史。':''}请帮我整理本次就医资料，解释费用与需要补充的材料。用户填写的信息：${JSON.stringify(form.current)}；材料分类：${JSON.stringify(activeGroups.map(group=>({category:group.title,count:entries.filter(entry=>entry.category===group.id).length})))}。这些是个人补充信息，请以材料原文核对，不代表已确认事实。`,[...attempt.uploaded.values()]);
         attempt.analysisStarted=true;
       }
       await onOpen(attempt.id);
@@ -78,7 +85,11 @@ export default function ClaimIntake({token,subject,visible,onOpen,onAuthorize,on
     pending.current ??= {id:uuid(),requestId:uuid(),uploaded:new Map()};
     const attempt=pending.current;
     try {
-      await createConversation(token,attempt.id,subject);
+      if(judgeSample&&selectedFiles.every(entry=>entry.sample)&&!attempt.caseId){
+        const created=await createJudgeSampleUploadCase(token,subject,judgeSample,'judge-upload:'+attempt.id);
+        attempt.caseId=created.case_id;
+      }
+      await createConversation(token,attempt.id,subject,attempt.caseId);
       if(!mounted.current)return;
       const activeGroups=claimTemplate(form.current,files,step).groups;
       const entries=selectedFiles.filter(f=>activeGroups.some(g=>g.id===f.category));
@@ -104,6 +115,15 @@ export default function ClaimIntake({token,subject,visible,onOpen,onAuthorize,on
     setError('');setStep(step+1);shell.current?.querySelector('.claim-main')?.scrollTo?.(0,0);
   };
   return <main className="claim-react">
+    {!finished&&step<2&&(!judgeSample||!files.length)&&<JudgeSampleEntry token={token} prepareFiles disabled={locked||busy} onChoose={(sample,selected)=>{
+      if(locked||running.current)return;
+      if(files.length&&!window.confirm('用示例资料替换当前尚未提交的材料？'))return;
+      files.forEach(entry=>{if(entry.url)URL.revokeObjectURL(entry.url);});
+      form.current={...initialClaimForm(),...sample.claim_info};
+      setFiles(selected.map(entry=>({id:uuid(),name:entry.file.name,size:entry.file.size,category:entry.category,sample:true,url:null,file:entry.file})));
+      setJudgeSample(sample);setStep(1);setConfirmed(false);setError('');onDirty?.(true);
+    }}/>}
+    {judgeSample&&!finished&&<p className="claim-sample-status" role="status">示例资料已加入待上传列表，尚未提交。请预览材料，核对后确认上传。</p>}
     {reviewPhotos&&<PhotoReview token={token} subjectId={subject} files={files.map(f=>f.file)} onCancel={()=>setReviewPhotos(false)} onContinue={checked=>{
       const updated=files.map((entry,index)=>entry.file===checked[index]?entry:{...entry,file:checked[index],name:checked[index].name,size:checked[index].size,url:URL.createObjectURL(checked[index])});
       files.forEach((entry,index)=>{if(entry!==updated[index]&&entry.url)URL.revokeObjectURL(entry.url);});
@@ -131,7 +151,7 @@ export default function ClaimIntake({token,subject,visible,onOpen,onAuthorize,on
     }}/>
     {error && <p className="claim-error" role="alert">{error}</p>}
     <footer className="claim-shell claim-footer">
-      {!finished && step===2 && <label className="claim-consent"><input type="checkbox" checked={confirmed} disabled={locked} onChange={e=>setConfirmed(e.target.checked)}/><span>我已核对信息，同意将合成材料上传并用于关怀分析<small>不会向保险公司提交理赔申请。</small></span></label>}
+      {!finished && step===2 && <label className="claim-consent"><input type="checkbox" checked={confirmed} disabled={locked} onChange={e=>setConfirmed(e.target.checked)}/><span>我已核对信息，同意将{judgeSample?'脱敏示例资料':'合成材料'}上传并用于关怀分析<small>不会向保险公司提交理赔申请。</small></span></label>}
       {!subject && !finished && <button className="claim-text" onClick={onAuthorize}>确认资料用途授权</button>}
       {step>0 && !finished && <button className="claim-finish" disabled={locked||busy} onClick={()=>{setStep(step-1);setError('');}}>返回修改</button>}
       <button className="claim-primary" disabled={busy||(!finished&&step===2&&(!confirmed||!subject))} onClick={()=>{if(finished)void viewReport();else if(step<2)next();else void submit();}}>{busy?(finished?'正在开始分析…':'正在上传材料…'):finished?'查看相关报告':step===0?'下一步，上传材料':step===1?'下一步，核对申请':locked?'重试提交':'确认提交材料'}</button>
@@ -162,6 +182,6 @@ export default function ClaimIntake({token,subject,visible,onOpen,onAuthorize,on
       </div>
       <div className="claim-source-note"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6l8-3Z"/><path d="m8 12 3 3 5-5"/></svg><p>每份不超过 10 MB，数量不限<br/><span>确认前仅在本机预览</span></p></div>
     </dialog>
-    <dialog ref={preview} className="claim-preview-dialog" aria-label="材料图片预览"><div className="claim-preview-head"><strong>{previewFile?.name}</strong><button aria-label="关闭图片预览" onClick={()=>preview.current?.close()}>×</button></div>{previewFile?.url && <img src={previewFile.url} alt={previewFile.name}/>}</dialog>
+    <dialog ref={preview} className="claim-preview-dialog" aria-label="材料图片预览"><div className="claim-preview-head"><strong>{previewFile?.name}</strong><button aria-label="关闭图片预览" onClick={()=>{preview.current?.close();setPreviewFile(null);}}>×</button></div>{previewFile?.url ? <img src={previewFile.url} alt={previewFile.name}/> : previewPdf&&<iframe className="claim-pdf-preview" src={previewPdf} title={previewFile?.name||'资料预览'}/>}</dialog>
   </main>;
 }

@@ -184,7 +184,7 @@ def classify_fees(provider, fields, source_text=None):
         source_input['source_text'] = source_text
         messages[1]['content'] = json.dumps(source_input, ensure_ascii=False)
     base_messages = [dict(message) for message in messages]
-    timeout = (30, 300) if getattr(provider, 'provider', None) == 'qianfan' else 120
+    timeout = (10, 300) if getattr(provider, 'provider', None) == 'qianfan' else 120
     expected = {index for index, _ in pending}
     attempts = []
     for attempt in range(2):
@@ -555,13 +555,13 @@ surgery只转录明确手术名称或术式标签的原文数组，完整保留�
                        'allowed_fields': sorted(ALLOWED_FIELDS - {'blocks'}),
                        'text': text}, ensure_ascii=False)
     qianfan = getattr(provider, 'provider', None) == 'qianfan'
-    request_timeout = (30, 600) if qianfan else 120
+    request_timeout = (10, 600) if qianfan else 120
     stage_seconds = {}
     stage_request_attempts = []
     def call_stage(stage, stage_messages):
         started = time.monotonic()
         try:
-            timeout = (30, 120) if qianfan and stage.startswith('fee_table_cells_') else request_timeout
+            timeout = (10, 120) if qianfan and stage.startswith('fee_table_cells_') else request_timeout
             workload = ('ocr_repair' if '_vision_recovery' in stage else
                         'ocr_transcription' if stage.startswith('fee_table') else 'extraction')
             for attempt in range(3):

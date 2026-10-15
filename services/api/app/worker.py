@@ -7,6 +7,8 @@ import os
 import re
 import signal
 import time
+import threading
+import logging
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from pathlib import Path
@@ -29,15 +31,24 @@ from .knowledge_assembler import KnowledgeAssembler, PackExcludedError
 from .report_builder import POLICY_VERSION as REPORT_POLICY_VERSION, map_report_sources, validate_and_complete
 from .report_llm import PROMPT_VERSION as REPORT_PROMPT_VERSION, draft_report
 from .contracts.core import Action
+from .contracts.knowledge import DiseaseCode
 from .llm_extractor import PROMPT_VERSION, SCHEMA_VERSION as MODEL_SCHEMA_VERSION, OpenAiCompatibleExtractor, validate_evidence_quotes
-from .tencent_ocr import OCR_METHOD, OCR_VERSION, TencentOcr
+from .ocr import OCR_METHOD, OCR_VERSION, Ocr, create_ocr, page_ocr_method
 from .document_quality import classify_material
+from . import medical_records
 
 
 TEXT_PARSER_VERSION = "controlled-text-v1"
 PDF_PARSER_VERSION = "pypdf-6.6.2-v1"
 ROUTING_VERSION = "page-router-v1"
 stop_requested = False
+
+
+def worker_error_code(exc: Exception) -> str:
+    value = str(exc)
+    if re.fullmatch(r'OCR_PROVIDER_ERROR:[A-Za-z0-9_.-]{1,80}', value):
+        return value
+    return value if value.isupper() else 'PARSE_FAILED'
 
 
 def request_stop(*_args) -> None:
@@ -75,7 +86,7 @@ def evidence_for_page(document,page):
     """Prepare once so report cost context and SQL evidence refer to the same source spans."""
     if not page['text']:
         return []
-    if page['parser_version']==OCR_VERSION:
+    if page_ocr_method(page):
         spans=[]
         cursor=0
         for block in page['blocks']:
@@ -204,7 +215,7 @@ def parse_controlled_text(document: dict, path: Path):
     }]
 
 
-def ocr_page(image_bytes: bytes, width: int, height: int, base: dict, ocr: TencentOcr):
+def ocr_page(image_bytes: bytes, width: int, height: int, base: dict, ocr: Ocr):
     result = ocr.recognize(image_bytes, width, height)
     kind, certainty = classify_material(result['text'])
     uncertain = 0
@@ -221,10 +232,10 @@ def ocr_page(image_bytes: bytes, width: int, height: int, base: dict, ocr: Tence
         "text": text or None,
         "status": "parsed" if text else "unreadable",
         "requires_ocr": False,
-        "parser_version": OCR_VERSION,
+        "parser_version": getattr(ocr, 'version', OCR_VERSION),
         "blocks": result["blocks"],
         "metadata": {
-            **base["metadata"], "ocr_method": OCR_METHOD,
+            **base["metadata"], "ocr_method": getattr(ocr, 'method', OCR_METHOD),
             "ocr_request_id": result["request_id"], "ocr_angle": result["angle"],
             "ocr_line_count": len(result["blocks"]),
             "photo_quality": {"material_type":kind,"type_certainty":certainty,
@@ -235,7 +246,7 @@ def ocr_page(image_bytes: bytes, width: int, height: int, base: dict, ocr: Tence
     return base
 
 
-def parse_pdf(path: Path, ocr: TencentOcr | None = None):
+def parse_pdf(path: Path, ocr: Ocr | None = None):
     reader = PdfReader(str(path), strict=False)
     if reader.is_encrypted and reader.decrypt("") == 0:
         raise RuntimeError("PDF_ENCRYPTED")
@@ -263,7 +274,7 @@ def parse_pdf(path: Path, ocr: TencentOcr | None = None):
                          "extracted_code_points": len(text)},
         }
         if requires_ocr:
-            ocr = ocr or TencentOcr()
+            ocr = ocr or create_ocr()
             rendered_pdf = rendered_pdf or pdfium.PdfDocument(str(path))
             bitmap = rendered_pdf[page_index].render(scale=2.0)
             image = bitmap.to_pil().convert("RGB")
@@ -274,7 +285,7 @@ def parse_pdf(path: Path, ocr: TencentOcr | None = None):
     return pages
 
 
-def route_document(document: dict, path: Path, pipeline_version: str, ocr: TencentOcr | None = None):
+def route_document(document: dict, path: Path, pipeline_version: str, ocr: Ocr | None = None):
     if pipeline_version == "text-parser-v1":
         if document["media_type"] != "text/plain":
             raise RuntimeError("PARSER_NOT_IMPLEMENTED")
@@ -297,7 +308,7 @@ def route_document(document: dict, path: Path, pipeline_version: str, ocr: Tence
                         "metadata": {"analysis_status": "ocr_required"}}],
             "metadata": {"media_type": document["media_type"], "image_count": 1},
         }
-        return [ocr_page(path.read_bytes(), width, height, page, ocr or TencentOcr())]
+        return [ocr_page(path.read_bytes(), width, height, page, ocr or create_ocr())]
     raise RuntimeError("PARSER_NOT_IMPLEMENTED")
 
 
@@ -335,16 +346,36 @@ def analyze_models(material, knowledge_entries, user_context, source_refs, fact_
             insights_future = pool.submit(measured, 'insight_seconds', detect_semantic, material, knowledge)
         if fields_future:
             fields = validate_evidence_quotes(fields_future.result(), material)
-        advance('guidance')
-        if configured and not knowledge_excluded:
-            reviewable = [{"entry_id":e.entry_id,"title":e.title,"content":e.content[:500],
-                           "status":e.status.value,"ai_verified":e.ai_verified,
-                           "ai_verification_source":e.ai_verification_source} for e in knowledge_entries[:80]]
-            report = measured('guidance_seconds', draft_report, material, reviewable, user_context,
-                user_sources=source_refs, structured_costs=report_cost_context(fact_inputs,fields['candidates'].get('cost_lines',[])),
-                personnel=fields.get('personnel',[]), normalized_dates=encounter_dates)
         if insights_future:
             insights = insights_future.result()
+        advance('guidance')
+        if configured and not knowledge_excluded:
+            from .guidance_context import care_priorities, select_guidance_knowledge
+            reviewable = select_guidance_knowledge(knowledge_entries,fields,material,user_context)
+            from .web_knowledge import supplement_knowledge
+            reviewable,web_search=supplement_knowledge(reviewable,fields,material)
+            priorities = care_priorities(insights,material,[entry['entry_id'] for entry in reviewable])
+            from .analysis_sources import pack_sources
+            packed, aliases = pack_sources([{'evidence':fact_inputs}])
+            report = measured('guidance_seconds', draft_report, material, reviewable, user_context,
+                user_sources=source_refs, structured_costs=report_cost_context(fact_inputs,fields['candidates'].get('cost_lines',[])),
+                personnel=fields.get('personnel',[]), normalized_dates=encounter_dates, analysis_sources=packed,
+                care_priorities=priorities, structured_fields=fields.get('candidates',{}))
+            report.setdefault('usage_metadata',{})['web_search']=web_search
+            report['reference_knowledge']=reviewable
+            shared = report['draft'].get('patient_analysis')
+            if shared:
+                shared['evidence_refs'] = [aliases.get(ref,ref) for ref in shared['evidence_refs']]
+                for citation in shared.get('citations',[]):
+                    citation['source_refs'] = [aliases.get(ref,ref) for ref in citation.get('source_refs',[])]
+                from .inline_citations import canonical_analysis_citations
+                try:
+                    report['draft']['patient_analysis'] = canonical_analysis_citations(shared,aliases,
+                        [entry['entry_id'] for entry in reviewable])
+                except (ValueError,KeyError,TypeError):
+                    # Optional chat prose is unusable; retain the structured
+                    # report and regenerate prose against live authorized sources.
+                    report['draft']['patient_analysis'] = None
     performance = {'model_schedule':'parallel','model_seconds':timings,
                    'model_wall_seconds':round(time.monotonic()-started,3)}
     return fields, insights, report, provider, model_id, performance
@@ -393,13 +424,14 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
         knowledge_entries = []
         knowledge_version = None
         knowledge_excluded = False
+        assembler = KnowledgeAssembler()
+        knowledge_version = assembler.knowledge_version
+        knowledge_entries = assembler.select(DiseaseCode.ty,patient_visible=False).allowed
         disease_code = infer_disease_code(material)
         if disease_code is not None:
-            assembler = KnowledgeAssembler()
-            knowledge_version = assembler.knowledge_version
             try:
                 assembler.check_exclusions(disease_code, material)
-                knowledge_entries = assembler.select(
+                knowledge_entries += assembler.select(
                     disease_code, patient_visible=False,
                 ).allowed
             except PackExcludedError:
@@ -491,7 +523,7 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
                              document["document_version"], page["page_index"], block["type"],
                              block["order"], block["text"], json.dumps(block.get("bbox")),
                              json.dumps(block["metadata"]),
-                             OCR_METHOD if page["parser_version"] == OCR_VERSION else
+                             page_ocr_method(page) or
                              ("pdf_text_layer" if document["media_type"] == "application/pdf" else "controlled_text"),
                              document["source_hash"], page["parser_version"]),
                         )
@@ -506,7 +538,7 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
                             (evidence_id, run["run_id"], run["case_id"], document["document_id"],
                              document["document_version"], page["page_index"], start, end, value,
                              json.dumps(bbox),
-                             OCR_METHOD if page["parser_version"] == OCR_VERSION else
+                             page_ocr_method(page) or
                              ("pdf_text_layer" if document["media_type"] == "application/pdf" else "controlled_text"),
                              document["source_hash"], page["parser_version"]),
                         )
@@ -562,7 +594,7 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
             mapped_draft = map_report_sources(report_model_result["draft"], evidence_texts, source_refs)
             sections, action_drafts, report_errors = validate_and_complete(
                 mapped_draft, evidence_texts,
-                {e.entry_id for e in knowledge_entries}, source_refs,
+                {e.entry_id for e in knowledge_entries} | {d['entry_id'] for d in report_model_result.get('reference_knowledge',[])}, source_refs,
                 structured_dates=encounter_dates,
             )
             report_id = uuid4()
@@ -728,6 +760,7 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
                 "report_version": report_version, "prompt_version": REPORT_PROMPT_VERSION,
                 "policy_version": REPORT_POLICY_VERSION,
                 "validation_errors": report_errors, "model_status": report_model_result['status'],
+                "reading_quality": report_model_result.get('usage_metadata',{}).get('guidance_delivery'),
             }}
             result_status = 'failed' if report_model_result['status'] == 'failed' else ('waiting_review' if waiting_review else 'completed')
             conn.execute(
@@ -740,8 +773,13 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
                              'retryable': report_model_result.get('retryable', True)}) if result_status == 'failed' else None,
                  run["run_id"], run["lease_token"]),
             )
+            if result_status in ('completed','waiting_review'):
+                try:
+                    with conn.transaction():medical_records.enqueue(conn,run['run_id'])
+                except Exception:
+                    logging.getLogger(__name__).warning('MEDICAL_RECORD_QUEUE_UNAVAILABLE')
     except Exception as exc:
-        code = str(exc) if str(exc).isupper() else "PARSE_FAILED"
+        code = worker_error_code(exc)
         with conn.transaction():
             conn.execute(
                 """UPDATE analysis_runs SET status='failed', finished_at=now(),
@@ -757,6 +795,8 @@ def main() -> None:
     storage_root = Path(os.environ["ZHONGAN_STORAGE_ROOT"]).resolve()
     signal.signal(signal.SIGTERM, request_stop)
     signal.signal(signal.SIGINT, request_stop)
+    # Separate connection/thread: record organization never delays report delivery or OCR.
+    threading.Thread(target=medical_records.worker_loop,args=(dsn,lambda:stop_requested),name='medical-records',daemon=True).start()
     while not stop_requested:
         try:
             with connect(dsn) as conn:

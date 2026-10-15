@@ -17,7 +17,7 @@ REFERENCE_POLICY = 'user-authorized-reference-v1'
 CORPUS_PATH = REPO_ROOT / 'contracts/knowledge/rag-cost-chunks.jsonl'
 REPORT_PATH = REPO_ROOT / 'contracts/knowledge/rag-build-report.json'
 DISEASE_NAMES = {'FX': ('骨折',), 'FY': ('肺炎',), 'GX': ('冠心病',),
-                 'YZ': ('腰椎间盘', '腰突'), 'TN': ('糖尿病',), 'TY': ('医保', '费用', '发票')}
+                 'YZ': ('腰椎间盘', '腰突'), 'TN': ('糖尿病',), 'HJ': ('股骨头坏死','股骨头缺血性坏死','髋关节置换'), 'TY': ('医保', '费用', '发票')}
 STOP = {'什么', '怎么', '怎样', '这个', '那个', '我的', '可以', '需要', '是不是',
         '一下', '哪些', '有什么', '情况', '说明', '用户', '材料', '记录', '帮我'}
 
@@ -41,7 +41,7 @@ class KnowledgeRetriever:
                           'content': e.content, 'source': e.source or '',
                           'source_path': 'docs/medical/knowledge/'+({
                               'FX':'FX-骨折/','FY':'FY-肺炎/','GX':'GX-冠心病/',
-                              'YZ':'YZ-腰椎间盘突出症/','TN':'TN-糖尿病/','TY':''}[e.disease_code.value])+e.slot_file,
+                              'YZ':'YZ-腰椎间盘突出症/','TN':'TN-糖尿病/','HJ':'HJ-髋关节/','TY':''}[e.disease_code.value])+e.slot_file,
                           'disease_code': e.disease_code.value, 'scope': e.applicable_scope or '',
                           'anchoring': e.anchoring or '', 'status': e.status.value,
                           'numeric_pending_review': e.numeric_pending_review}
@@ -78,7 +78,7 @@ class KnowledgeRetriever:
             selected = medical | {'TY'}
         blocked = set()
         if self.assembler:
-            for code in medical or {'FX','FY','GX','YZ','TN'}:
+            for code in medical or {'FX','FY','GX','YZ','TN','HJ'}:
                 try:
                     self.assembler.check_exclusions(DiseaseCode(code), case_text or query)
                 except PackExcludedError:
@@ -150,3 +150,21 @@ class KnowledgeRetriever:
         return {'status': status, 'results': hits, 'knowledge_version': self.version,
                 'retrieval_method': 'bm25', 'indexed_count': len(self.documents),
                 'notice': '知识用于一般解释，不是本人的诊断、处方或保险赔付结论。'}
+
+    def resolve_references(self,refs,*,case_text):
+        """Read exact cached references, with current scope and version checks."""
+        hits=[]
+        for ref in list(dict.fromkeys(refs))[:8]:
+            if ref.startswith('WEB-VOLC-'):
+                from .web_knowledge import WebKnowledge
+                doc=WebKnowledge().resolve(ref)
+                if doc:hits.append(doc)
+                continue
+            doc=self.by_id.get(ref)
+            if not doc or doc.get('numeric_pending_review'):continue
+            if self.assembler and doc['disease_code']!='TY':
+                try:self.assembler.check_exclusions(DiseaseCode(doc['disease_code']),case_text)
+                except PackExcludedError:continue
+            hits.append({**doc,'version':self.version,'use':'general_reference',
+                         'reference_policy':REFERENCE_POLICY})
+        return self._result('available' if hits else 'no_results',hits)
