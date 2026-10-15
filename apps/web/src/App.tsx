@@ -22,6 +22,8 @@ import {revokeSession} from './api';
 import OriginalChatGuide,{OriginalChatWelcome} from './OriginalChatGuide';
 import {prepareChatFiles} from './chatFiles';
 import {isClaimSubmission} from './claimChatPresentation';
+import {uploadChatAttachment} from './api';
+import {ChatDraftAttachments,ReportUploadDialog,type DraftAttachment} from './ChatUploads';
 import PhotoReview from './PhotoReview';
 import EncounterOverview from './EncounterOverview';
 import DemoShowcase from './DemoShowcase';
@@ -73,7 +75,8 @@ export default function App() {
   const [members,setMembers]=useState<MemberResponse[]>([]);
   const [viewSubject,setViewSubject]=useState('');
   const [recordCase,setRecordCase]=useState<string>();
-  const [memberPicker,setMemberPicker]=useState<'chat'|'claim'>();
+  const [memberPicker,setMemberPicker]=useState<'chat'|'claim'|'report'>();
+  const pendingReportMember=useRef('');
   const [consentMember,setConsentMember]=useState<string>();
   const memberEpoch=useRef(0);
   const memberCacheKey=useRef('');
@@ -93,6 +96,9 @@ export default function App() {
   const [hasOlder,setHasOlder] = useState(false);
   const [input,setInput] = useState('');
   const [attachments,setAttachments] = useState<{document_id:string; name:string}[]>([]);
+  const [draftFiles,setDraftFiles]=useState<DraftAttachment[]>([]);
+  const uploadedDrafts=useRef(new Map<string,string>());
+  const [reportUploadConversation,setReportUploadConversation]=useState('');
   const [busy,setBusy] = useState(false);
   const [uploading,setUploading] = useState(false);
   const [photoReview,setPhotoReview]=useState<{files:File[];conversationId:string;replaceId?:string}|null>(null);
@@ -102,6 +108,7 @@ export default function App() {
   const [analysisError,setAnalysisError]=useState('');
   const observedAnalysis=useRef('');
   const analysisRequest=useRef<{id:string;message:string;docs:string[]}|null>(null);
+  const pendingReportUpload=useRef<{files:File[];replaceId?:string;completed:Map<File,{document_id:string;name:string}>}|null>(null);
   const [error,setError] = useState('');
   const [pollError,setPollError] = useState('');
   const [evidence,setEvidence] = useState<Evidence|null>(null);
@@ -131,7 +138,7 @@ export default function App() {
   const uploadMenu = useRef<HTMLDetailsElement>(null);
   const uploadingRef=useRef(false);
   const bottom = useRef<HTMLDivElement>(null);
-  const pendingSend = useRef<{id:string; text:string; docs:string[]}|null>(null);
+  const pendingSend = useRef<{id:string; text:string; docs:string[];draftKey:string}|null>(null);
   const connecting=useRef(false);
 
   const invalidateAccess = useCallback((e:unknown,id:string,generation:number,auth=token) => {
@@ -139,6 +146,7 @@ export default function App() {
     const fresh=++epoch.current;active.current='';busyRef.current=false;
     setLoadingConversation(false);setPollError('');
     setSnapshot(null);setOlder([]);setEvidence(null);setAttachments([]);setPhotoReview(null);setInput('');setDelivery(null);
+    setDraftFiles([]);uploadedDrafts.current.clear();setReportUploadConversation('');pendingReportUpload.current=null;
     setConversations([]);setSubjects([]);setSubject('');setCaseInput('');setFeedbackNotice('');setBusy(false);setUploading(false);
     localStorage.removeItem('zhongan_last_conversation');
     pendingSend.current=null;careKeys.current.clear();
@@ -169,10 +177,11 @@ export default function App() {
   const openConversation = useCallback(async (id:string, auth=token, destination:CarePanel='home', fromClaim=false) => {
     const generation = ++epoch.current;
     active.current = id;
-    analysisRequest.current=null;uploadingRef.current=false;
+    analysisRequest.current=null;pendingReportUpload.current=null;uploadingRef.current=false;
     setClaimGuideConversation(fromClaim ? id : '');
     olderExhausted.current = false;
     setSnapshot(null); setOlder([]); setAttachments([]);setPhotoReview(null); setInput(''); setEvidence(null); setError('');setPollError('');
+    setDraftFiles([]);uploadedDrafts.current.clear();setReportUploadConversation('');pendingReportUpload.current=null;
     busyRef.current=false;setBusy(false);setUploading(false);
     setLoadingConversation(true);setHasOlder(false);setDelivery(null);setFeedbackNotice('');
     setPanel(destination);setReportFocus(undefined); setHistoryOpen(false); pendingSend.current = null;
@@ -180,6 +189,7 @@ export default function App() {
       const state=await refresh(id,auth,generation);
       if(epoch.current===generation){setAnalysisOpen(!!fromClaim && !!state.analysis.run_id);setAnalysisError('');setUploadProgress(undefined);}
       if (epoch.current===generation) localStorage.setItem('zhongan_last_conversation',id);
+      if(epoch.current===generation)return state;
     } catch(e) {if(epoch.current===generation) setError(errorText(e));}
     finally {if(epoch.current===generation)setLoadingConversation(false);}
   },[refresh,token,setPanel]);
@@ -311,6 +321,7 @@ export default function App() {
     busyRef.current=false;setBusy(false);setUploading(false);setLoadingConversation(false);
     setDelivery(null);setFeedbackNotice('');setHasOlder(false);setReportFocus(undefined);setCaseInput('');
     setSnapshot(null);setOlder([]);setAttachments([]);setPhotoReview(null);setInput('');setEvidence(null);setError('');
+    setDraftFiles([]);uploadedDrafts.current.clear();setReportUploadConversation('');
     setHistoryOpen(false);pendingSend.current=null;
     setClaimGuideConversation('');
     setPanel('chat');
@@ -327,7 +338,25 @@ export default function App() {
     else setMemberPicker(destination);
   };
   const chooseBusinessMember=(id:string)=>{
-    const destination=memberPicker;setMemberPicker(undefined);if(destination)requestBusiness(destination,id);
+    const destination=memberPicker;setMemberPicker(undefined);
+    if(destination==='report')void createReportConversation(id);
+    else if(destination)requestBusiness(destination,id);
+  };
+  const createReportConversation=async(personId:string,allowed:ChatSubject[]=subjects)=>{
+    if(busyRef.current||uploadingRef.current||analysisSubmitting)return;
+    if(!allowed.some(item=>item.subject_id===personId)){
+      pendingReportMember.current=personId;setConsentMember(personId);return;
+    }
+    const generation=epoch.current;busyRef.current=true;setBusy(true);setError('');
+    try{
+      const created=await createConversation(token,requestId(),personId);
+      if(epoch.current!==generation)return;
+      setConversations(await listConversations(token));
+      if(epoch.current!==generation)return;
+      const opened=await openConversation(created.conversation_id,token,'chat');
+      if(opened&&active.current===created.conversation_id)setReportUploadConversation(created.conversation_id);
+    }catch(e){if(epoch.current===generation)setError(errorText(e));}
+    finally{if(epoch.current===generation){busyRef.current=false;setBusy(false);}}
   };
   const startJudgeExperience=(sample:JudgeSample)=>{
     if(busyRef.current||uploadingRef.current||analysisSubmitting)return;
@@ -346,8 +375,14 @@ export default function App() {
     const [items,allowed]=await Promise.all([listConversations(token),listSubjects(token)]);
     if(memberEpoch.current!==generation)return;
     setConversations(items);setSubjects(allowed);
+    if(pendingReportMember.current===changedSubject&&allowed.some(item=>item.subject_id===changedSubject)){
+      pendingReportMember.current='';
+      await createReportConversation(changedSubject,allowed);
+      return;
+    }
     if(snapshot?.conversation.subject_id===changedSubject&&active.current===snapshot.conversation.conversation_id&&!items.some(item=>item.conversation_id===snapshot.conversation.conversation_id)){
       ++epoch.current;active.current='';setSnapshot(null);setEvidence(null);setOlder([]);setAttachments([]);setPhotoReview(null);setInput('');setDelivery(null);
+      setDraftFiles([]);uploadedDrafts.current.clear();setReportUploadConversation('');
       pendingSend.current=null;careKeys.current.clear();localStorage.removeItem('zhongan_last_conversation');
     }
   };
@@ -397,26 +432,38 @@ export default function App() {
   const send = async (retry?:ChatTurn) => {
     const id=active.current, generation=epoch.current;
     if(!id || busyRef.current || busy || uploading) return;
-    const text=retry?.question || input.trim() || (attachments.length ? '请帮我分析这些材料。' : '');
+    const selected=[...draftFiles];
+    const text=retry?.question || input.trim() || (selected.length ? '请看看这些附件，帮我解释一下。' : '');
     if(!text)return;
-    const docs=retry ? retry.attachments.map(x=>x.document_id) : attachments.map(x=>x.document_id);
+    const docs=retry ? retry.attachments.filter(x=>x.kind!=='chat_attachment').map(x=>x.document_id) : [];
+    const attachmentIds=retry ? retry.attachments.filter(x=>x.kind==='chat_attachment').map(x=>x.document_id) : [];
+    const draftKey=retry?retry.turn_id:selected.map(file=>file.id).join(':');
     const previous=pendingSend.current;
-    const req=retry?.request_id || (previous && previous.text===text && JSON.stringify(previous.docs)===JSON.stringify(docs) ? previous.id : requestId());
-    pendingSend.current={id:req,text,docs};busyRef.current=true;setBusy(true);setError('');
-    if(docs.length){setAnalysisOpen(true);setAnalysisError('');setAnalysisSubmitting(true);}
+    const req=retry?.request_id || (previous && previous.text===text && previous.draftKey===draftKey ? previous.id : requestId());
+    pendingSend.current={id:req,text,docs,draftKey};busyRef.current=true;setBusy(true);setError('');
     try {
       if(retry?.input_kind==='analysis_ready' && snapshot?.analysis.run_id) {
         await continueAnalysis(token,id,snapshot.analysis.run_id);
       } else {
-        if(docs.length)await startChatAnalysis(token,id,req,text,docs);
-        else await sendChatMessage(token,id,req,text,docs);
+        if(!retry&&selected.length){
+          uploadingRef.current=true;setUploading(true);
+          for(const item of selected){
+            let attachmentId=uploadedDrafts.current.get(item.id);
+            if(!attachmentId){const uploaded=await uploadChatAttachment(token,id,item.file);
+              if(epoch.current!==generation)return;
+              attachmentId=uploaded.attachment_id;uploadedDrafts.current.set(item.id,attachmentId);}
+            attachmentIds.push(attachmentId);
+          }
+          uploadingRef.current=false;setUploading(false);
+        }
+        await sendChatMessage(token,id,req,text,docs,attachmentIds);
       }
-      if(epoch.current===generation){setInput('');setAttachments([]);setPhotoReview(null);pendingSend.current=null;}
+      if(epoch.current===generation){setInput('');setDraftFiles([]);uploadedDrafts.current.clear();pendingSend.current=null;}
     } catch(e){if(!invalidateAccess(e,id,generation) && epoch.current===generation)setError(errorText(e));}
     finally {
       try {await refresh(id,token,generation);if(epoch.current===generation)setConversations(await listConversations(token));}
       catch(e){if(epoch.current===generation)setError(errorText(e));}
-      if(epoch.current===generation){busyRef.current=false;setBusy(false);setAnalysisSubmitting(false);}
+      if(epoch.current===generation){busyRef.current=false;uploadingRef.current=false;setUploading(false);setBusy(false);}
     }
   };
 
@@ -437,9 +484,8 @@ export default function App() {
 
   const upload = async(files:FileList|null) => {
     if(!files || !active.current || busyRef.current || busy || uploading)return;
-    try{const selected=prepareChatFiles(files,attachments.length);
-      if(selected.some(file=>file.type.startsWith('image/')))setPhotoReview({files:selected,conversationId:active.current});
-      else await uploadAccepted(selected);
+    try{const selected=prepareChatFiles(files);
+      setDraftFiles(current=>[...current,...selected.map(file=>({id:requestId(),file}))]);setError('');
     }catch(e){setError(errorText(e));}
     if(uploadInput.current)uploadInput.current.value='';if(photoInput.current)photoInput.current.value='';
   };
@@ -447,16 +493,20 @@ export default function App() {
     if(!active.current || busyRef.current || uploading)return;
     const id=active.current,generation=epoch.current;
     if(!selected.length)return;
+    const previous=pendingReportUpload.current;
+    const attempt=previous?.files===selected&&previous.replaceId===replaceId?previous:{files:selected,replaceId,completed:new Map<File,{document_id:string;name:string}>()};
+    pendingReportUpload.current=attempt;
     uploadingRef.current=true;
     const uploaded=attachments.filter(item=>item.document_id!==replaceId);setUploading(true);setError('');setAnalysisError('');setAnalysisOpen(true);setUploadProgress({done:0,total:selected.length});
     try {
       for(const file of selected) {
-        const doc=replaceId?await replaceChatDocument(token,id,replaceId,file):await uploadChatDocument(token,id,file);
+        const doc=attempt.completed.get(file) || (replaceId?await replaceChatDocument(token,id,replaceId,file):await uploadChatDocument(token,id,file));
         if(epoch.current!==generation)return;
+        attempt.completed.set(file,{document_id:doc.document_id,name:file.name});
         if(!uploaded.some(x=>x.document_id===doc.document_id))uploaded.push({document_id:doc.document_id,name:file.name});
         setAttachments([...uploaded]);setUploadProgress({done:selected.indexOf(file)+1,total:selected.length});
       }
-      if(epoch.current===generation){setUploadProgress(undefined);await startMaterialAnalysis(uploaded.map(a=>a.document_id));}
+      if(epoch.current===generation){pendingReportUpload.current=null;setUploadProgress(undefined);await startMaterialAnalysis(uploaded.map(a=>a.document_id));}
     } catch(e){if(!invalidateAccess(e,id,generation) && epoch.current===generation){setError(errorText(e));setAnalysisError(errorText(e));}}
     finally {if(epoch.current===generation){uploadingRef.current=false;setUploading(false);setUploadProgress(undefined);if(uploadInput.current)uploadInput.current.value='';if(photoInput.current)photoInput.current.value='';}}
   };
@@ -488,6 +538,7 @@ export default function App() {
     sessionStorage.removeItem('zhongan_account_name');
     setToken('');setConnected(false);setConversations([]);setSnapshot(null);
     setOlder([]);setAttachments([]);setPhotoReview(null);setEvidence(null);setError('');setPollError('');setHistoryOpen(false);pendingSend.current=null;
+    setDraftFiles([]);uploadedDrafts.current.clear();setReportUploadConversation('');pendingReportMember.current='';pendingReportUpload.current=null;
     setSubjects([]);setSubject('');setCaseInput('');setInput('');localStorage.removeItem('zhongan_last_conversation');
     ++memberEpoch.current;setClaimSubject('');setClaimDirty(false);setMembers([]);setViewSubject('');setMemberPicker(undefined);setRecordCase(undefined);
     if(memberCacheKey.current)localStorage.removeItem(memberCacheKey.current);memberCacheKey.current='';
@@ -514,7 +565,8 @@ export default function App() {
   const progressView=analysisView(snapshot,uploadProgress,analysisSubmitting,analysisError);
   const historyPanel=<aside className="chat-sidebar" aria-label="历史对话列表">
       <div className="history-panel-head"><div className="brand"><img src={brand} alt="暖愈智护"/></div><button className="history-close" autoFocus={mobileHistory} aria-label="关闭历史对话" onClick={()=>setHistoryOpen(false)}>×</button></div>
-      <button className="new-chat" disabled={working} onClick={()=>requestBusiness('chat')}>＋ 新的关怀对话</button>
+      <button className="new-chat new-report" disabled={working} onClick={()=>{setHistoryOpen(false);setMemberPicker('report');}}>＋ 新建解读报告</button>
+      <button className="new-chat" disabled={working} onClick={()=>requestBusiness('chat')}>＋ 新建对话</button>
       <div className="history-list"><p>以前的对话</p>{conversations.length===0 && <p>还没有历史对话</p>}{conversations.map(c=><button disabled={working} key={c.conversation_id}
         className={active.current===c.conversation_id?'selected':''} onClick={()=>void openConversation(c.conversation_id,token,'chat')}>
         <strong>{c.title}</strong><small>{new Date(c.updated_at).toLocaleDateString('zh-CN')}</small></button>)}</div>
@@ -588,31 +640,36 @@ export default function App() {
             </div></div></div>)}
         </div><div ref={bottom}/></main>
         <footer className="chat-footer">
-          <div className="upload-list">{attachments.map(a=><span className="attachment" key={a.document_id}>▤ {a.name} · 已上传</span>)}</div>
+          <ChatDraftAttachments files={draftFiles} busy={working} onRemove={id=>{setDraftFiles(current=>current.filter(file=>file.id!==id));uploadedDrafts.current.delete(id);}}/>
           {showClaimGuide && <div className="nuan-quick-actions">{[['summary','看病经过'],['cost','费用解读'],['action','下一步安排']].map(([id,label])=><button key={id} onClick={()=>{const target=document.getElementById('chat-topic-'+id);if(target?.tagName==='DETAILS')target.setAttribute('open','');target?.scrollIntoView({behavior:'smooth',block:'start'});}}><DemoIcon name={id==='summary'?'file':id==='cost'?'chat':'leaf'}/>{label}</button>)}</div>}<form className="composer" onSubmit={submit}>
             <input ref={uploadInput} aria-label="选择文档文件" hidden type="file" multiple onChange={e=>void upload(e.target.files)}/>
             <input ref={photoInput} aria-label="选择照片或图片" hidden type="file" multiple accept="image/jpeg,image/png" onChange={e=>void upload(e.target.files)}/>
             <details ref={uploadMenu} className="chat-upload-menu" onBlur={e=>{if(!e.currentTarget.contains(e.relatedTarget))e.currentTarget.open=false;}} onKeyDown={e=>{if(e.key==='Escape'){e.preventDefault();e.currentTarget.open=false;e.currentTarget.querySelector('summary')?.focus();}}}>
               <summary title="上传病历或发票" aria-label="上传病历或发票" aria-disabled={working} onClick={e=>{if(working)e.preventDefault();}}>＋</summary>
-              <div className="chat-upload-options" aria-label="选择上传方式"><div className="upload-panel-heading"><p>上传就医材料</p><small>补充资料，一起看得更清楚</small></div>
+              <div className="chat-upload-options" aria-label="选择上传方式"><div className="upload-panel-heading"><p>添加图片或文件</p><small>选好后可补充问题，一起发送</small></div>
                 <button className="upload-source-photo" type="button" aria-label="照片或图片" aria-describedby="upload-photo-hint" disabled={working} onClick={()=>{if(uploadMenu.current)uploadMenu.current.open=false;photoInput.current?.click();}}><span className="upload-source-icon"><UploadSourceIcon kind="image"/></span><span className="upload-source-copy"><strong>照片或图片</strong><small id="upload-photo-hint">从相册选择 · JPG、PNG</small></span><DemoIcon name="arrow"/></button>
                 <button className="upload-source-document" type="button" aria-label="PDF / TXT 文件" aria-describedby="upload-document-hint" disabled={working} onClick={()=>{if(uploadMenu.current)uploadMenu.current.open=false;uploadInput.current?.click();}}><span className="upload-source-icon"><UploadSourceIcon kind="document"/></span><span className="upload-source-copy"><strong>PDF / TXT 文件</strong><small id="upload-document-hint">从文件中选择病历或票据</small></span><DemoIcon name="arrow"/></button>
                 <small className="upload-panel-note"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" aria-hidden="true"><path d="M8 12v5a4 4 0 0 0 8 0V7a3 3 0 0 0-6 0v10a1 1 0 0 0 2 0V9"/></svg>支持多选 · 每份不超过 10MB</small>
               </div>
             </details>
-            <textarea aria-label="给暖暖的消息" value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.nativeEvent.isComposing){e.preventDefault();void send();}}} rows={1} placeholder="有哪里不清楚？问问暖暖"/>
-            <button className="send-button" aria-label="发送消息" disabled={working || (!input.trim()&&!attachments.length)}>{uploading?'…':busy?'…':<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6"/></svg>}</button>
+            <textarea aria-label="给暖暖的消息" value={input} disabled={working} onChange={e=>setInput(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.nativeEvent.isComposing){e.preventDefault();void send();}}} rows={1} placeholder={draftFiles.length?'补充你想问的问题，和附件一起发送':'有哪里不清楚？问问暖暖'}/>
+            <button className="send-button" aria-label="发送消息" disabled={working || (!input.trim()&&!draftFiles.length)}>{uploading?'…':busy?'…':<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6"/></svg>}</button>
           </form>
         </footer></>}
       </PageBoundary>
-      {connected && snapshot && <AnalysisFlow open={analysisOpen && ['chat','report','overview'].includes(panel)} snapshot={analysisSubmitting || uploadProgress?null:snapshot} upload={uploadProgress} submitting={analysisSubmitting} error={analysisError} onClose={()=>setAnalysisOpen(false)} onReport={openNarrative} onRetry={()=>{if(material?.status==='available' && snapshot.analysis.run_id)void completeNarrative(active.current,epoch.current,snapshot.analysis.run_id);else void startMaterialAnalysis();}}/>}
+      {connected && snapshot && <AnalysisFlow open={analysisOpen && ['chat','report','overview'].includes(panel)} snapshot={analysisSubmitting || uploadProgress?null:snapshot} upload={uploadProgress} submitting={analysisSubmitting} error={analysisError} onClose={()=>setAnalysisOpen(false)} onReport={openNarrative} onRetry={()=>{if(pendingReportUpload.current)void uploadAccepted(pendingReportUpload.current.files,pendingReportUpload.current.replaceId);else if(material?.status==='available' && snapshot.analysis.run_id)void completeNarrative(active.current,epoch.current,snapshot.analysis.run_id);else void startMaterialAnalysis();}}/>}
       {connected && !needsProfile && panel!=='claim' && <nav className="care-navigation" aria-label="关怀页面"><button aria-current={panel==='home'?'page':undefined} onClick={()=>setPanel('home')}><DemoIcon name="leaf"/>首页</button>
         <button aria-current={panel==='chat'?'page':undefined} onClick={()=>snapshot?setPanel('chat'):requestBusiness('chat')}><DemoIcon name="chat"/>问暖暖</button>
         <button aria-current={['account','records'].includes(panel)?'page':undefined} onClick={()=>setPanel('account')}><DemoIcon name="user"/>我的</button>
         </nav>}
     </section>
-    {connected && consentMember && members.find(m=>m.subject_id===consentMember) && <MemberConsentDialog key={consentMember} token={token} member={members.find(m=>m.subject_id===consentMember)!} onClose={()=>setConsentMember(undefined)} onChanged={refreshAccess}/>}
-    {connected && !needsProfile && memberPicker && <MemberPicker members={members} title={memberPicker==='claim'?'选择就医资料所属人员':'选择对话所属人员'} onSelect={chooseBusinessMember} onClose={()=>setMemberPicker(undefined)}/>}
+    {connected && consentMember && members.find(m=>m.subject_id===consentMember) && <MemberConsentDialog key={consentMember} token={token} member={members.find(m=>m.subject_id===consentMember)!} onClose={()=>{setConsentMember(undefined);pendingReportMember.current='';}} onChanged={refreshAccess}/>}
+    {connected && !needsProfile && memberPicker && <MemberPicker members={members} title={memberPicker==='report'?'选择解读报告所属人员':memberPicker==='claim'?'选择就医资料所属人员':'选择对话所属人员'} onSelect={chooseBusinessMember} onClose={()=>setMemberPicker(undefined)}/>}
+    {connected&&snapshot&&reportUploadConversation===snapshot.conversation.conversation_id&&<ReportUploadDialog person={members.find(member=>member.subject_id===snapshot.conversation.subject_id)?.name||'当前人员'} onClose={()=>setReportUploadConversation('')} onSubmit={files=>{
+      setReportUploadConversation('');
+      if(files.some(file=>file.type.startsWith('image/')))setPhotoReview({files,conversationId:snapshot.conversation.conversation_id});
+      else void uploadAccepted(files);
+    }}/>}
     {photoReview&&snapshot&&photoReview.conversationId===snapshot.conversation.conversation_id&&<PhotoReview key={photoReview.conversationId} token={token} subjectId={snapshot.conversation.subject_id} files={photoReview.files} onCancel={()=>setPhotoReview(null)} onContinue={files=>{const replaceId=photoReview.replaceId;setPhotoReview(null);setPanel('chat');void uploadAccepted(files,replaceId);}}/>}
     {evidence && <EvidencePanel token={token} evidence={evidence} onClose={()=>setEvidence(null)}/>}
   </div></SourceToken.Provider>;

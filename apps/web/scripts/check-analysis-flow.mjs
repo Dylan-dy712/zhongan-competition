@@ -13,19 +13,25 @@ dom.window.HTMLDialogElement.prototype.showModal=function(){this.open=true;};
 dom.window.HTMLDialogElement.prototype.close=function(){this.open=false;};
 const realTimeout=globalThis.setTimeout;
 globalThis.setTimeout=(fn,ms,...args)=>realTimeout(fn,ms>=1500?20:ms,...args);
-const conversation={conversation_id:'analysis-ui',subject_id:'synthetic',case_id:'case-ui',title:'合成分析流程',recall_enabled:false,updated_at:'2026-10-08T00:00:00Z'};
-let phase='initial',run='run-1',uploads=0,submissions=[],turns=[],resolveSecond,resolveNarrative;
+let conversation={conversation_id:'analysis-ui',subject_id:'synthetic',case_id:'case-ui',title:'合成分析流程',recall_enabled:false,updated_at:'2026-10-08T00:00:00Z'};
+let phase='initial',run='run-1',uploads=0,acceptedUploads=[],submissions=[],turns=[],resolveSecond,resolveNarrative;
 let delayNarrative=false,failNarrative=false,continuations=0,polls=0,pollOutage=false;
 const section={section_type:'cost_explanation',pending_count:1,items:[{text:'医疗总费用：120元',kind:'checked',evidence_refs:['00000000-0000-4000-8000-000000000002']}]};
 const state=()=>({conversation,turns,analysis:{status:phase==='initial'?'not_started':phase==='ready'?'waiting_review':phase==='failed'?'failed':phase==='queued'?'queued':'running',run_id:phase==='initial'?undefined:run,stage:phase==='ready'?'validate':phase},
   report:{status:'not_released'},material_report:{status:phase==='ready'?'available':phase==='failed'?'failed':phase,run_id:run,report_id:'material-ui',document_count:2,source_report_version:1,pending_count:1,notice:'合成自动核对提示',sections:[section]}});
 globalThis.fetch=async(url,options={})=>{
  const path=new URL(url,'http://localhost').pathname;
- if(path==='/v1/conversations')return Response.json([conversation]);
+ if(path==='/v1/conversations'){
+  if(options.method==='POST'){conversation={...conversation,conversation_id:JSON.parse(options.body).conversation_id};return Response.json(conversation);}
+  return Response.json([conversation]);
+ }
  if(path==='/v1/me/members')return Response.json([{subject_id:'synthetic',name:'合成分析用户',relationship:'self',gender:'unspecified',birth_date:null,profile_completed:true}]);
  if(path==='/v1/chat/subjects')return Response.json([{subject_id:'synthetic'}]);
  if(path.endsWith('/deliveries'))return Response.json([]);
- if(path.endsWith('/documents')){uploads++;if(uploads===2)await new Promise(r=>resolveSecond=r);return Response.json({document_id:'doc-'+uploads});}
+ if(path.endsWith('/documents')){
+  uploads++;if(uploads===2){await new Promise(r=>resolveSecond=r);return Response.json({message:'合成上传中断'},{status:503});}
+  const document_id='doc-'+uploads;acceptedUploads.push(document_id);return Response.json({document_id});
+ }
  if(path.endsWith('/analyses')){
   const body=JSON.parse(options.body);submissions.push(body);phase='queued';run='run-'+submissions.length;
   turns=[{turn_id:'turn-ui',request_id:body.request_id,question:body.message,input_kind:'user',status:'completed',answer:{text:'材料已收到',evidence_refs:[],history_refs:[]},attachments:[],tool_events:[{tool:'start_analysis',run_id:run,status:'queued'}]}];
@@ -42,7 +48,7 @@ globalThis.fetch=async(url,options={})=>{
  }
  if(path==='/v1/evidence/00000000-0000-4000-8000-000000000002')return Response.json({evidence_id:'00000000-0000-4000-8000-000000000002',document_version:1,page_index:0,text_span:{text:'医疗总费用：120元'}});
  if(path.endsWith('/messages'))return Response.json({turn_id:'follow-ui'});
- if(path==='/v1/conversations/analysis-ui'){polls++;if(pollOutage)return new Response('Bad gateway',{status:502});return Response.json(state());}
+ if(path==='/v1/conversations/'+conversation.conversation_id){polls++;if(pollOutage)return new Response('Bad gateway',{status:502});return Response.json(state());}
  throw Error('Unexpected fixture request '+path);
 };
 sessionStorage.setItem('zhongan_chat_token','synthetic-test-only');
@@ -51,18 +57,27 @@ const flush=()=>act(async()=>new Promise(r=>realTimeout(r,60)));
 const click=async(text)=>{const node=[...document.querySelectorAll('button')].find(n=>!n.closest('[hidden]') && (n.textContent.trim()===text || n.getAttribute('aria-label')===text));assert.ok(node,text);await act(async()=>node.click());await flush();};
 try{
  await act(async()=>root.render(React.createElement(modules.App)));await flush();
- const input=document.querySelector('[aria-label="选择文档文件"]');
+ await click('＋ 新建解读报告');
+ assert.ok(document.querySelector('dialog.member-dialog'),'A report asks for its person');
+ await act(async()=>document.querySelector('.member-list button').click());await flush();
+ assert.equal(document.querySelector('.report-upload-dialog').open,true,'Choosing a person immediately opens report upload');
+ const input=document.querySelector('[aria-label="选择报告材料"]');
  Object.defineProperty(input,'files',{value:Array.from({length:25},(_,i)=>new File(['synthetic'],`${i+1}.txt`,{type:'text/plain'}))});
  await act(async()=>input.dispatchEvent(new dom.window.Event('change',{bubbles:true})));await flush();
+ assert.equal(uploads,0,'Selecting report materials waits for explicit confirmation');
+ await click('上传并生成解读报告');
  assert.equal(document.querySelector('.chat-workspace > dialog.analysis-dialog').open,true);
  assert.equal(document.querySelector('.chat-workspace > dialog.analysis-dialog progress').value,4,'Only acknowledged uploads count');
  assert.equal(submissions.length,0,'Analysis waits for all selected uploads');
- await act(async()=>resolveSecond());await flush();assert.equal(submissions.length,1);
- assert.deepEqual(submissions[0].document_ids,Array.from({length:25},(_,i)=>'doc-'+(i+1)));
+ await act(async()=>resolveSecond());await flush();assert.equal(submissions.length,0,'A partially failed upload cannot generate an incomplete report');
+ await click('重新分析材料');assert.equal(submissions.length,1);
+ assert.equal(uploads,26,'Retry uploads only the failed and remaining files');
+ assert.deepEqual(submissions[0].document_ids,acceptedUploads);
  assert.equal(document.querySelector('.chat-workspace > dialog.analysis-dialog progress').value,0);
  for(const [next,percent] of [['extract',20],['insights',40],['guidance',60],['validate',80]]){
-  phase=next;await flush();const displayed=document.querySelector('.chat-workspace > dialog.analysis-dialog progress').value;
-  assert.ok(displayed>=percent+1 && displayed<percent+20,'Estimated progress stays within the actual stage');
+  phase=next;let displayed;
+  for(let attempt=0;attempt<12;attempt++){await flush();displayed=document.querySelector('.chat-workspace > dialog.analysis-dialog progress').value;if(displayed>=percent+1&&displayed<percent+20)break;}
+  assert.ok(displayed>=percent+1 && displayed<percent+20,`Estimated progress stays within ${next}: ${displayed}`);
   assert.match(document.querySelector('.chat-workspace > dialog.analysis-dialog').textContent,/预估进度/);
  }
  await click('收起进度，稍后查看');assert.equal(document.querySelector('.chat-workspace > dialog.analysis-dialog').open,false);

@@ -127,7 +127,7 @@ try{
   assert.ok(document.querySelector('.claim-form-shell'),'Reentering completed intake starts a fresh form');
   assert.equal(document.querySelector('[data-claim-field="diagnosis"]').value,'');
   await click('返回首页');await click('问暖暖');
-  await click('新的关怀对话');
+  await click('新建对话');
   assert.equal(document.querySelector('dialog.member-dialog'),null,'New chat skips the preliminary member picker');
   assert.equal(button('开始新的对话').disabled,true);
   await act(async()=>{const select=document.querySelector('.connect-form select');select.value='synthetic-subject';select.dispatchEvent(new dom.window.Event('change',{bubbles:true}));});

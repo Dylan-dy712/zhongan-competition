@@ -145,8 +145,12 @@ export const changeCareConsent=(token:string,confirmation:boolean,expected_versi
 export const getConversation = (token: string, id: string) => chatRequest<ChatSnapshot>(`/v1/conversations/${id}`, token);
 export const getOlderTurns = (token: string, id: string, before: string) =>
   chatRequest<ChatTurn[]>(`/v1/conversations/${id}/turns?before=${encodeURIComponent(before)}`, token);
-export const sendChatMessage = (token: string, id: string, requestId: string, message: string, documentIds: string[]) =>
-  chatRequest(`/v1/conversations/${id}/messages`, token, 'POST', {request_id:requestId, message, document_ids:documentIds});
+export const sendChatMessage = (token: string, id: string, requestId: string, message: string, documentIds: string[],attachmentIds:string[]=[]) =>
+  chatRequest(`/v1/conversations/${id}/messages`, token, 'POST', {request_id:requestId, message, document_ids:documentIds,attachment_ids:attachmentIds});
+export const uploadChatAttachment=(token:string,id:string,file:File)=>{
+  const data=new FormData();data.append('file',file);
+  return chatRequest<{attachment_id:string;name:string}>(`/v1/conversations/${id}/attachments`,token,'POST',data);
+};
 export const continueAnalysis = (token: string, id: string, runId: string) =>
   chatRequest(`/v1/conversations/${id}/analyses/${runId}/continue`, token, 'POST',undefined,undefined,450000);
 export const setRecall = (token: string, id: string, enabled: boolean) =>
