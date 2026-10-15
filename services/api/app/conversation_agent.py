@@ -647,6 +647,7 @@ def run_agent(history, question, attachments, tools, model=None, on_event=None, 
                 reply = AgentReply.model_validate(normalized)
             else:
                 reply = AgentReply.model_validate_json(content)
+                bind_citations(reply.text, reply.citations, {}, reply.evidence_refs, reply.knowledge_refs)
         except (ValidationError, ValueError) as exc:
             if repaired or round_index == 4:
                 raise
@@ -693,8 +694,6 @@ def run_agent(history, question, attachments, tools, model=None, on_event=None, 
         if analysis_mode and _unsafe(reply.text.replace("**", "")):
             raise ValueError('UNSAFE_ANALYSIS')
         tools.validate_reply(reply)
-        if not analysis_mode:
-            bind_citations(reply.text, reply.citations, {}, reply.evidence_refs, reply.knowledge_refs)
         # Scripted models must explicitly implement review to exercise this stage.
         # Every real AgentModel has it; no accepted draft is delivered unchecked.
         reviewer=getattr(type(model),'review_analysis',None)

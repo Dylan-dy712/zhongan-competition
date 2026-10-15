@@ -17,6 +17,26 @@ def answer(text='你好', refs=None):
 
 
 class AgentTests(unittest.TestCase):
+    def test_chat_repairs_a_citation_quote_that_does_not_match_the_final_text(self):
+        model, tools = MagicMock(), MagicMock()
+        data = {'text': '合成知识说明。', 'knowledge_refs': ['synthetic-knowledge'],
+                'citations': [{'quote': '与正文不一致的句子。', 'source_refs': ['synthetic-knowledge']}]}
+        fixed = {**data, 'citations': [{'quote': data['text'], 'source_refs': ['synthetic-knowledge']}]}
+        model.complete.side_effect = [{'content': json.dumps(data)}, {'content': json.dumps(fixed)}]
+        reply, _ = run_agent([], '解释一个术语', [], tools, model=model)
+        self.assertEqual(reply['citations'][0]['quote'], data['text'])
+        self.assertEqual(model.complete.call_count, 2)
+        self.assertIn('CITATION_ANCHOR_NOT_UNIQUE', model.complete.call_args.args[0][-1]['content'])
+        tools.execute.assert_not_called()
+
+    def test_chat_citation_repair_is_bounded(self):
+        model, tools = MagicMock(), MagicMock()
+        model.complete.return_value = {'content': json.dumps({'text': '实际正文。', 'knowledge_refs': ['synthetic'],
+            'citations': [{'quote': '另一个句子。', 'source_refs': ['synthetic']}]})}
+        with self.assertRaisesRegex(ValueError, 'CITATION_ANCHOR_NOT_UNIQUE'):
+            run_agent([], '解释一个术语', [], tools, model=model)
+        self.assertEqual(model.complete.call_count, 2)
+
     def test_search_promise_runs_real_search_and_continues_to_an_answer(self):
         model, tools = MagicMock(), MagicMock()
         question = '费用清单上甲类、乙类、丙类是什么意思？'
