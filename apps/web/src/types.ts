@@ -72,8 +72,19 @@ export interface ClarificationQuestion {field:PatientField;question:string;optio
 export interface PatientUpdate {field:PatientField;statement:string}
 export interface ChatAnswer {text: string; evidence_refs: string[]; history_refs: string[];
   clarification_questions?:ClarificationQuestion[];suggested_questions?:string[];patient_updates?:PatientUpdate[];
+  service_guide?:{text:string;policy_status:'demo_assumed_midhigh'};medical_services?:MedicalServices;
   guidance_delivery?:{status:'passed'|'needs_improvement'|'unchecked';notice?:string};
   prompt_version?:string; analysis_run_id?:string; knowledge_refs?:string[]; knowledge_sources?:KnowledgeSource[]; citations?:InlineCitation[]}
+export interface MedicalServiceCard {
+  id:string;kind:'benefit'|'hospital'|'online';title:string;subtitle:string;description:string;tags:string[];
+  reasons:string[];details:{label:string;value:string}[];notice:string;
+  source:{title:string;url:string;pages:string;address_url?:string};
+  action:{kind:'benefit'|'hospital'|'online';label:string;target_id:string};
+}
+export interface MedicalServices {
+  version:string;status:'available'|'needs_location'|'no_local_matches'|'urgent';policy_label:string;policy_notice:string;
+  location_query:string;location_prompt:string;notice?:string;cards:MedicalServiceCard[];
+}
 export interface InlineCitation {quote:string;source_refs:string[]}
 export interface KnowledgeSource {entry_id:string;title:string;source:string;source_path?:string;scope:string;version:string;reference_policy?:string;content?:string;retrieval_provider?:string;retrieved_at?:string;published_at?:string}
 export interface ToolEvent {tool: string; status: string; run_id?: string}

@@ -10,7 +10,7 @@ from pathlib import Path
 
 @unittest.skipUnless(os.name == 'posix' and shutil.which('bash'), 'Linux deployment harness')
 class FrontendDeploymentTests(unittest.TestCase):
-    def run_release(self, *, backend_change=False, fail_nginx=False, fail_backup=False):
+    def run_release(self, *, backend_change=False, catalog_change=False, fail_nginx=False, fail_backup=False):
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory); home=root/'home/ubuntu'
             app=home/'zhongan-app'; release=home/'zhongan-releases/release-fixture'; web=root/'web'; tools=root/'bin'
@@ -19,11 +19,12 @@ class FrontendDeploymentTests(unittest.TestCase):
             def executable(path,text):
                 write(path,'#!/usr/bin/env bash\nset -e\n'+text+'\n');path.chmod(0o755)
             for base in (app,release):
-                for relative in ('services','contracts/knowledge','docs/medical/knowledge','scripts'):
+                for relative in ('services','contracts/knowledge','contracts/medical-services','docs/medical/knowledge','scripts'):
                     (base/relative).mkdir(parents=True)
                 write(base/'services/api/sql/011_conversations.sql','same schema')
                 write(base/'services/api/app/main.py','old' if base==app else 'new' if backend_change else 'old')
                 write(base/'scripts/placeholder','same')
+                write(base/'contracts/medical-services/catalog.json','new' if base==release and catalog_change else 'same')
                 write(base/'REVISION',('a' if base==app else 'b')*40)
             for unit in ('zhongan-api','zhongan-worker'):
                 write(release/f'deploy/{unit}.service','same unit')
@@ -69,6 +70,12 @@ class FrontendDeploymentTests(unittest.TestCase):
         self.assertEqual(result.returncode,0,result.stderr);self.assertIn('BACKEND_CHANGED=1',result.stdout)
         self.assertIn('systemctl stop zhongan-api zhongan-worker',log)
         self.assertIn('migrate_database',log);self.assertIn('systemctl restart',log);self.assertEqual(code,'new')
+
+    def test_catalog_change_is_a_runtime_release(self):
+        result,log,_,_=self.run_release(catalog_change=True)
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertIn('BACKEND_CHANGED=1',result.stdout)
+        self.assertIn('systemctl restart zhongan-api zhongan-worker',log)
 
     def test_ui_failure_rolls_back_without_api_restart(self):
         result,log,html,_=self.run_release(fail_nginx=True)

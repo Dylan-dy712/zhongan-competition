@@ -39,7 +39,7 @@ chmod 600 "$backup_dir"/*.tar.gz
 backend_changed=0
 # UI releases keep the API/worker running. Compare all runtime code, schemas,
 # knowledge and service definitions; uncertainty takes the full backup path.
-for relative in services contracts/knowledge docs/medical/knowledge; do
+for relative in services contracts/knowledge contracts/medical-services docs/medical/knowledge; do
     if ! diff -qr --exclude=__pycache__ "$release_dir/$relative" "$app_dir/$relative" >/dev/null; then
         backend_changed=1
     fi
@@ -102,6 +102,7 @@ cp -a "$release_dir/scripts/." "$app_dir/scripts/"
 if [[ "$backend_changed" == 1 ]]; then
     cp -a "$release_dir/services" "$app_dir/"
     cp -a "$release_dir/contracts/knowledge" "$app_dir/contracts/"
+    cp -a "$release_dir/contracts/medical-services" "$app_dir/contracts/"
     cp -a "$release_dir/docs/medical/knowledge" "$app_dir/docs/medical/"
 fi
 cp "$release_dir/REVISION" "$app_dir/REVISION"
@@ -112,6 +113,7 @@ if [[ "$backend_changed" == 1 ]]; then
     "$app_dir/.venv/bin/python" -m scripts.build_knowledge_vectors
 fi
 "$app_dir/.venv/bin/python" -m pip check
+"$app_dir/.venv/bin/python" -c 'from services.api.app.medical_services import catalog; data=catalog(); assert data["benefits"] and data["hospitals"]'
 if [[ "$backend_changed" == 1 ]]; then
     sudo install -m 644 "$release_dir/deploy/zhongan-api.service" /etc/systemd/system/zhongan-api.service
     sudo install -m 644 "$release_dir/deploy/zhongan-worker.service" /etc/systemd/system/zhongan-worker.service

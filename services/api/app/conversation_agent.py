@@ -29,11 +29,12 @@ from .guidance_quality import GUIDANCE_INSTRUCTION, review_guidance_quality, gui
 from .model_workloads import is_qianfan
 from .contracts.knowledge import DiseaseCode
 from .patient_followup import FollowupPayload, FOLLOWUP_INSTRUCTION, source_patient_updates
+from .medical_services import MedicalServiceArgs, SERVICE_INSTRUCTION, SERVICE_INVITATION, recommend_services
 from .chat_reply import CHAT_REPLY_INSTRUCTION, decode_chat_reply
 from .web_knowledge import WebKnowledge, chat_concepts, CONCEPTS, COST_TOPICS
 
 
-PROMPT_VERSION = 'conversation-agent-v7-grounded-paragraphs'
+PROMPT_VERSION = 'conversation-agent-v8-medical-services'
 ANALYSIS_PROMPT_VERSION = 'patient-analysis-narrative-v17-patient-followups'
 ANALYSIS_INSTRUCTION = """
 本轮是暖暖看完资料后，对用户讲清这次就医情况。遵循上面的对话语气，读起来要像人在耐心讲解。
@@ -167,6 +168,7 @@ class ReportArgs(ToolArgs):
 
 
 TOOL_DEFS = [
+    ('recommend_medical_services', '根据本次需求选择中高端权益、同城公立/私立机构、互联网医院服务卡。地点必须来自用户；急症优先急救。返回有来源的候选及模拟入口，不真实预约。', MedicalServiceArgs),
     ('search_knowledge', '检索用户授权的医护指南和费用知识库，返回相关原文、适用范围、版本和来源。不能替代本人的病历事实。', KnowledgeArgs),
     ('search_web', '联网查权威公开资料。topic必须是预设公开术语；甲类乙类丙类选择医保目录分类，自费自付选择医保个人负担。不会发送病历或聊天原文。', WebSearchArgs),
     ('list_materials', '列出当前对话案件的已上传材料及文档ID。', ToolArgs),
@@ -296,6 +298,8 @@ class CareTools:
         self.force_analysis = force_analysis
         self.allow_analysis = True
         self.message_materials = None
+        self.medical_services = None
+        self.service_user_messages = []
         self.web_search_results = {}
 
     def execute(self, name, raw_args):
@@ -304,6 +308,11 @@ class CareTools:
         args = ARG_SCHEMAS[name].model_validate_json(raw_args or '{}')
         current = require_conversation(self.conn, self.actor_id, self.conversation_id)
         case_id = current['case_id']
+        if name == 'recommend_medical_services':
+            if self.medical_services and self.medical_services['status']=='urgent':
+                return self.medical_services
+            self.medical_services = recommend_services(args,self.service_user_messages)
+            return self.medical_services
         if name == 'start_analysis' and not self.allow_analysis:
             return {'status': 'use_report_entry', 'notice': '普通对话只回复本条问题，完整报告请使用新建解读报告入口。'}
         if name == 'read_chat_attachments':
@@ -481,7 +490,7 @@ def run_agent(history, question, attachments, tools, model=None, on_event=None, 
     started = time.monotonic()
     model = model or (AgentModel(analysis_mode=True) if analysis_mode else AgentModel())
     messages = [{'role': 'system', 'content': SYSTEM +
-                 (ANALYSIS_INSTRUCTION + GUIDANCE_INSTRUCTION if analysis_mode else CHAT_REPLY_INSTRUCTION) +
+                 (ANALYSIS_INSTRUCTION + GUIDANCE_INSTRUCTION if analysis_mode else CHAT_REPLY_INSTRUCTION + SERVICE_INSTRUCTION) +
                  '\n当前UTC时间：' + datetime.now(timezone.utc).isoformat()}]
     if patient_context:
         messages.append({'role': 'user', 'content': json.dumps(
@@ -490,6 +499,7 @@ def run_agent(history, question, attachments, tools, model=None, on_event=None, 
     # Include a bounded recent context; older messages remain searchable in the DB.
     used = 0
     recent = []
+    service_user_messages=[question]
     for turn in reversed(history):
         if turn['status'] != 'completed':
             continue
@@ -501,8 +511,10 @@ def run_agent(history, question, attachments, tools, model=None, on_event=None, 
         size = sum(len(x['content']) for x in pair)
         if used + size > 18000:
             break
+        if turn.get('input_kind','user')=='user':service_user_messages.append(turn['question'])
         recent[0:0] = pair
         used += size
+    if isinstance(tools,CareTools):tools.service_user_messages=service_user_messages
     messages.extend(recent)
     messages.append({'role': 'user', 'content': json.dumps({'message': question, 'attachments': attachments}, ensure_ascii=False)})
     attachment_materials = tools.message_materials if isinstance(tools, CareTools) and not analysis_mode else None
@@ -818,7 +830,13 @@ def run_agent(history, question, attachments, tools, model=None, on_event=None, 
                 for key in ('entry_id','title','source','source_path','scope','version','reference_policy','content','retrieval_provider','retrieved_at','published_at')
                 if key in tools.knowledge_sources[ref]}
                 for ref in dict.fromkeys(reply.knowledge_refs)]
+        if isinstance(tools,CareTools) and not analysis_mode and tools.medical_services is not None:
+            result['medical_services']=tools.medical_services
+            if tools.medical_services['status']=='urgent':
+                result['suggested_questions']=[]
+                result['clarification_questions']=[]
         if analysis_mode:
+            result['service_guide']={'text':SERVICE_INVITATION,'policy_status':'demo_assumed_midhigh'}
             result['guidance_delivery']=delivery
             result['performance'] = {'source_fragments':len(aliases), 'source_characters':size,
                 'source_read_complete':offset is None and not truncated,

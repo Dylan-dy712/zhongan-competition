@@ -7,6 +7,7 @@ import {replaceChatDocument} from './api';
 import AnalysisFlow,{analysisView,type UploadProgress} from './AnalysisFlow';
 import AnalysisNarrative,{currentNarrative} from './AnalysisNarrative';
 import ChatFollowups from './ChatFollowups';
+import MedicalServiceCards from './MedicalServices';
 import type {ChatSnapshot, ChatSubject, ChatTurn, Conversation, Evidence, ToolEvent, DeliveryNotice, FeedbackType,ReportSection} from './types';
 import {CareReport,EvidencePanel,brand} from './CarePages';
 import {DemoHome,DemoIcon} from './DemoPages';
@@ -41,7 +42,7 @@ function requestId() {
   const hex = Array.from(bytes, x => x.toString(16).padStart(2, '0')).join('');
   return `${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20)}`;
 }
-const toolLabels: Record<string,string> = {list_materials:'查看上传材料',start_analysis:'提交材料分析',
+const toolLabels: Record<string,string> = {recommend_medical_services:'整理医疗服务',list_materials:'查看上传材料',start_analysis:'提交材料分析',
   search_knowledge:'查阅医护与费用知识',search_web:'联网查阅权威资料',
   analysis_status:'查询分析进度',read_materials:'查阅原始依据',read_report:'读取分析报告',search_history:'查找以前的对话'};
 const statusLabels: Record<string,string> = {not_started:'尚未分析',queued:'材料已排队',running:'正在分析材料',
@@ -644,7 +645,7 @@ export default function App() {
       : panel==='overview' ? <EncounterOverview key={`${snapshot.conversation.case_id}:${snapshot.analysis.run_id}`} onBack={openNarrative} token={token} snapshot={snapshot} person={members.find(m=>m.subject_id===snapshot.conversation.subject_id)?.name||'当前人员'} onEvidence={id=>void showEvidence(id)} onAsk={text=>{setInput(text);setPanel('chat');}} onUpload={()=>{setPanel('chat');setInput('我需要补充本次就医材料。');}} onReplace={(documentId,file)=>setPhotoReview({files:[file],conversationId:snapshot.conversation.conversation_id,replaceId:documentId})} onReport={openReport} onRefresh={()=>{setPanel('chat');void startMaterialAnalysis([], '请重新分析本次材料，并为每条结论标明准确来源。',true);}}/>
       : panel==='report' ? <main className="chat-report"><h1>本次关怀指引</h1>
           {publishedCare(snapshot.report) ? <><p className="care-report-version">第 {snapshot.report.report_version} 版 · 已审核发布</p>
-            <CareReport report={snapshot.report} initialSection={reportFocus} onEvidence={id=>void showEvidence(id)}/>
+            <CareReport report={snapshot.report} initialSection={reportFocus} onEvidence={id=>void showEvidence(id)} disabled={working} onServiceAsk={message=>{setPanel('chat');return send(undefined,message);}}/>
             {snapshot.report.report_id && <div className="report-feedback"><p>这份指引对你有帮助吗？</p>
               <button disabled={feedbackBusy} onClick={()=>void feedback('helpful')}>有帮助</button>
               <button disabled={feedbackBusy} onClick={()=>void feedback('not_helpful')}>还不够清楚</button>
@@ -662,8 +663,9 @@ export default function App() {
             {t.input_kind==='analysis_ready' ? <p className="analysis-continuation">材料已整理 · 暖暖为你解读</p> : isClaimSubmission(t) ? <p className="analysis-continuation">材料已提交 · 暖暖为你整理</p> : <div className="message-row user"><div className="message-bubble"><p>{t.question}</p>
             {sentMessages.find(item=>item.turn.request_id===t.request_id)?.files.length ? <ChatSentAttachments files={sentMessages.find(item=>item.turn.request_id===t.request_id)!.files}/> : t.attachments.map(a=><span className="attachment" key={a.document_id}>▤ {a.name}</span>)}</div></div>}
             <div className="message-row assistant"><span className="nuan-avatar" aria-hidden="true">✦</span><div className={`message-bubble ${t.input_kind==='analysis_ready'?'narrative-bubble':''}`}><div className="nuan-reply-label"><DemoIcon name="leaf"/>暖暖{t.input_kind==='analysis_ready' && <span>· 材料解读</span>}</div>{t.input_kind!=='analysis_ready' && <ToolActivity events={t.tool_events}/>}
-              {t.answer ? <>{t.input_kind==='analysis_ready'?<AnalysisNarrative turn={t} onEvidence={id=>void showEvidence(id)}/>:<><p><CitedText text={t.answer.text} citations={t.answer.citations} sources={t.answer.knowledge_sources} onEvidence={id=>void showEvidence(id)}/></p></>}
+              {t.answer ? <>{t.input_kind==='analysis_ready'?<AnalysisNarrative turn={t} onEvidence={id=>void showEvidence(id)} onServiceAsk={message=>send(undefined,message)} disabled={working}/>:<><p><CitedText text={t.answer.text} citations={t.answer.citations} sources={t.answer.knowledge_sources} onEvidence={id=>void showEvidence(id)}/></p></>}
 
+                {t.answer.medical_services&&<MedicalServiceCards services={t.answer.medical_services} onAsk={message=>send(undefined,message)} disabled={working} canAskForLocation={t.turn_id===latestAnswered}/>}
                 {t.answer.history_refs.length>0 && <small className="history-reference">参考了 {t.answer.history_refs.length} 条你允许回忆的历史记录</small>}
                 {!!t.answer.patient_updates?.length&&<small className="patient-update-notice">已记录你的补充 · 作为用户自述供后续交流参考</small>}
                 {t.status==='completed'&&t.turn_id===latestAnswered&&<ChatFollowups answer={t.answer} disabled={working} onSend={message=>send(undefined,message)}/>}</>
