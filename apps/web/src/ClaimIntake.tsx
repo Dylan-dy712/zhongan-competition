@@ -1,11 +1,12 @@
 import {useEffect,useLayoutEffect,useRef,useState} from 'react';
-import {createConversation,startChatAnalysis,uploadChatDocument,createJudgeSampleUploadCase,chooseJudgeSampleFiles,type JudgeSample} from './api';
+import {createConversation,startChatAnalysis,uploadChatDocument,createJudgeSampleUploadCase,chooseJudgeSampleFiles,getCareConsent,changeCareConsent,type JudgeSample} from './api';
 import AnalysisFlow,{type UploadProgress} from './AnalysisFlow';
 import {claimTemplate,initialClaimForm,validateClaimInfo,type ClaimFile,type ClaimForm} from './claimTemplate';
 import './claim-original.css';
 import './judge-sample.css';
 import {syncClaimMarkup} from './claimDom';
 import PhotoReview from './PhotoReview';
+import CarePreparation from './CarePreparation';
 
 function uuid() {
   const bytes=crypto.getRandomValues(new Uint8Array(16));bytes[6]=(bytes[6]&15)|64;bytes[8]=(bytes[8]&63)|128;
@@ -43,8 +44,13 @@ export default function ClaimIntake({token,subject,visible,onOpen,onAuthorize,on
   const [progressOpen,setProgressOpen]=useState(false);
   const [progress,setProgress]=useState<UploadProgress>();
   const [submission,setSubmission]=useState(false);
-  const pending=useRef<{id:string;requestId:string;uploaded:Map<File,string>;caseId?:string;analysisStarted?:boolean} | null>(null);
+  const pending=useRef<{id:string;requestId:string;uploaded:Map<File,string>;caseId?:string;analysisStarted?:boolean;requestLocked?:boolean;careConfirmed?:boolean} | null>(null);
   const [finished,setFinished]=useState(false);
+  const [careStage,setCareStage]=useState<'receipt'|'materials'|'consent'>('receipt');
+  const [supplements,setSupplements]=useState<ClaimFile[]>([]);
+  const supplementRef=useRef(supplements);supplementRef.current=supplements;
+  useEffect(()=>()=>supplementRef.current.forEach(f=>{if(f.url)URL.revokeObjectURL(f.url);}),[]);
+  const [careAgreed,setCareAgreed]=useState(false);
   const [locked,setLocked]=useState(false);
   const [reviewPhotos,setReviewPhotos]=useState(false);
   useEffect(()=>{if(!visible)setReviewPhotos(false);},[visible]);
@@ -53,28 +59,52 @@ export default function ClaimIntake({token,subject,visible,onOpen,onAuthorize,on
   const wasVisible=useRef(visible);
   useEffect(()=>{
     const entering=visible&&!wasVisible.current;wasVisible.current=visible;
-    if(!entering||!finished||running.current)return;
+    if(!entering||!finished||!pending.current?.analysisStarted||running.current)return;
     fileRef.current.forEach(f=>{if(f.url)URL.revokeObjectURL(f.url);});
+    supplementRef.current.forEach(f=>{if(f.url)URL.revokeObjectURL(f.url);});
     form.current=initialClaimForm();pending.current=null;setJudgeSample(null);
     setFiles([]);setStep(0);setConfirmed(false);setFinished(false);setLocked(false);
+    setCareStage('receipt');setSupplements([]);setCareAgreed(false);
     setError('');setProgressOpen(false);setProgress(undefined);setPreviewFile(null);
     onDirty?.(false);
   },[visible,finished,onDirty]);
   const viewReport=async()=>{
-    const attempt=pending.current;if(!finished||!attempt||running.current)return;
+    const attempt=pending.current;if(!finished||!attempt||running.current||(!attempt.analysisStarted&&(careStage!=='consent'||!careAgreed)))return;
     running.current=true;setBusy(true);setError('');setSubmission(true);setProgressOpen(true);
     try{
       if(!attempt.analysisStarted){
+        if(!attempt.careConfirmed){
+          const consent=await getCareConsent(token,subject);
+          await changeCareConsent(token,true,consent.version,subject);
+          attempt.careConfirmed=true;
+        }
+        if(supplements.some(entry=>!attempt.uploaded.has(entry.file))){
+          setProgress({done:supplements.filter(entry=>attempt.uploaded.has(entry.file)).length,total:supplements.length});
+          for(const entry of supplements){
+            if(attempt.uploaded.has(entry.file))continue;
+            const result=await uploadChatDocument(token,attempt.id,entry.file);
+            attempt.uploaded.set(entry.file,result.document_id);
+            if(!mounted.current)return;
+            setProgress({done:supplements.filter(item=>attempt.uploaded.has(item.file)).length,total:supplements.length});
+          }
+        }
+        setProgress(undefined);
         const activeGroups=claimTemplate(form.current,files,step).groups;
-        const entries=files.filter(f=>activeGroups.some(g=>g.id===f.category));
+        const entries=[...files.filter(f=>activeGroups.some(g=>g.id===f.category)),...supplements];
+        attempt.requestLocked=true;
         await startChatAnalysis(token,attempt.id,attempt.requestId,
-          `${judgeSample?'这是一组主办方比赛样例的脱敏体验资料，不代表账号使用者本人病史。':''}请帮我整理本次就医资料，解释费用与需要补充的材料。用户填写的信息：${JSON.stringify(form.current)}；材料分类：${JSON.stringify(activeGroups.map(group=>({category:group.title,count:entries.filter(entry=>entry.category===group.id).length})))}。这些是个人补充信息，请以材料原文核对，不代表已确认事实。`,[...attempt.uploaded.values()]);
+          `${judgeSample?'这是一组主办方比赛样例的脱敏体验资料，不代表账号使用者本人病史。':''}请帮我整理本次就医资料，解释费用与需要补充的材料。用户填写的信息：${JSON.stringify(form.current)}；材料分类：${JSON.stringify(activeGroups.map(group=>({category:group.title,count:entries.filter(entry=>entry.category===group.id).length})))}。这些是个人补充信息，请以材料原文核对，不代表已确认事实。`,[...new Set(attempt.uploaded.values())]);
         attempt.analysisStarted=true;
       }
       await onOpen(attempt.id);
       if(mounted.current)setProgressOpen(false);
     }catch(e){if(mounted.current)setError(e instanceof Error?e.message:'分析暂时没能开始，请重试。');}
-    finally{running.current=false;if(mounted.current){setBusy(false);setSubmission(false);}}
+    finally{running.current=false;if(mounted.current){setBusy(false);setSubmission(false);setProgress(undefined);}}
+  };
+  const openCare=()=>{
+    if(running.current)return;
+    if(pending.current?.analysisStarted){void viewReport();return;}
+    setError('');setCareStage('materials');
   };
   useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;};},[]);
   useEffect(()=>{
@@ -82,8 +112,10 @@ export default function ClaimIntake({token,subject,visible,onOpen,onAuthorize,on
     if(running.current){setSampleError('材料正在提交，请完成后再从首页开始体验。');return;}
     let active=true;const sample=sampleRequest.sample;
     fileRef.current.forEach(entry=>{if(entry.url)URL.revokeObjectURL(entry.url);});
+    supplementRef.current.forEach(entry=>{if(entry.url)URL.revokeObjectURL(entry.url);});
     form.current={...initialClaimForm(),...sample.claim_info};pending.current=null;
     setJudgeSample(sample);setFiles([]);setStep(0);setConfirmed(false);setFinished(false);setLocked(false);
+    setCareStage('receipt');setSupplements([]);setCareAgreed(false);
     setError('');setSampleError('');setSampleProgress(0);setSampleLoading(true);
     setPreviewFile(null);preview.current?.close();source.current?.close();setReviewPhotos(false);
     setProgressOpen(false);setProgress(undefined);
@@ -125,7 +157,7 @@ export default function ClaimIntake({token,subject,visible,onOpen,onAuthorize,on
     finally{running.current=false;if(mounted.current){setBusy(false);setProgress(undefined);setSubmission(false);}}
   };
   const template=claimTemplate(form.current,files,step,finished,!!judgeSample);
-  useEffect(()=>{onDirty?.(!finished&&!!(judgeSample||files.length||step>0||locked));},[judgeSample,files.length,step,locked,finished,onDirty]);
+  useEffect(()=>{onDirty?.(!finished?!!(judgeSample||files.length||step>0||locked):careStage!=='receipt'&&!pending.current?.analysisStarted);},[judgeSample,files.length,step,locked,finished,careStage,busy,onDirty]);
   const html=(locked&&!finished)||sampleLoading?template.html.replace(/<(input|select) /g,'<$1 disabled '):template.html;
   useLayoutEffect(()=>{if(shell.current)syncClaimMarkup(shell.current,html);},[html]);
   useLayoutEffect(()=>{shell.current?.querySelector('.claim-main')?.scrollTo?.(0,0);},[step]);
@@ -135,6 +167,14 @@ export default function ClaimIntake({token,subject,visible,onOpen,onAuthorize,on
     setError('');setStep(step+1);shell.current?.querySelector('.claim-main')?.scrollTo?.(0,0);
   };
   return <main className="claim-react">
+    {careStage!=='receipt'&&<CarePreparation stage={careStage} date={[form.current.start,form.current.kind==='住院医疗'?form.current.end:''].filter(Boolean).join(' 至 ')}
+      files={files.filter(entry=>pending.current?.uploaded.has(entry.file))} supplements={supplements} uploaded={entry=>!!pending.current?.uploaded.has(entry.file)}
+      busy={busy} locked={!!pending.current?.requestLocked} agreed={careAgreed} onAgree={setCareAgreed}
+      onBack={()=>{setError('');setCareStage(careStage==='consent'?'materials':'receipt');}} onHome={onExit}
+      onNext={()=>{setError('');setCareStage('consent');}} onConfirm={()=>void viewReport()}
+      onPick={()=>{category.current='record';setSourceCategory('补充就医资料');source.current?.showModal();}}
+      onRemove={entry=>{if(running.current||pending.current?.requestLocked||pending.current?.uploaded.has(entry.file))return;if(entry.url)URL.revokeObjectURL(entry.url);setSupplements(items=>items.filter(item=>item!==entry));setCareAgreed(false);setError('');}}
+      onPreview={entry=>{setPreviewFile(entry);preview.current?.showModal();}}/>}
     {judgeSample&&!finished&&<p className="claim-sample-status" role="status">{sampleLoading?`申请信息已填好，正在准备示例材料（${sampleProgress}/${judgeSample.file_count}）…`:sampleError?'申请信息已填好，示例材料尚未准备完成。':'申请信息与示例材料已自动填好，尚未提交。核对后即可确认上传。'}</p>}
     {sampleError&&<p className="claim-error" role="alert">{sampleError} <button className="claim-text" disabled={sampleLoading||busy||locked} onClick={()=>setSampleRetry(value=>value+1)}>重新准备示例资料</button></p>}
     {reviewPhotos&&<PhotoReview token={token} subjectId={subject} files={files.map(f=>f.file)} onCancel={()=>setReviewPhotos(false)} onContinue={checked=>{
@@ -142,9 +182,9 @@ export default function ClaimIntake({token,subject,visible,onOpen,onAuthorize,on
       files.forEach((entry,index)=>{if(entry!==updated[index]&&entry.url)URL.revokeObjectURL(entry.url);});
       setFiles(updated);setReviewPhotos(false);void submit(updated);
     }}/>}
-    <AnalysisFlow open={visible && progressOpen} snapshot={null} submitting={submission} error={error} onClose={()=>setProgressOpen(false)} onReport={()=>void viewReport()} onRetry={()=>void viewReport()}/>
+    <AnalysisFlow open={visible && progressOpen} snapshot={null} upload={progressOpen?progress:undefined} submitting={submission} error={error} onClose={()=>setProgressOpen(false)} onReport={()=>void viewReport()} onRetry={()=>void viewReport()}/>
     {progress && <p className="claim-text" role="status">正在上传材料：{progress.done} / {progress.total} 份</p>}
-    <div className="claim-shell" ref={shell} onInput={e=>{
+    <div className="claim-shell" hidden={careStage!=='receipt'} ref={shell} onInput={e=>{
       const input=e.target as HTMLInputElement;const key=input.dataset.claimField as keyof ClaimForm;
       if(key && key in form.current){form.current[key]=input.value;onDirty?.(true);}
     }} onChange={e=>{
@@ -160,26 +200,31 @@ export default function ClaimIntake({token,subject,visible,onOpen,onAuthorize,on
       else if(action?.startsWith('pick-')){category.current=action.slice(5);setSourceCategory(template.groups.find(g=>g.id===category.current)?.title||'理赔材料');source.current?.showModal();}
       else if(button.dataset.claimRemove){const removed=files.find(f=>f.id===button.dataset.claimRemove);if(removed?.url)URL.revokeObjectURL(removed.url);setFiles(files.filter(f=>f!==removed));setConfirmed(false);}
       else if(button.dataset.claimPreview){setPreviewFile(files.find(f=>f.id===button.dataset.claimPreview)||null);preview.current?.showModal();}
-      else if(button.dataset.go && finished)void viewReport();
+      else if(button.dataset.go && finished)openCare();
     }}/>
     {error && <p className="claim-error" role="alert">{error}</p>}
-    <footer className="claim-shell claim-footer">
+    <footer className="claim-shell claim-footer" hidden={careStage!=='receipt'}>
       {!finished && step===2 && <label className="claim-consent"><input type="checkbox" checked={confirmed} disabled={locked} onChange={e=>setConfirmed(e.target.checked)}/><span>我已核对信息，同意上传本次材料，用于资料整理与关怀分析<small>本次上传不会向保险公司提交理赔申请。</small></span></label>}
       {!subject && !finished && <button className="claim-text" onClick={onAuthorize}>确认资料用途授权</button>}
       {step>0 && !finished && <button className="claim-finish" disabled={locked||busy} onClick={()=>{setStep(step-1);setError('');}}>返回修改</button>}
-      <button className="claim-primary" disabled={busy||(!finished&&(sampleLoading||!!sampleError||step===2&&(!confirmed||!subject)))} onClick={()=>{if(finished)void viewReport();else if(step<2)next();else void submit();}}>{busy?(finished?'正在开始分析…':'正在上传材料…'):finished?'查看相关报告':step===0?'下一步，上传材料':step===1?'下一步，核对申请':locked?'重试提交':'确认提交材料'}</button>
+      {finished&&<button className="claim-home" disabled={busy} onClick={onExit}>返回首页</button>}
+      <button className="claim-primary" disabled={busy||(!finished&&(sampleLoading||!!sampleError||step===2&&(!confirmed||!subject)))} onClick={()=>{if(finished)openCare();else if(step<2)next();else void submit();}}>{busy?(finished?'正在开始分析…':'正在上传材料…'):finished?'查看就医关怀':step===0?'下一步，上传材料':step===1?'下一步，核对申请':locked?'重试提交':'确认提交材料'}</button>
     </footer>
     <input ref={picker} hidden aria-label="添加就医材料" type="file" multiple accept=".pdf,.jpg,.jpeg,.png" onChange={e=>{
+      if(running.current||pending.current?.requestLocked)return;
       const added=Array.from(e.target.files||[]).map(file=>file.type?file:new File([file],file.name,{type:/\.pdf$/i.test(file.name)?'application/pdf':/\.png$/i.test(file.name)?'image/png':'image/jpeg',lastModified:file.lastModified}));e.target.value='';
       if(added.some(f=>!f.size||f.size>10*1024*1024||!/\.(pdf|jpe?g|png)$/i.test(f.name))){setError('请选择有效 PDF 或图片，每份不超过 10 MB。');return;}
-      setFiles([...files,...added.map(file=>({id:uuid(),name:file.name,size:file.size,category:category.current,sample:false,url:/\.(jpe?g|png)$/i.test(file.name)?URL.createObjectURL(file):null,file}))]);setError('');setConfirmed(false);
+      const selected=added.map(file=>({id:uuid(),name:file.name,size:file.size,category:category.current,sample:false,url:/\.(jpe?g|png)$/i.test(file.name)?URL.createObjectURL(file):null,file}));
+      if(finished){setSupplements(items=>[...items,...selected]);setCareAgreed(false);}
+      else {setFiles([...files,...selected]);setConfirmed(false);}
+      setError('');
     }}/>
     <dialog ref={source} className="claim-upload-dialog" aria-labelledby="claim-source-title" aria-describedby="claim-source-description" onClick={e=>{
       if(e.target!==e.currentTarget)return;
       const bounds=e.currentTarget.getBoundingClientRect();
       if(e.clientX<bounds.left||e.clientX>bounds.right||e.clientY<bounds.top||e.clientY>bounds.bottom)source.current?.close();
     }}>
-      <div className="claim-source-heading"><div><span className="claim-source-category">{sourceCategory}</span><h2 id="claim-source-title">添加理赔材料</h2></div><button type="button" className="claim-source-close" onClick={()=>source.current?.close()} aria-label="关闭材料来源"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div>
+      <div className="claim-source-heading"><div><span className="claim-source-category">{sourceCategory}</span><h2 id="claim-source-title">{finished?'补充看病资料':'添加理赔材料'}</h2></div><button type="button" className="claim-source-close" onClick={()=>source.current?.close()} aria-label="关闭材料来源"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div>
       <p id="claim-source-description" className="claim-source-description">请选择材料类型，支持一次选择多份</p>
       <div className="claim-source-options">
         <button type="button" className="claim-source-option" onClick={()=>{source.current?.close();picker.current!.accept='.jpg,.jpeg,.png';picker.current?.click();}}>
