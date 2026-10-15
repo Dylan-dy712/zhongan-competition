@@ -124,7 +124,7 @@ export default function ClaimIntake({token,subject,visible,onOpen,onAuthorize,on
     }catch(e){if(mounted.current)setError(e instanceof Error?e.message:'材料整理失败，请重试。');}
     finally{running.current=false;if(mounted.current){setBusy(false);setProgress(undefined);setSubmission(false);}}
   };
-  const template=claimTemplate(form.current,files,step,finished);
+  const template=claimTemplate(form.current,files,step,finished,!!judgeSample);
   useEffect(()=>{onDirty?.(!finished&&!!(judgeSample||files.length||step>0||locked));},[judgeSample,files.length,step,locked,finished,onDirty]);
   const html=(locked&&!finished)||sampleLoading?template.html.replace(/<(input|select) /g,'<$1 disabled '):template.html;
   useLayoutEffect(()=>{if(shell.current)syncClaimMarkup(shell.current,html);},[html]);
@@ -164,7 +164,7 @@ export default function ClaimIntake({token,subject,visible,onOpen,onAuthorize,on
     }}/>
     {error && <p className="claim-error" role="alert">{error}</p>}
     <footer className="claim-shell claim-footer">
-      {!finished && step===2 && <label className="claim-consent"><input type="checkbox" checked={confirmed} disabled={locked} onChange={e=>setConfirmed(e.target.checked)}/><span>我已核对信息，同意将{judgeSample?'脱敏示例资料':'合成材料'}上传并用于关怀分析<small>不会向保险公司提交理赔申请。</small></span></label>}
+      {!finished && step===2 && <label className="claim-consent"><input type="checkbox" checked={confirmed} disabled={locked} onChange={e=>setConfirmed(e.target.checked)}/><span>我已核对信息，同意上传本次材料，用于资料整理与关怀分析<small>本次上传不会向保险公司提交理赔申请。</small></span></label>}
       {!subject && !finished && <button className="claim-text" onClick={onAuthorize}>确认资料用途授权</button>}
       {step>0 && !finished && <button className="claim-finish" disabled={locked||busy} onClick={()=>{setStep(step-1);setError('');}}>返回修改</button>}
       <button className="claim-primary" disabled={busy||(!finished&&(sampleLoading||!!sampleError||step===2&&(!confirmed||!subject)))} onClick={()=>{if(finished)void viewReport();else if(step<2)next();else void submit();}}>{busy?(finished?'正在开始分析…':'正在上传材料…'):finished?'查看相关报告':step===0?'下一步，上传材料':step===1?'下一步，核对申请':locked?'重试提交':'确认提交材料'}</button>

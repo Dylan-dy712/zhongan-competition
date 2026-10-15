@@ -14,9 +14,8 @@ export default function JudgeSampleEntry({token,onChoose,disabled=false}:{token:
   return <section className="judge-sample-card" aria-labelledby="judge-sample-title">
     <span className="judge-sample-label">评委专属体验</span>
     <h2 id="judge-sample-title">体验理赔材料与报告</h2>
-    <p className="judge-sample-description">{sample.title}</p>
+    <p className="judge-sample-description">看懂病历与费用，记好后续就医安排。</p>
     <ul>{sample.documents.map(item=><li key={item.name}><span>{item.document_type}</span><small>{item.page_count} 页</small></li>)}</ul>
-    <p className="judge-sample-notice">{sample.notice} 共 {sample.file_count} 份资料、{sample.page_count} 页，体验选择文件、上传、识别与报告生成。</p>
     <button className="judge-sample-primary" disabled={busy||disabled} onClick={async()=>{
       if(running.current)return;running.current=true;setBusy(true);setError('');
       try{await onChoose(sample);}
@@ -24,6 +23,6 @@ export default function JudgeSampleEntry({token,onChoose,disabled=false}:{token:
       finally{running.current=false;setBusy(false);}
     }}>{busy?'正在进入体验…':'开始评委体验'}<span aria-hidden="true"> →</span></button>
     {error&&<p role="alert" className="judge-sample-error">{error}</p>}
-    <small className="judge-sample-footnote">进入后自动填好申请信息与示例材料，核对后确认上传。</small>
+    <small className="judge-sample-footnote">进入后可核对申请信息与材料，再确认上传。</small>
   </section>;
 }

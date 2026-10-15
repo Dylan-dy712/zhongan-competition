@@ -40,10 +40,10 @@ export default function AuthPage({onAuthenticated}:{onAuthenticated:(token:strin
       <label>手机号<span className="auth-input"><FieldIcon kind="phone"/><input type="tel" inputMode="numeric" value={username} onChange={e=>setUsername(e.target.value)} pattern="1[3-9][0-9]{9}" placeholder="请输入手机号" autoComplete="username" required disabled={busy}/></span></label>
       <label>密码<span className="auth-input"><FieldIcon kind="lock"/><input type={showPassword?'text':'password'} value={password} onChange={e=>setPassword(e.target.value)} placeholder="请输入密码" autoComplete={register?'new-password':'current-password'} required disabled={busy}/><button type="button" className="auth-password-toggle" aria-label={showPassword?'隐藏密码':'显示密码'} aria-pressed={showPassword} disabled={busy} onClick={()=>setShowPassword(value=>!value)}><FieldIcon kind={showPassword?'eye':'hidden'}/></button></span></label>
       {register && <><label>确认密码<span className="auth-input"><FieldIcon kind="lock"/><input type={showPassword?'text':'password'} value={confirm} onChange={e=>setConfirm(e.target.value)} placeholder="请再次输入密码" autoComplete="new-password" required disabled={busy}/></span></label>
-        <label className="auth-consent"><input type="checkbox" checked={consent} onChange={e=>setConsent(e.target.checked)} disabled={busy}/><span>可选：同意将主动提供的合成资料用于本次关怀，并保存相关对话与记录。不包含长期记忆、推荐或评测用途。也可注册后再授权。版本：account-care-v1。</span></label></>}
+        <label className="auth-consent"><input type="checkbox" checked={consent} onChange={e=>setConsent(e.target.checked)} disabled={busy}/><span>可选：同意将主动提供的资料用于本次就医关怀，并保存相关对话与记录。其他用途需另行授权，也可注册后再确认。</span></label></>}
       {error && <p role="alert" className="auth-error">{error}</p>}
       <button className="auth-primary" disabled={busy}><span>{busy?'正在连接…':register?'注册并进入':'登录'}</span><span className="auth-submit-arrow"><FieldIcon kind="arrow"/></span></button>
     </form>
-    <small>当前为比赛开发系统，仅使用合成资料。登录有效期为 12 小时。</small>
+    <small>登录后可查看已保存的资料与对话，登录有效期为 12 小时。</small>
   </div></main>;
 }

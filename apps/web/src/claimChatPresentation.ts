@@ -5,6 +5,11 @@ const prefix='请帮我整理本次就医资料，解释费用与需要补充的
 const separator='；材料分类：';
 const suffix='。这些是个人补充信息，请以材料原文核对，不代表已确认事实。';
 
+/** Old conversation titles were truncated from the form's internal analysis request. */
+export function conversationTitle(title:string):string {
+  return title.startsWith('这是一组主办方比赛样例的脱敏体验资料')||title===prefix.slice(0,30)?'本次就医资料':title;
+}
+
 /** Recognize the claim form's generated request, including saved sample conversations. */
 export function isClaimSubmission(turn:ChatTurn):boolean {
   if(turn.input_kind!=='user')return false;

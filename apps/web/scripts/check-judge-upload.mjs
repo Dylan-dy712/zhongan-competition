@@ -17,6 +17,7 @@ const modules=await loadTestModules();const {App}=modules;
 const sample={sample_id:'synthetic-01',version:'v1',data_origin:'official_deidentified',title:'合成病例流程测试',summary:'测试',notice:'合成测试，非患者资料',file_count:4,page_count:13,
   claim_info:{kind:'住院医疗',cause:'待确认',diagnosis:'合成肩部损伤样例',start:'2026-09-20',end:'2026-09-25',total:'1200.00',social:'待确认',other:'待确认'},
   documents:[{id:'discharge',name:'合成出院记录.pdf',document_type:'出院记录',page_count:2},{id:'diagnosis',name:'合成诊断证明.pdf',document_type:'诊断证明',page_count:1},{id:'costs',name:'合成费用清单.pdf',document_type:'费用清单',page_count:5},{id:'outpatient',name:'合成复诊病历.pdf',document_type:'门诊病历',page_count:5}]};
+const legacyTitle='这是一组主办方比赛样例的脱敏体验资料，不代表账号使用者本人病史。'.slice(0,30);
 const calls=[];let uploadCount=0,failSecond=true,failSelection=true,conversation,turns=[];
 globalThis.fetch=async(url,options={})=>{
   const p=new URL(url,'http://localhost').pathname;
@@ -25,7 +26,8 @@ globalThis.fetch=async(url,options={})=>{
   if(p==='/judge/sample')return options.headers.Authorization.includes('ordinary')?Response.json({}, {status:403}):Response.json(sample);
   if(p==='/v1/chat/subjects')return Response.json([{subject_id:'synthetic-subject',consent_id:'synthetic-consent'}]);
   if(p==='/v1/me/members')return Response.json([{subject_id:'synthetic-subject',relationship:'self',name:'合成评委',profile_completed:true}]);
-  if(p==='/v1/medical-records')return Response.json({records:[],unorganized_count:0,processing_count:0});
+  if(p==='/v1/medical-records')return Response.json({records:conversation?[{record_id:'synthetic-record',title:legacyTitle,
+    cases:[{case_id:'synthetic-case',conversations:[conversation],proposal_title:legacyTitle}],related_records:[{record_id:'related-record',title:legacyTitle}]}]:[],unorganized_count:0,processing_count:0});
   if(p.startsWith('/judge/sample/files/')){
     assert.equal(new URL(url,'http://localhost').searchParams.get('version'),'v1');
     assert.equal(new URL(url,'http://localhost').searchParams.get('sample_id'),'synthetic-01');
@@ -35,7 +37,7 @@ globalThis.fetch=async(url,options={})=>{
   if(p==='/v1/me/consents')return Response.json({status:'active',consent_id:'synthetic-consent'});
   if(p==='/v1/cases')return Response.json({case_id:'synthetic-case'});
   if(p==='/v1/conversations'){
-    if(options.method==='POST')conversation={conversation_id:body.conversation_id,case_id:'synthetic-case',subject_id:'synthetic-subject',title:'合成测试记录',created_at:'2026-10-01',updated_at:'2026-10-01'};
+    if(options.method==='POST')conversation={conversation_id:body.conversation_id,case_id:'synthetic-case',subject_id:'synthetic-subject',title:legacyTitle,created_at:'2026-10-01',updated_at:'2026-10-01'};
     return Response.json(options.method==='POST'?{}:conversation?[conversation]:[]);
   }
   if(conversation&&p==='/v1/conversations/'+conversation.conversation_id)return Response.json({conversation,turns,analysis:{status:'queued',run_id:'synthetic-run'},report:{status:'not_generated',actions:[],sections:[]}});
@@ -61,12 +63,16 @@ try{
   await act(async()=>root.render(React.createElement(App)));await flush();
   assert.equal(document.querySelectorAll('.judge-sample-card').length,1);
   assert.doesNotMatch(document.body.textContent,/没有病例资料|没有病历资料/);
+  assert.ok(!document.querySelector('.judge-sample-card').textContent.includes(sample.notice),'Private source metadata is not product copy');
+  assert.equal(document.querySelector('.judge-sample-notice'),null);
   await click('开始评委体验');
   assert.equal(window.location.hash,'#/claim');
   assert.equal(document.querySelector('dialog.member-dialog'),null,'Judge experience selects the test account automatically');
   assert.equal(document.querySelector('.claim-react .judge-sample-card'),null,'No second import card in the claim form');
   assert.equal(document.querySelector('[data-claim-field="diagnosis"]').value,sample.claim_info.diagnosis);
   assert.equal(document.querySelector('[data-claim-field="total"]').value,sample.claim_info.total);
+  assert.equal(document.querySelector('[data-claim-action="example"]'),null,'Prepared sample entry does not offer an unrelated placeholder diagnosis');
+  assert.doesNotMatch(document.querySelector('.claim-main').textContent,/合成测试信息|演示保单|示例身份|虚构示例|演示占位/);
   assert.match(document.querySelector('[role="alert"]').textContent,/示例资料载入超时/);
   assert.equal(calls.filter(call=>call.method==='POST').length,0);
   await click('重新准备示例资料');
@@ -94,6 +100,7 @@ try{
   assert.equal(calls.filter(call=>call.path==='/v1/cases').length,1,'Retry retains one case');
   const created=calls.find(call=>call.path==='/v1/cases').body;
   assert.equal(created.data_origin,'official_deidentified');assert.equal(created.user_context.judge_demo,true);
+  assert.equal(created.user_context.notice,sample.notice,'Backend source metadata remains intact');
   const uploads=calls.filter(call=>call.path.endsWith('/documents'));
   assert.deepEqual(uploads.map(call=>call.body.get('file').name),['合成出院记录.pdf','合成诊断证明.pdf','合成诊断证明.pdf','合成费用清单.pdf','合成复诊病历.pdf']);
   assert.equal(calls.filter(call=>call.path.endsWith('/analyses')).length,0,'Successful upload must precede analysis');
@@ -102,6 +109,12 @@ try{
   assert.equal(analysis.body.document_ids.length,4);assert.match(analysis.body.message,/不代表账号使用者本人病史/);
   assert.match(analysis.body.message,/用户填写的信息：.*已核对的合成诊断.*；材料分类：/,'The backend retains all form context');
   assert.equal(window.location.hash,'#/chat');
+  assert.doesNotMatch(document.querySelector('.history-list').textContent,/主办方比赛样例|脱敏体验资料/,'Saved prompt-derived titles are presented naturally');
+  const listed=await modules.api.listConversations('synthetic-judge');assert.equal(listed[0].title,'本次就医资料');
+  const snapshot=await modules.api.getConversation('synthetic-judge',conversation.conversation_id);assert.equal(snapshot.conversation.title,'本次就医资料');
+  const records=await modules.api.listMedicalRecords('synthetic-judge','synthetic-subject');
+  const record=records.records[0];assert.equal(record.title,'本次就医资料');assert.equal(record.cases[0].conversations[0].title,'本次就医资料');assert.equal(record.cases[0].proposal_title,'本次就医资料');assert.equal(record.related_records[0].title,'本次就医资料');
+  assert.equal(conversation.title,legacyTitle,'Display cleanup does not overwrite saved data');
   const checkChat=()=>{
     const messages=document.querySelector('.messages');assert.ok(messages);
     assert.equal(messages.querySelectorAll('.analysis-continuation').length,2,'Sample and ordinary claim submissions use the concise receipt');

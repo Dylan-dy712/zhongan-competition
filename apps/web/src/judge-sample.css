@@ -5,7 +5,6 @@
 .judge-sample-card ul{list-style:none;padding:0;margin:16px 0;display:flex;gap:8px;flex-wrap:wrap}
 .judge-sample-card li{display:flex;gap:8px;align-items:center;background:#ffffffc9;border:1px solid #a1d9c2;border-radius:10px;padding:9px 10px;font-size:13px}
 .judge-sample-card li small{color:#476f5e;font-size:12px}
-.judge-sample-notice{font-size:13px;line-height:1.8;color:#3d6855;margin:10px 0 18px}
 .judge-sample-card .judge-sample-primary{display:flex;justify-content:space-between;align-items:center;width:100%;gap:10px;padding:14px 16px;background:linear-gradient(110deg,#008d69,#007b5c);color:#fff;border:0;border-radius:12px;font:inherit;font-size:15px;font-weight:650;cursor:pointer;box-shadow:0 4px 10px #007c5d21}
 .judge-sample-card .judge-sample-primary:hover:not(:disabled){background:#007453}
 .judge-sample-card .judge-sample-primary:disabled{opacity:.65;cursor:wait}
@@ -18,7 +17,7 @@
 .claim-react>.judge-sample-card{flex:none;margin:10px 14px;padding:14px 16px;border-radius:14px}
 .claim-react>.judge-sample-card h2{font-size:17px;margin:0 0 4px}
 .claim-react>.judge-sample-card .judge-sample-description{font-size:12px;margin-bottom:10px}
-.claim-react>.judge-sample-card .judge-sample-label,.claim-react>.judge-sample-card ul,.claim-react>.judge-sample-card .judge-sample-notice{display:none}
+.claim-react>.judge-sample-card .judge-sample-label,.claim-react>.judge-sample-card ul{display:none}
 .claim-react>.judge-sample-card .judge-sample-primary{padding:11px 14px;font-size:14px}
 .claim-react>.judge-sample-card .judge-sample-footnote{margin-top:7px;font-size:10px}
 @media(max-width:380px){.judge-sample-card{padding:18px}.judge-sample-card h2{font-size:19px}}
