@@ -961,7 +961,8 @@ def process_chat_message(conversation_id, body, actor_id, conn, input_kind='user
             progress([{'tool': 'read_chat_attachments', 'status': tools.message_materials['status']}])
         answer, events = run_agent(history, question, turn['attachments'], tools, on_event=progress,
                                   analysis_mode=input_kind == 'analysis_ready',
-                                  initial_analysis=tools.reusable_analysis() if input_kind == 'analysis_ready' else None)
+                                  initial_analysis=tools.reusable_analysis() if input_kind == 'analysis_ready' else None,
+                                  patient_context=chats.get_patient_context(conn, actor_id, conversation_id))
         if analysis_run_id is not None:
             # Recheck the actual current case and run after slow model generation.
             current = chats.require_conversation(conn, actor_id, conversation_id)

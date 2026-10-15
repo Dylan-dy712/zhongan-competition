@@ -67,7 +67,11 @@ export interface Conversation {
   report_context_enabled?:boolean; report_context_version?:number;
   created_at: string; updated_at: string;
 }
+export type PatientField='followup_time'|'followup_location'|'medication'|'allergy'|'recovery_status';
+export interface ClarificationQuestion {field:PatientField;question:string;options:{label:string;message:string}[]}
+export interface PatientUpdate {field:PatientField;statement:string}
 export interface ChatAnswer {text: string; evidence_refs: string[]; history_refs: string[];
+  clarification_questions?:ClarificationQuestion[];suggested_questions?:string[];patient_updates?:PatientUpdate[];
   guidance_delivery?:{status:'passed'|'needs_improvement'|'unchecked';notice?:string};
   prompt_version?:string; analysis_run_id?:string; knowledge_refs?:string[]; knowledge_sources?:KnowledgeSource[]; citations?:InlineCitation[]}
 export interface InlineCitation {quote:string;source_refs:string[]}

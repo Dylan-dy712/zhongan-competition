@@ -7,6 +7,7 @@
     "dev": "vite",
     "test:navigation": "node scripts/check-navigation.mjs",
     "test:auth": "node scripts/check-auth-flow.mjs",
+    "test:followups": "node scripts/check-chat-followups.mjs",
     "test:reminders": "node scripts/check-home-reminders.mjs",
     "test:medical-records": "node scripts/check-medical-records.mjs",
     "build": "tsc --noEmit && vite build",

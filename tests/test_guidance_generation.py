@@ -16,6 +16,7 @@ def assessment(**changes):
 def draft(text='本次记录为肺炎。',quote=None):
     return {'sections':[{'section_type':section,'claims':[]} for section in SECTION_TYPES],'actions':[],
         'patient_analysis':{'text':text,'evidence_refs':['S1'],'history_refs':[],
+            'clarification_questions':[],'suggested_questions':[],'patient_updates':[],
             'knowledge_refs':[],'citations':[{'quote':quote or text,'source_refs':['S1']}]}}
 
 class GuidanceGenerationTests(unittest.TestCase):

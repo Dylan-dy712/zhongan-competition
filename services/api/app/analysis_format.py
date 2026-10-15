@@ -1,5 +1,26 @@
 """Fixed citation slots enforce the count, without fixing the report's prose."""
 import json
+from .patient_followup import FollowupPayload
+
+
+def followup_fields():
+    schema = FollowupPayload.model_json_schema()
+    definitions = schema.get('$defs', {})
+
+    def inline(value):
+        if isinstance(value, list):
+            return [inline(item) for item in value]
+        if not isinstance(value, dict):
+            return value
+        if '$ref' in value:
+            return inline(definitions[value['$ref'].rsplit('/', 1)[-1]])
+        result = {key: inline(item) for key, item in value.items() if key not in {'title', 'default'}}
+        if result.get('type') == 'object':
+            result['required'] = list(result['properties'])
+            result['additionalProperties'] = False
+        return result
+
+    return inline(schema)['properties']
 
 
 def strict_analysis_tool():
@@ -15,6 +36,7 @@ def strict_analysis_tool():
             'source_refs':{'type':'array','minItems':1,'maxItems':6,'items':{'type':'string'},
             'description':'仅支持这句话的S编号或知识entry_id，须同时出现在对应来源槽位中。'}},
             'required':['quote','source_refs'],'additionalProperties':False}}
+    fields.update(followup_fields())
     return {'type':'function','function':{'name':'deliver_analysis','strict':True,
         'description':'仅调用一次，提交本次全部材料的文字解读和最多20个关键引用；未使用的引用槽位填空字符串。',
         'parameters':{'type':'object','properties':fields,'required':list(fields),'additionalProperties':False}}}
@@ -26,9 +48,11 @@ def decode_analysis_tool(message):
         raise RuntimeError('ANALYSIS_RESPONSE_FORMAT')
     data=json.loads(calls[0]['function']['arguments'])
     expected={'text',*(f'source_{i}' for i in range(1,21)),*(f'knowledge_{i}' for i in range(1,5))}
-    if set(data) not in (expected, expected | {'citations'}):
+    optional={'citations', 'clarification_questions', 'suggested_questions', 'patient_updates'}
+    if not expected.issubset(data) or set(data) - expected - optional:
         raise RuntimeError('ANALYSIS_RESPONSE_FORMAT')
     return {'role':'assistant','content':json.dumps({'text':data['text'],
         'evidence_refs':[data[f'source_{i}'] for i in range(1,21) if data[f'source_{i}']],
         'history_refs':[], 'knowledge_refs':[data[f'knowledge_{i}'] for i in range(1,5) if data[f'knowledge_{i}']],
-        'citations':data.get('citations',[])},ensure_ascii=False)}
+        'citations':data.get('citations',[]),
+        **{key:data.get(key,[]) for key in optional - {'citations'}}},ensure_ascii=False)}

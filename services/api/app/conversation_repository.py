@@ -4,6 +4,7 @@ import json
 from uuid import UUID, uuid4
 
 from .contracts.core import DataOrigin
+from .patient_followup import PatientUpdate, source_patient_updates
 from .repository import AccessDenied, IdempotencyConflict, create_case, get_case, get_document
 
 
@@ -144,6 +145,12 @@ def begin_turn(conn, actor_id, conversation_id, request_id, question, document_i
 def finish_turn(conn, actor_id, conversation_id, turn, answer=None, events=None, error=None):
     with conn.transaction():
         require_conversation(conn, actor_id, conversation_id)
+        if answer and answer.get('patient_updates'):
+            # Store the self-report atomically with its successful source turn;
+            # retries cannot create duplicate profile entries or partial writes.
+            answer = {**answer, 'patient_updates': [] if turn['input_kind'] != 'user' else
+                      source_patient_updates([PatientUpdate.model_validate(item)
+                                              for item in answer['patient_updates']], turn['question'])}
         row = conn.execute("""UPDATE conversation_turns SET status=%s,answer=%s::jsonb,
             tool_events=%s::jsonb,error_code=%s,finished_at=now()
             WHERE turn_id=%s AND lease_token=%s AND status='running' RETURNING turn_id""",
@@ -160,6 +167,39 @@ def finish_turn(conn, actor_id, conversation_id, turn, answer=None, events=None,
             except Exception:
                 import logging
                 logging.getLogger(__name__).warning('CONVERSATION_TITLE_QUEUE_UNAVAILABLE')
+
+
+def get_patient_context(conn, actor_id, conversation_id):
+    """Project a bounded profile from source turns, respecting live recall/consent.
+
+    Keeping statements on their original turn also avoids a second store that
+    could outlive a revoked consent or a disabled conversation recall setting.
+    """
+    current = require_conversation(conn, actor_id, conversation_id)
+    rows = conn.execute("""SELECT t.turn_id,t.question,t.answer->'patient_updates' AS updates,
+        t.created_at,v.case_id """ + AUTHORIZED.replace(' WHERE v.actor_id=%s',
+        ' JOIN conversation_turns t ON t.conversation_id=v.conversation_id WHERE v.actor_id=%s') + """
+        AND c.subject_id=%s AND t.status='completed' AND t.input_kind='user'
+        AND (v.conversation_id=%s OR (%s AND v.recall_enabled=true))
+        AND jsonb_typeof(t.answer->'patient_updates')='array'
+        AND t.answer->'patient_updates'<>'[]'::jsonb
+        ORDER BY t.created_at DESC,t.turn_id DESC LIMIT 20""",
+        (actor_id, current['subject_id'], conversation_id, current['recall_enabled'])).fetchall()
+    context, seen, size = [], set(), 0
+    for row in rows:
+        updates = source_patient_updates([PatientUpdate.model_validate(item) for item in row['updates']], row['question'])
+        for item in updates:
+            key = (str(row['case_id']), item['field'])
+            if key in seen or size + len(item['statement']) > 6000:
+                continue
+            seen.add(key)
+            size += len(item['statement'])
+            context.append({**item, 'source_kind': 'patient_statement', 'turn_id': str(row['turn_id']),
+                            'case_id': str(row['case_id']), 'recorded_at': row['created_at'].isoformat()})
+            if len(context) >= 12:
+                return context
+    return context
+
 
 
 def search_history(conn, actor_id, conversation_id, query):
