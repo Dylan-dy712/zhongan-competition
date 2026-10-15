@@ -75,19 +75,23 @@ try{
  assert.equal(uploads,26,'Retry uploads only the failed and remaining files');
  assert.deepEqual(submissions[0].document_ids,acceptedUploads);
  assert.equal(document.querySelector('.chat-workspace > dialog.analysis-dialog progress').value,0);
- for(const [next,percent] of [['extract',20],['insights',40],['guidance',60],['validate',80]]){
+ for(const [next,completed] of [['parse',0],['extract',1],['insights',1],['guidance',2],['validate',3]]){
   phase=next;let displayed;
-  for(let attempt=0;attempt<12;attempt++){await flush();displayed=document.querySelector('.chat-workspace > dialog.analysis-dialog progress').value;if(displayed>=percent+1&&displayed<percent+20)break;}
-  assert.ok(displayed>=percent+1 && displayed<percent+20,`Estimated progress stays within ${next}: ${displayed}`);
-  assert.match(document.querySelector('.chat-workspace > dialog.analysis-dialog').textContent,/预估进度/);
+  for(let attempt=0;attempt<12;attempt++){await flush();displayed=document.querySelector('.chat-workspace > dialog.analysis-dialog progress').value;if(displayed===completed)break;}
+  const progress=document.querySelector('.chat-workspace > dialog.analysis-dialog progress');
+  assert.equal(progress.max,5);assert.equal(displayed,completed,`Only confirmed steps count during ${next}`);
+  assert.match(progress.getAttribute('aria-valuetext'),new RegExp(`已完成 ${completed} / 5 步`));
+  assert.doesNotMatch(document.querySelector('.analysis-percent').textContent,/%|预估/,'Analysis duration is not presented as a measured percentage');
  }
+ await act(async()=>new Promise(r=>realTimeout(r,300)));assert.equal(document.querySelector('.analysis-dialog progress').value,3,'Waiting alone cannot advance progress');
  await click('收起进度，稍后查看');assert.equal(document.querySelector('.chat-workspace > dialog.analysis-dialog').open,false);
  const pollsBeforeNarrative=polls;
  delayNarrative=true;phase='ready';await flush();await flush();
  await act(async()=>document.querySelector('.analysis-card').click());await flush();
  const waiting=document.querySelector('.chat-workspace > dialog.analysis-dialog');
  assert.equal(waiting.open,true,'Material readiness cannot dismiss progress before the text arrives');
- assert.ok(waiting.querySelector('progress').value>=95 && waiting.querySelector('progress').value<100,'Narrative generation remains below 100%');
+ assert.equal(waiting.querySelector('progress').value,4,'Narrative generation is the unfinished fifth step');
+ assert.equal(waiting.querySelector('progress').max,5);
  assert.match(waiting.textContent,/写好解读|把情况讲清楚/);
  assert.equal(document.querySelector('.analysis-narrative'),null);
  assert.ok(polls>pollsBeforeNarrative+1,'Progress polling continues while the narrative request waits');
