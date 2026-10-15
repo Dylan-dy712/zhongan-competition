@@ -7,6 +7,7 @@ import './judge-sample.css';
 import {syncClaimMarkup} from './claimDom';
 import PhotoReview from './PhotoReview';
 import CarePreparation from './CarePreparation';
+import SamplePreparationDialog from './SamplePreparationDialog';
 
 function uuid() {
   const bytes=crypto.getRandomValues(new Uint8Array(16));bytes[6]=(bytes[6]&15)|64;bytes[8]=(bytes[8]&63)|128;
@@ -175,8 +176,7 @@ export default function ClaimIntake({token,subject,visible,onOpen,onAuthorize,on
       onPick={()=>{category.current='record';setSourceCategory('补充就医资料');source.current?.showModal();}}
       onRemove={entry=>{if(running.current||pending.current?.requestLocked||pending.current?.uploaded.has(entry.file))return;if(entry.url)URL.revokeObjectURL(entry.url);setSupplements(items=>items.filter(item=>item!==entry));setCareAgreed(false);setError('');}}
       onPreview={entry=>{setPreviewFile(entry);preview.current?.showModal();}}/>}
-    {judgeSample&&!finished&&<p className="claim-sample-status" role="status">{sampleLoading?`申请信息已填好，正在准备示例材料（${sampleProgress}/${judgeSample.file_count}）…`:sampleError?'申请信息已填好，示例材料尚未准备完成。':'申请信息与示例材料已自动填好，尚未提交。核对后即可确认上传。'}</p>}
-    {sampleError&&<p className="claim-error" role="alert">{sampleError} <button className="claim-text" disabled={sampleLoading||busy||locked} onClick={()=>setSampleRetry(value=>value+1)}>重新准备示例资料</button></p>}
+    <SamplePreparationDialog open={visible&&!!judgeSample&&!finished&&(sampleLoading||!!sampleError)} loading={sampleLoading} completed={sampleProgress} total={judgeSample?.file_count||1} error={sampleError} onRetry={()=>setSampleRetry(value=>value+1)} onHome={onExit}/>
     {reviewPhotos&&<PhotoReview token={token} subjectId={subject} files={files.map(f=>f.file)} onCancel={()=>setReviewPhotos(false)} onContinue={checked=>{
       const updated=files.map((entry,index)=>entry.file===checked[index]?entry:{...entry,file:checked[index],name:checked[index].name,size:checked[index].size,url:URL.createObjectURL(checked[index])});
       files.forEach((entry,index)=>{if(entry!==updated[index]&&entry.url)URL.revokeObjectURL(entry.url);});
