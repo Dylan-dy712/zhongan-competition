@@ -19,7 +19,7 @@ import {MemberEditor,MemberPicker,MemberConsentDialog} from './MemberControls';
 import PersonalRecords from './PersonalRecords';
 import type {MemberResponse,JudgeSample} from './api';
 import {revokeSession} from './api';
-import OriginalChatGuide,{OriginalChatWelcome} from './OriginalChatGuide';
+import OriginalChatWelcome from './OriginalChatWelcome';
 import {prepareChatFiles} from './chatFiles';
 import {isClaimSubmission} from './claimChatPresentation';
 import {uploadChatAttachment} from './api';
@@ -90,8 +90,6 @@ export default function App() {
     if(value.relationship==='self'&&!selfMember?.profile_completed)setPanel('home');};
   const [caseInput,setCaseInput] = useState('');
   const [snapshot,setSnapshot] = useState<ChatSnapshot|null>(null);
-  // Care cards belong to the claim-completion entry, not to ordinary chat visits.
-  const [claimGuideConversation,setClaimGuideConversation] = useState('');
   const [older,setOlder] = useState<ChatTurn[]>([]);
   const [hasOlder,setHasOlder] = useState(false);
   const [input,setInput] = useState('');
@@ -179,7 +177,6 @@ export default function App() {
     const generation = ++epoch.current;
     active.current = id;
     analysisRequest.current=null;pendingReportUpload.current=null;uploadingRef.current=false;
-    setClaimGuideConversation(fromClaim ? id : '');
     olderExhausted.current = false;
     setSnapshot(null); setOlder([]); setAttachments([]);setPhotoReview(null); setInput(''); setEvidence(null); setError('');setPollError('');
     setDraftFiles([]);setSentMessages([]);uploadedDrafts.current.clear();setReportUploadConversation('');pendingReportUpload.current=null;
@@ -228,7 +225,7 @@ export default function App() {
       observedAnalysis.current=key;setAnalysisError('');setAnalysisOpen(true);
     }
   },[snapshot?.analysis.run_id,snapshot?.analysis.status,snapshot?.conversation.conversation_id]);
-  useEffect(()=>{++evidenceRequest.current;setHistoryOpen(false);setEvidence(null);if(panel!=='chat')setClaimGuideConversation('');},[panel]);
+  useEffect(()=>{++evidenceRequest.current;setHistoryOpen(false);setEvidence(null);},[panel]);
   useEffect(()=>{
     if(panel==='report' && snapshot && !publishedCare(snapshot.report))setPanel('chat');
   },[panel,snapshot,setPanel]);
@@ -324,7 +321,6 @@ export default function App() {
     setSnapshot(null);setOlder([]);setAttachments([]);setPhotoReview(null);setInput('');setEvidence(null);setError('');
     setDraftFiles([]);setSentMessages([]);uploadedDrafts.current.clear();setReportUploadConversation('');
     setHistoryOpen(false);pendingSend.current=null;
-    setClaimGuideConversation('');
     setPanel('chat');
   };
 
@@ -580,7 +576,6 @@ export default function App() {
   const savedTurns=[...older,...(snapshot?.turns || [])].filter((t,i,all)=>all.findIndex(x=>x.turn_id===t.turn_id)===i);
   const turns=[...savedTurns,...sentMessages.filter(item=>!savedTurns.some(t=>t.request_id===item.turn.request_id)).map(item=>item.turn)];
   const narrative=currentNarrative(turns,snapshot?.analysis.run_id);
-  const showClaimGuide=!!snapshot && claimGuideConversation===snapshot.conversation.conversation_id;
   const working=busy || uploading || loadingConversation || !!snapshot?.turns.some(t=>t.status==='running');
   const submit=(e:FormEvent)=>{e.preventDefault();void send();};
   const openNarrative=()=>{setAnalysisOpen(false);setPanel('chat');requestAnimationFrame(()=>{
@@ -651,7 +646,7 @@ export default function App() {
               {feedbackNotice && <p role="status">{feedbackNotice}</p>}</div>}</>
           : <div className="empty-report"><p>暖暖会在对话里结合材料为你解释。</p>
             <button onClick={()=>setPanel('chat')}>回到对话</button></div>}</main>
-      : <><main className="chat-scroll inline-report-thread">{showClaimGuide ? <OriginalChatGuide snapshot={snapshot} onEvidence={id=>void showEvidence(id)}/> : <OriginalChatWelcome/>}
+      : <><main className="chat-scroll inline-report-thread"><OriginalChatWelcome/>
         {(snapshot.analysis.run_id || analysisSubmitting || uploadProgress || analysisError) && !narrative && <button className="analysis-card" onClick={()=>setAnalysisOpen(true)}><span className="analysis-card-icon" aria-hidden="true">✦</span><span className="analysis-card-copy"><strong>{progressView.title}</strong><small>{`${progressView.detail}${progressView.percent!==null?` · ${progressView.percent}%`:''}`}</small></span><span className="analysis-card-arrow" aria-hidden="true">›</span></button>}
         {hasOlder && turns.length>0 && <button className="load-history" onClick={()=>void loadOlder()}>查看更早的聊天</button>}
         <div className="nuan-chat-heading"><span><DemoIcon name="chat"/>和暖暖聊聊</span><small>有疑问，接着问</small></div>
@@ -669,7 +664,7 @@ export default function App() {
         </div><div ref={bottom}/></main>
         <footer className="chat-footer">
           <ChatDraftAttachments files={draftFiles} busy={working} onRemove={id=>{setDraftFiles(current=>current.filter(file=>file.id!==id));uploadedDrafts.current.delete(id);}}/>
-          {showClaimGuide && <div className="nuan-quick-actions">{[['summary','看病经过'],['cost','费用解读'],['action','下一步安排']].map(([id,label])=><button key={id} onClick={()=>{const target=document.getElementById('chat-topic-'+id);if(target?.tagName==='DETAILS')target.setAttribute('open','');target?.scrollIntoView({behavior:'smooth',block:'start'});}}><DemoIcon name={id==='summary'?'file':id==='cost'?'chat':'leaf'}/>{label}</button>)}</div>}<form className="composer" onSubmit={submit}>
+          <form className="composer" onSubmit={submit}>
             <input ref={uploadInput} aria-label="选择文档文件" hidden type="file" multiple onChange={e=>void upload(e.target.files)}/>
             <input ref={photoInput} aria-label="选择照片或图片" hidden type="file" multiple accept="image/jpeg,image/png" onChange={e=>void upload(e.target.files)}/>
             <details ref={uploadMenu} className="chat-upload-menu" onBlur={e=>{if(!e.currentTarget.contains(e.relatedTarget))e.currentTarget.open=false;}} onKeyDown={e=>{if(e.key==='Escape'){e.preventDefault();e.currentTarget.open=false;e.currentTarget.querySelector('summary')?.focus();}}}>
