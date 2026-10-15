@@ -234,7 +234,15 @@ class AgentModel:
             '只有不涉及医疗服务或需要先澄清症状才返回null。参数必须符合以下JSON Schema：'+
             json.dumps(MedicalServiceArgs.model_json_schema(),ensure_ascii=False))
         message=self.complete([*messages,{'role':'system','content':instruction}],allow_tools=False)
-        data=json.loads(message['content'])
+        calls=message.get('tool_calls') or []
+        if calls:
+            if len(calls)!=1 or calls[0].get('function',{}).get('name')!='recommend_medical_services':
+                raise ValueError('INVALID_SERVICE_PLAN_TOOL')
+            return MedicalServiceArgs.model_validate_json(calls[0]['function'].get('arguments','{}'))
+        content=(message.get('content') or '').strip()
+        if content.startswith('```'):
+            content=content.split('\n',1)[-1].rsplit('```',1)[0].strip()
+        data=json.loads(content)
         if not isinstance(data,dict) or 'service_request' not in data:raise ValueError('INVALID_SERVICE_PLAN')
         return None if data['service_request'] is None else MedicalServiceArgs.model_validate(data['service_request'])
 

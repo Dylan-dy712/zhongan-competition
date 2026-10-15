@@ -45,6 +45,13 @@ class MedicalServicesTests(unittest.TestCase):
         args=model.plan_medical_services([{'role':'user','content':'我想了解体检权益'}])
         self.assertEqual(args.needs,['checkup'])
         self.assertFalse(model.complete.call_args.kwargs['allow_tools'])
+        model.complete.return_value={'content':'```json\n{"service_request":{"routes":["benefits"],"needs":["checkup"]}}\n```'}
+        self.assertEqual(model.plan_medical_services([]).needs,['checkup'])
+        model.complete.return_value={'content':None,'tool_calls':[{'function':{'name':'recommend_medical_services',
+            'arguments':'{"routes":["benefits"],"needs":["checkup"]}'}}]}
+        self.assertEqual(model.plan_medical_services([]).needs,['checkup'])
+        model.complete.return_value={'content':None,'tool_calls':[{'function':{'name':'search_history','arguments':'{}'}}]}
+        with self.assertRaisesRegex(ValueError,'INVALID_SERVICE_PLAN_TOOL'):model.plan_medical_services([])
         model.complete.return_value={'content':json.dumps({'service_request':None})}
         self.assertIsNone(model.plan_medical_services([]))
         model.complete.return_value={'content':'{"paragraphs":[]}'}
