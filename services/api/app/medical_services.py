@@ -40,6 +40,24 @@ def pending_service_reply(text):
         r'(?:查一下|查一查|查询|筛选|匹配|推荐|调出|整理).{0,24}(?:权益|医疗服务|体检入口|互联网医院|附近.{0,8}医院|医院(?:名单|资源|选择|入口)|在线(?:咨询|问诊)(?:入口|服务))'
         r'|(?:权益|医疗服务|体检|互联网医院|医院(?:名单|资源|选择|入口)|在线(?:咨询|问诊)).{0,24}(?:入口.{0,6}调出|查一下|查一查|帮你查|调出来|推荐|匹配)',text))
 
+def separate_service_citations(reply,services):
+    """Keep exact UI catalogue identifiers out of clinical citation fields.
+
+    Service provenance remains visible on its card. Unknown references still
+    reach the normal evidence validator and cannot be silently discarded.
+    """
+    known=set()
+    for card in (services or {}).get('cards',[]):
+        known.update([card['id'],card['action']['target_id'],card['source']['url']])
+        if card['source'].get('address_url'):known.add(card['source']['address_url'])
+    if not known:return reply
+    citations=[]
+    for citation in reply.citations:
+        refs=[ref for ref in citation.source_refs if ref not in known]
+        if refs:citations.append(citation.model_copy(update={'source_refs':refs}))
+    return reply.model_copy(update={'knowledge_refs':[ref for ref in reply.knowledge_refs if ref not in known],
+                                   'citations':citations})
+
 class MedicalServiceArgs(BaseModel):
     model_config=ConfigDict(extra='forbid')
     routes:list[Literal['benefits','offline','online']]=Field(min_length=1,max_length=3)

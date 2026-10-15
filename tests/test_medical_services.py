@@ -2,10 +2,20 @@ import json
 import unittest
 from unittest.mock import MagicMock,patch
 
-from services.api.app.medical_services import MedicalServiceArgs,recommend_services,catalog,SERVICE_INVITATION,pending_service_reply
-from services.api.app.conversation_agent import CareTools,run_agent,TOOLS,AgentModel
+from services.api.app.medical_services import MedicalServiceArgs,recommend_services,catalog,SERVICE_INVITATION,pending_service_reply,separate_service_citations
+from services.api.app.conversation_agent import CareTools,run_agent,TOOLS,AgentModel,AgentReply
 
 class MedicalServicesTests(unittest.TestCase):
+    def test_only_returned_catalog_metadata_is_separated_from_clinical_citations(self):
+        services=self.recommend(routes=['benefits'],needs=['checkup'])
+        identifier=services['cards'][0]['id']
+        reply=AgentReply(text='体检需要核对使用条件。',knowledge_refs=[identifier,'unverified-reference'],
+            citations=[{'quote':'体检需要核对使用条件。','source_refs':[identifier,'unverified-reference']}])
+        clean=separate_service_citations(reply,services)
+        self.assertEqual(clean.knowledge_refs,['unverified-reference'])
+        self.assertEqual(clean.citations[0].source_refs,['unverified-reference'])
+        self.assertEqual(services['cards'][0]['source'],self.recommend(routes=['benefits'],needs=['checkup'])['cards'][0]['source'])
+
     def test_pending_service_guard_only_checks_model_draft_promises(self):
         self.assertTrue(pending_service_reply('我按中高端服务参考帮你查一下权益类的体检入口。'))
         self.assertTrue(pending_service_reply('我先帮你把中高端服务参考里的体检权益入口调出来。'))

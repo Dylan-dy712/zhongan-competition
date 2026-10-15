@@ -29,7 +29,7 @@ from .guidance_quality import GUIDANCE_INSTRUCTION, review_guidance_quality, gui
 from .model_workloads import is_qianfan
 from .contracts.knowledge import DiseaseCode
 from .patient_followup import FollowupPayload, FOLLOWUP_INSTRUCTION, source_patient_updates
-from .medical_services import MedicalServiceArgs, SERVICE_INSTRUCTION, SERVICE_INVITATION, recommend_services, pending_service_reply
+from .medical_services import MedicalServiceArgs, SERVICE_INSTRUCTION, SERVICE_INVITATION, recommend_services, pending_service_reply, separate_service_citations
 from .chat_reply import CHAT_REPLY_INSTRUCTION, decode_chat_reply
 from .web_knowledge import WebKnowledge, chat_concepts, CONCEPTS, COST_TOPICS
 
@@ -805,6 +805,8 @@ def run_agent(history, question, attachments, tools, model=None, on_event=None, 
             raise ValueError('UNSOURCED_ANALYSIS')
         if analysis_mode and _unsafe(reply.text.replace("**", "")):
             raise ValueError('UNSAFE_ANALYSIS')
+        if not analysis_mode and isinstance(tools,CareTools):
+            reply=separate_service_citations(reply,tools.medical_services)
         tools.validate_reply(reply)
         # Scripted models must explicitly implement review to exercise this stage.
         # Every real AgentModel has it; no accepted draft is delivered unchecked.
