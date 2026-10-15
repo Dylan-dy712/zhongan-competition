@@ -73,7 +73,7 @@ jobs:
       - run: node apps/web/scripts/check-chat-attachments.mjs
       - run: node apps/web/scripts/check-overview-content.mjs
       - run: node apps/web/scripts/check-claim-submission.mjs
-      - run: node --experimental-strip-types apps/web/scripts/check-analysis-estimate.mjs
+      - run: node --experimental-strip-types apps/web/scripts/check-analysis-progress.mjs
       - run: node --experimental-strip-types scripts/check_fact_presentation.mjs
       - run: node --experimental-strip-types scripts/check_narrative_formatting.mjs
       - run: node --experimental-strip-types scripts/check_care_presentation.mjs
