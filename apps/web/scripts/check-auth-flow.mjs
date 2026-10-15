@@ -29,7 +29,7 @@ globalThis.fetch=async(url,options={})=>{
   if(path==='/v1/chat/subjects')return Response.json(consent.status==='active'?[{subject_id:'synthetic-subject',consent_id:'synthetic-consent'}]:[]);
   if(path==='/v1/medical-records')return Response.json({records:conversation?[{record_id:'synthetic-record',subject_id:conversation.subject_id,title:'合成资料',updated_at:conversation.updated_at,document_count:uploadCount,conversation_count:1,related_records:[],cases:[{case_id:conversation.case_id,conversations:[conversation],profile:{},updated_at:conversation.updated_at,document_count:uploadCount,organization_status:'ready',assignment_source:'ai',relation:'new_episode',version:1,analysis_status:'completed'}]}]:[],unorganized_count:0,processing_count:0});
   if(path==='/v1/conversations'){
-    if(body){conversation={conversation_id:body.conversation_id,subject_id:body.subject_id,case_id:'synthetic-case',title:'合成资料',recall_enabled:body.recall_enabled,updated_at:new Date().toISOString()};return Response.json(conversation);}
+    if(body){if(conversation?.conversation_id!==body.conversation_id){claimReady=false;claimTurns=[];}conversation={conversation_id:body.conversation_id,subject_id:body.subject_id,case_id:'synthetic-case',title:'合成资料',recall_enabled:body.recall_enabled,updated_at:new Date().toISOString()};return Response.json(conversation);}
     return Response.json(conversation?[conversation]:[]);
   }
   if(path.endsWith('/documents')){
@@ -45,13 +45,14 @@ globalThis.fetch=async(url,options={})=>{
   if(path.endsWith('/continue')){
     await new Promise(r=>resolveClaimNarrative=r);
     claimTurns=[{turn_id:'claim-narrative',input_kind:'analysis_ready',status:'completed',question:'合成测试',attachments:[],tool_events:[],answer:{text:'我看过你上传的资料了，咱们先把这次费用理清楚。',evidence_refs:[],history_refs:[],analysis_run_id:'claim-run'}}];
+    conversation={...conversation,has_interpretation_report:true};
     return Response.json({turn_id:'claim-narrative'});
   }
   if(path.includes('/v1/conversations/'))return Response.json({conversation,turns:claimTurns,analysis:{status:claimReady?'waiting_review':'not_started',run_id:claimReady?'claim-run':undefined},report:{status:'not_generated'},material_report:claimReady?{status:'available',run_id:'claim-run',sections:[]}:undefined});
   if(path.endsWith('/deliveries'))return Response.json([]);
   throw Error('Unexpected test request '+path);
 };
-const root=createRoot(document.getElementById('root'));
+let root=createRoot(document.getElementById('root'));
 const flush=()=>act(async()=>{await new Promise(r=>setTimeout(r,15));});
 const visible=node=>!node.closest('[hidden]');
 const button=text=>[...document.querySelectorAll('button')].find(n=>visible(n) && (n.textContent.trim().endsWith(text)||n.getAttribute('aria-label')===text));
@@ -126,9 +127,20 @@ try{
   assert.ok(document.querySelector('#chat-topic-action'),'Claim completion must show care cards');
   assert.ok(document.querySelector('#chat-topic-summary'));assert.ok(document.querySelector('#chat-topic-cost'));
   assert.ok(document.querySelector('.nuan-quick-actions'),'Claim cards must have working shortcuts');
+  // Reload with a fresh App instance. The saved report is older than the current history page.
+  const savedTurns=claimTurns;
+  claimTurns=Array.from({length:50},(_,i)=>({turn_id:'recent-'+i,input_kind:'user',status:'completed',question:'合成后续问题',attachments:[],tool_events:[],answer:{text:'合成回复',evidence_refs:[],history_refs:[]}}));
+  const generationsBeforeReload=calls.filter(c=>c.path.endsWith('/continue')||c.path.endsWith('/analyses')).length;
+  await act(async()=>root.unmount());root=createRoot(document.getElementById('root'));
+  await act(async()=>root.render(React.createElement(modules.App)));await flush();await flush();
+  assert.ok(document.querySelector('#chat-topic-summary'),'Reload restores care cards from saved conversation metadata');
+  assert.ok(document.querySelector('#chat-topic-cost'));assert.ok(document.querySelector('#chat-topic-action'));
+  assert.ok(document.querySelector('.nuan-quick-actions'),'Restored cards retain their shortcuts');
+  assert.equal(calls.filter(c=>c.path.endsWith('/continue')||c.path.endsWith('/analyses')).length,generationsBeforeReload,'Reload does not regenerate the saved report');
+  claimTurns=savedTurns;
   await click('首页');await click('问暖暖');
-  assert.equal(document.querySelector('#chat-topic-action'),null,'Ordinary chat visits must not retain claim-entry cards');
-  assert.equal(document.querySelector('.nuan-quick-actions'),null,'No shortcuts to absent cards');
+  assert.ok(document.querySelector('#chat-topic-action'),'Returning to the same saved report retains its care cards');
+  assert.ok(document.querySelector('.nuan-quick-actions'));
   await click('首页');await click('提交理赔材料');await click('年龄未填写');
   assert.ok(document.querySelector('.claim-form-shell'),'Reentering completed intake starts a fresh form');
   assert.equal(document.querySelector('[data-claim-field="diagnosis"]').value,'');

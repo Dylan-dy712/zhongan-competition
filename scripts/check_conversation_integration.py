@@ -309,6 +309,8 @@ def main():
             with patch('services.api.app.conversation_agent.AgentModel',return_value=model):
                 completed=client.post(base+f'/analyses/{run_id}/continue',headers=headers)
             check(completed.status_code==200,'analysis completion continues with real evidence')
+            check(client.get(base,headers=headers).json()['conversation'].get('has_interpretation_report') is True,
+                  'conversation reload carries saved report presence for care cards')
             check(next(c for c in client.get('/v1/conversations',headers=headers).json()
                        if c['conversation_id']==conversation_id).get('has_interpretation_report') is True,
                   'completed narrative is marked as a report in history')
@@ -506,6 +508,8 @@ def main():
         check(not next(c for c in client.get('/v1/conversations',headers=headers).json()
                        if c['conversation_id']==follow_id).get('has_interpretation_report'),
               'report badge belongs to its conversation rather than every chat for the same case')
+        check(not client.get('/v1/conversations/'+follow_id,headers=headers).json()['conversation'].get('has_interpretation_report'),
+              'a new conversation for the same case does not inherit report care cards')
         with connection() as conn:
             found=chats.search_history(conn,actor,follow_id,'费用')
             check(bool(found['messages']),'new conversation finds prior topic')

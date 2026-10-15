@@ -90,7 +90,7 @@ export default function App() {
     if(value.relationship==='self'&&!selfMember?.profile_completed)setPanel('home');};
   const [caseInput,setCaseInput] = useState('');
   const [snapshot,setSnapshot] = useState<ChatSnapshot|null>(null);
-  // Care cards belong to the claim-completion entry, not to ordinary chat visits.
+  // The intake entry can show care cards before completion; saved reports restore them on later visits.
   const [claimGuideConversation,setClaimGuideConversation] = useState('');
   const [older,setOlder] = useState<ChatTurn[]>([]);
   const [hasOlder,setHasOlder] = useState(false);
@@ -580,7 +580,8 @@ export default function App() {
   const savedTurns=[...older,...(snapshot?.turns || [])].filter((t,i,all)=>all.findIndex(x=>x.turn_id===t.turn_id)===i);
   const turns=[...savedTurns,...sentMessages.filter(item=>!savedTurns.some(t=>t.request_id===item.turn.request_id)).map(item=>item.turn)];
   const narrative=currentNarrative(turns,snapshot?.analysis.run_id);
-  const showClaimGuide=!!snapshot && claimGuideConversation===snapshot.conversation.conversation_id;
+  const showClaimGuide=!!snapshot && (claimGuideConversation===snapshot.conversation.conversation_id
+    || snapshot.conversation.has_interpretation_report || !!narrative);
   const working=busy || uploading || loadingConversation || !!snapshot?.turns.some(t=>t.status==='running');
   const submit=(e:FormEvent)=>{e.preventDefault();void send();};
   const openNarrative=()=>{setAnalysisOpen(false);setPanel('chat');requestAnimationFrame(()=>{

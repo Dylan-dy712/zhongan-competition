@@ -794,7 +794,7 @@ def new_conversation(body: NewConversation, actor_id: UUID = Depends(current_act
 
 @app.get('/v1/conversations/{conversation_id}')
 def conversation_detail(conversation_id: UUID, actor_id: UUID = Depends(current_actor), conn=Depends(database)):
-    conversation = chats.require_conversation(conn, actor_id, conversation_id)
+    conversation = chats.require_conversation(conn, actor_id, conversation_id, include_report=True)
     tools = CareTools(conn, actor_id, conversation_id)
     return {'conversation': conversation, 'turns': chats.get_turns(conn, actor_id, conversation_id),
             'analysis': tools.execute('analysis_status', '{}'),

@@ -19,12 +19,19 @@ AUTHORIZED = """ FROM conversations v JOIN cases c ON c.case_id=v.case_id
       AND p.status='active' AND (p.expires_at IS NULL OR p.expires_at>clock_timestamp())
     WHERE v.actor_id=%s """
 
+REPORT_PRESENCE = """EXISTS(SELECT 1 FROM conversation_turns t
+    WHERE t.conversation_id=v.conversation_id AND t.input_kind='analysis_ready'
+    AND t.status='completed' AND btrim(coalesce(t.answer->>'text',''))<>'') AS has_interpretation_report"""
 
-def require_conversation(conn, actor_id, conversation_id):
-    row = conn.execute("SELECT v.*,c.subject_id" + AUTHORIZED + " AND v.conversation_id=%s",
+
+def require_conversation(conn, actor_id, conversation_id, *, include_report=False):
+    projection = "SELECT v.*,c.subject_id" + ("," + REPORT_PRESENCE if include_report else "")
+    row = conn.execute(projection + AUTHORIZED + " AND v.conversation_id=%s",
                        (actor_id, conversation_id)).fetchone()
     if not row:
         raise AccessDenied()
+    if include_report and not row['has_interpretation_report']:
+        row.pop('has_interpretation_report')
     return row
 
 
@@ -34,10 +41,7 @@ def list_conversations(conn, actor_id, subject_id=None):
                               (actor_id,subject_id)).fetchone()
         if not access:
             raise AccessDenied()
-    rows = conn.execute("""SELECT v.*,c.subject_id,EXISTS(
-                            SELECT 1 FROM conversation_turns t WHERE t.conversation_id=v.conversation_id
-                            AND t.input_kind='analysis_ready' AND t.status='completed'
-                            AND btrim(coalesce(t.answer->>'text',''))<>'') AS has_interpretation_report""" + AUTHORIZED +
+    rows = conn.execute("SELECT v.*,c.subject_id," + REPORT_PRESENCE + AUTHORIZED +
                         " AND (%s::uuid IS NULL OR c.subject_id=%s) ORDER BY v.updated_at DESC,v.conversation_id" +
                         (" LIMIT 100" if subject_id is None else ""),
                         (actor_id,subject_id,subject_id)).fetchall()
