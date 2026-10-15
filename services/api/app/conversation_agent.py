@@ -840,6 +840,9 @@ def run_agent(history, question, attachments, tools, model=None, on_event=None, 
             messages.append({'role':'assistant','content':content})
             if getattr(type(model),'plan_medical_services',None) is not None:
                 service_planning_calls+=1
+                if getattr(tools,'memory_snapshot',None) is not None:
+                    tools.validate_runtime()
+                    tools.conn.commit()
                 args=model.plan_medical_services(messages)
                 if args is not None:
                     call_id='service-completion-repair'
@@ -896,6 +899,9 @@ def run_agent(history, question, attachments, tools, model=None, on_event=None, 
             if on_event:on_event(events)  # Renew the lease before the review request.
             review_pages=[*packed,*(page for page in knowledge_pages if page['document'] in reply.knowledge_refs)]
             citation_audit = [{'quote':c.quote, 'source_refs':[next((a for a,v in aliases.items() if v==ref),ref) for ref in c.source_refs]} for c in reply.citations]
+            if isinstance(tools,CareTools) and getattr(tools,'memory_snapshot',None) is not None:
+                tools.validate_runtime()
+                tools.conn.commit()
             verdict=(model.review_analysis(review_pages,reply.text,citations=citation_audit)
                      if getattr(type(model),'supports_inline_citations',False) else model.review_analysis(review_pages,reply.text))
             review_calls+=1
@@ -908,6 +914,9 @@ def run_agent(history, question, attachments, tools, model=None, on_event=None, 
                     if not partial:raise ValueError('ANALYSIS_FIDELITY_REJECTED')
                     if on_event:on_event(events)
                     partial_started=time.monotonic()
+                    if isinstance(tools,CareTools) and getattr(tools,'memory_snapshot',None) is not None:
+                        tools.validate_runtime()
+                        tools.conn.commit()
                     checked=model.review_analysis(review_pages,partial)
                     review_calls+=1
                     review_seconds+=time.monotonic()-partial_started
@@ -928,6 +937,9 @@ def run_agent(history, question, attachments, tools, model=None, on_event=None, 
                 and is_qianfan(getattr(getattr(model,'config',None),'base_url',None))):
             if on_event:on_event(events)
             try:
+                if isinstance(tools,CareTools) and getattr(tools,'memory_snapshot',None) is not None:
+                    tools.validate_runtime()
+                    tools.conn.commit()
                 quality=model.review_guidance(reply.model_dump(mode='json'),
                     {**guidance_context,'facts_independently_reviewed':True,
                      'case_anchors':[source for page in packed for alias,source in page['spans']
