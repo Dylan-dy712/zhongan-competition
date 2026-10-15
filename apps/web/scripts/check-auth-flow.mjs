@@ -106,7 +106,12 @@ try{
   const creations=calls.filter(c=>c.path==='/v1/conversations' && c.body);
   assert.equal(creations.length,2);assert.equal(creations[0].body.conversation_id,creations[1].body.conversation_id);
   assert.equal(creations[0].body.recall_enabled,false);
-  claimReady=true;await click('查看相关报告');
+  claimReady=true;await click('查看就医关怀');
+  assert.equal(document.querySelectorAll('[aria-label="已上传材料"] li').length,27);
+  assert.equal(calls.filter(c=>c.path.endsWith('/analyses')).length,0);
+  await click('带着这些资料问暖暖');
+  await act(async()=>document.querySelector('.care-agreement input').click());
+  await click('确认提交，开始解读');
   assert.equal(calls.find(c=>c.path.endsWith('/analyses')).body.document_ids.length,27);
   await act(async()=>{await new Promise(r=>setTimeout(r,2100));});await flush();
   assert.ok(resolveClaimNarrative,'Explicit report entry starts text generation');
