@@ -86,7 +86,7 @@ export interface ChatTurn {
 }
 export interface ChatSnapshot {
   conversation: Conversation; turns: ChatTurn[];
-  analysis: {status:string; run_id?:string; stage?:string; error?:unknown};
+  analysis: {status:string; run_id?:string; stage?:string; error?:unknown;stage_results?:{parse?:{reused_pages?:number;processed_pages?:number}}};
   report: {status:string; report_id?:string; report_version?:number; sections?:ReportSection[]; actions?:CareAction[]};
   material_report?: MaterialReport;
 }
