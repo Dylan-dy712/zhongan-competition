@@ -104,7 +104,13 @@ try{
   const uploads=calls.filter(call=>call.path.endsWith('/documents'));
   assert.deepEqual(uploads.map(call=>call.body.get('file').name),['合成出院记录.pdf','合成诊断证明.pdf','合成诊断证明.pdf','合成费用清单.pdf','合成复诊病历.pdf']);
   assert.equal(calls.filter(call=>call.path.endsWith('/analyses')).length,0,'Successful upload must precede analysis');
-  await click('查看相关报告');
+  await click('查看就医关怀');
+  assert.equal(document.querySelectorAll('[aria-label="已上传材料"] li').length,4);
+  assert.equal(calls.filter(call=>call.path.endsWith('/analyses')).length,0);
+  await click('带着这些资料问暖暖');
+  assert.equal(button('确认提交，开始解读').disabled,true);
+  await act(async()=>document.querySelector('.care-agreement input').click());
+  await click('确认提交，开始解读');
   const analysis=calls.find(call=>call.path.endsWith('/analyses'));
   assert.equal(analysis.body.document_ids.length,4);assert.match(analysis.body.message,/不代表账号使用者本人病史/);
   assert.match(analysis.body.message,/用户填写的信息：.*已核对的合成诊断.*；材料分类：/,'The backend retains all form context');
