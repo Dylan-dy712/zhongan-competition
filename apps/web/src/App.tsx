@@ -357,9 +357,7 @@ export default function App() {
       const opened=await openConversation(created.conversation_id,token,'chat');
       if(opened&&active.current===created.conversation_id)setReportUploadConversation(created.conversation_id);
     }catch(e){if(epoch.current===generation)setError(errorText(e));}
-    finally{if(epoch.current===generation){busyRef.current=false;setBusy(false);
-      void listConversations(token).then(items=>{if(epoch.current===generation)setConversations(items);}).catch(()=>{});
-    }}
+    finally{if(epoch.current===generation){busyRef.current=false;setBusy(false);}}
   };
   const startJudgeExperience=(sample:JudgeSample)=>{
     if(busyRef.current||uploadingRef.current||analysisSubmitting)return;
@@ -404,7 +402,9 @@ export default function App() {
         }else{setAnalysisError('解读暂时没能完成，你的材料已保存，可以重试。'+errorText(e));}
       }
     }
-    finally{if(epoch.current===generation){busyRef.current=false;setBusy(false);}}
+    finally{if(epoch.current===generation){busyRef.current=false;setBusy(false);
+      void listConversations(token).then(items=>{if(epoch.current===generation)setConversations(items);}).catch(()=>{});
+    }}
   },[token,refresh]);
 
   // Processing labels come from persisted backend events, never timed animations.
