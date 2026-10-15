@@ -652,6 +652,15 @@ def run_agent(history, question, attachments, tools, model=None, on_event=None, 
             if repaired or round_index == 4:
                 raise
             repaired = True
+            if not analysis_mode and str(exc) == 'CITATION_ANCHOR_NOT_UNIQUE':
+                messages.extend([
+                    {'role': 'assistant', 'content': content},
+                    {'role': 'user', 'content':
+                     'CITATION_ANCHOR_NOT_UNIQUE：citations里的quote与本条text正文不能唯一对应。'
+                     'quote必须从你刚生成的text中逐字复制一句，不能填知识库原文、材料原文或改写后的句子。'
+                     '保持text及真实source_refs不变，只修正引用定位：每个quote在text（去掉**）中恰好出现一次且不跨行。'
+                     '重新输出完整JSON，保留其他字段。'}])
+                continue
             errors = '、'.join(str(e['loc'][0]) + ':' + e['type']
                 for e in (exc.errors(include_input=False) if isinstance(exc,ValidationError) else [{'loc':['citations'],'type':str(exc)}])
                 if e['loc'] and e['loc'][0] in {'text','evidence_refs','history_refs','knowledge_refs','citations',
