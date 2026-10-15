@@ -34,8 +34,11 @@ def model_post(url, *, post, **kwargs):
 
 def workload_options(base_url, model_id, workload):
     if workload == 'title':
+        # GLM-5.3-Flash requires thinking; its budget includes reasoning tokens.
+        if is_qianfan(base_url) and model_id == 'glm-5.3-flash':
+            return {'thinking':{'type':'enabled'},'reasoning_effort':'low','max_tokens':2048}
         options = {'max_tokens': 128}
-        if (is_qianfan(base_url) and model_id == 'glm-5.3-flash') or uses_deepseek_strict(base_url, model_id):
+        if uses_deepseek_strict(base_url, model_id):
             options['thinking'] = {'type': 'disabled'}
         return options
     if is_qianfan(base_url) and model_id == 'glm-5.3-flash':
