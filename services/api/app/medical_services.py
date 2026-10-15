@@ -15,6 +15,7 @@ SERVICE_INVITATION='如果你想了解保单里的医疗增值服务，或想找
 SERVICE_INSTRUCTION='''
 医疗服务推荐：本演示默认客户具备中高端权益，但尚未读取真实保单。以“中高端服务参考”表达，不说已核验、免费全包或一定报销。
 用户问复查、看病不便、附近公立/私立医院、身体不适如何就医、体检、护理、康复或线上咨询时，结合本轮和本对话上下文判断；有服务承接价值时调用recommend_medical_services选择benefits、offline、online的一类或组合。不能每轮都展示所有类别；倾诉或单纯术语解释不用强推服务。
+用户明确要体检权益、绿通、医院名单或互联网医院入口时，必须先实际调用工具，取得结果后再回答。不能只说“帮你查”“把入口调出来”就结束；缺地区也可调用工具获取地区补问。演示已约定中高端权益，不能因缺真实保单而拒绝查询参考，资格限制由工具返回。
 复查通常用followup，不自动用checkup；checkup仅用于用户明确想预防体检且没有新发/加重症状。身体不适先了解部位、持续时间、严重度等必要信息，不能仅凭“不舒服”就推荐体检或声称适合线上处理。
 green_channel仅用于用户询问绿通资格，或材料已明确约定癌症/特定疾病且用户需要相应就医协助；不能从泛泛不舒服推断疾病。绿通有疾病、等待期及计划条件，不是普通复查都能使用。
 有突发持续胸痛伴气短/大汗、严重呼吸困难、意识异常等急症征象，优先提示立即急救/急诊，不等待保险权益或地址筛选。若调用服务工具，clinical_priority必须urgent。需要线下检查或症状加重时clinical_priority用offline_assessment，不能用线上咨询替代。
@@ -24,6 +25,20 @@ specialty依据本次用户需求和已经读取的材料选择；未知用gener
 服务来源随卡片展示；卡片ID、医院ID和来源URL不能填入evidence_refs或knowledge_refs，它们不是用户病历证据或专业知识条目。
 工具status为needs_location/no_local_matches时，如实询问或说明同城名录缺口，不跨城凑数。urgent时只围绕急救承接。所有按钮为模拟服务，不能说已替用户预约、问诊、核验保单、支付或向医院发送资料。
 '''
+
+def pending_service_reply(text):
+    """Detect an unfulfilled promise or nonexistent cards in the model draft.
+
+    This does not classify user intent or choose recommendation arguments.
+    """
+    if len(text)>600:return False
+    if (re.search(r'(?:下[面方]|以下).{0,16}卡片|卡片.{0,16}(?:候选|机构|模拟入口)',text)
+            and re.search(r'权益|中高端|医院|候选机构|公立|私立|在线咨询|体检',text)):
+        return True
+    if not re.search(r'我|为你|帮你',text):return False
+    return bool(re.search(
+        r'(?:查一下|查一查|查询|筛选|匹配|推荐|调出|整理).{0,24}(?:权益|医疗服务|体检入口|互联网医院|附近.{0,8}医院|医院(?:名单|资源|选择|入口)|在线(?:咨询|问诊)(?:入口|服务))'
+        r'|(?:权益|医疗服务|体检|互联网医院|医院(?:名单|资源|选择|入口)|在线(?:咨询|问诊)).{0,24}(?:入口.{0,6}调出|查一下|查一查|帮你查|调出来|推荐|匹配)',text))
 
 class MedicalServiceArgs(BaseModel):
     model_config=ConfigDict(extra='forbid')
