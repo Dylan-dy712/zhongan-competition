@@ -1,6 +1,12 @@
 import {useEffect,useId,useRef,useState} from 'react';
 import type {MedicalServiceCard,MedicalServices} from './types';
 import reading from '../../../output_dir/product-design/assets/nuan-reading-v1.webp';
+import benefitSmall from './assets/medical-services/benefit-v1-384.webp';
+import benefitLarge from './assets/medical-services/benefit-v1-768.webp';
+import hospitalSmall from './assets/medical-services/hospital-v1-384.webp';
+import hospitalLarge from './assets/medical-services/hospital-v1-768.webp';
+import onlineSmall from './assets/medical-services/online-v1-384.webp';
+import onlineLarge from './assets/medical-services/online-v1-768.webp';
 import './medical-services.css';
 
 type Ask=(message:string)=>Promise<boolean>;
@@ -8,6 +14,17 @@ const invitation='如果你想了解保单里的医疗增值服务，或想找�
 const guideActions=[['看看我的医疗权益','我想了解中高端保单里有哪些医疗增值权益适合我，请结合刚才的情况推荐。'],
   ['找复查医院','我想找适合这次复查的公立或私立医院，请结合已提供的就医地区看看附近的选择，缺少地区时再问我。'],
   ['了解在线咨询','请结合我的情况，介绍众安互联网医院有哪些适合的在线咨询服务。']];
+const serviceArtwork={benefit:[benefitSmall,benefitLarge],hospital:[hospitalSmall,hospitalLarge],online:[onlineSmall,onlineLarge]};
+
+function ServiceArtwork({kind}:{kind:MedicalServiceCard['kind']}) {
+  const [small,large]=serviceArtwork[kind];
+  return <figure className="medical-card-visual">
+    <img src={small} srcSet={`${small} 384w, ${large} 768w`}
+      sizes="(max-width:620px) calc(100vw - 64px), (max-width:1000px) 45vw, 384px"
+      width={768} height={384} loading="lazy" decoding="async" alt=""/>
+    <figcaption>{kind==='hospital'?'就医场景示意':kind==='online'?'在线服务示意':'权益服务示意'}</figcaption>
+  </figure>;
+}
 
 function ServiceIcon({kind}:{kind:MedicalServiceCard['kind']}) {
   return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -52,6 +69,7 @@ export default function MedicalServiceCards({services,onAsk,disabled=false,canAs
   return <section className="medical-services" aria-label="为你整理的医疗服务">
     <header className="medical-services-header"><div><span className="medical-eyebrow">把下一步，安排得轻松一点</span><h3>适合继续了解的服务</h3></div><span className="medical-policy-tag">{services.policy_label}</span></header>
     {services.cards.length>0&&<div className="medical-card-grid">{services.cards.map(card=><article className={`medical-service-card medical-service-${card.kind}`} key={card.id}>
+      <ServiceArtwork kind={card.kind}/>
       <div className="medical-card-top"><span className="medical-service-symbol"><ServiceIcon kind={card.kind}/></span><small>{card.subtitle}</small></div>
       <h4>{card.title}</h4><p className="medical-card-description">{card.description}</p>
       <div className="medical-card-tags">{card.tags.map(tag=><span key={tag}>{tag}</span>)}</div>
