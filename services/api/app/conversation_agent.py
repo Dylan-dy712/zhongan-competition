@@ -501,6 +501,8 @@ class CareTools:
                         'available_versions': versions,
                         'notice': '报告当前不可交付，可查看获授权原始材料，但不能引用未放行结论。'}
             report = visible.model_dump(mode='json')
+            if visible.memory_refs and not current['recall_enabled']:
+                return {'status':'recall_disabled','notice':'当前对话尚未允许读取历史记忆。'}
             self.track_report_memory(visible.run_id)
             for section in report['sections']:
                 section['claims'] = [c for c in section['claims'] if c['review_status'] in ('approved','corrected','not_required')]

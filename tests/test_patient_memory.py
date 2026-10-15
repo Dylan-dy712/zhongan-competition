@@ -248,7 +248,7 @@ class MemoryDatabaseTests(unittest.TestCase):
             self.assertFalse(any(section['items'] for section in material['sections']))
 
     def test_report_review_release_and_patient_reads_recheck_private_memory(self):
-        from services.api.app.repository import get_report
+        from services.api.app.repository import get_report,get_analysis_run
         from services.api.app.release_repository import publish_report
         from services.api.app.report_memory import check_report_refs
         with self.report_fixture() as (conn,saved,run,report):
@@ -265,6 +265,15 @@ class MemoryDatabaseTests(unittest.TestCase):
             conn.execute('INSERT INTO actor_subject_access VALUES (%s,%s,false,true)',(outsider,self.subject))
             self.assertIsNone(get_report(conn,actor_id=outsider,case_id=run['case_id'],version=1))
             self.assertEqual(self.client.get(source_path,headers=self.other_headers).status_code,404)
+            conn.execute("UPDATE analysis_runs SET stage_results=jsonb_set(stage_results,'{guidance,reading_quality}',%s::jsonb) WHERE run_id=%s",
+                (json.dumps({'explanation':'private synthetic memory assessment'}),run['run_id']))
+            projected=get_analysis_run(conn,actor_id=outsider,run_id=run['run_id'])
+            self.assertNotIn('private synthetic memory assessment',projected.model_dump_json())
+            next_chat=self.client.post('/v1/conversations',headers=self.headers,json={'conversation_id':str(uuid4()),'case_id':str(run['case_id'])})
+            self.assertEqual(next_chat.status_code,201,next_chat.text)
+            detail=self.client.get('/v1/conversations/'+next_chat.json()['conversation_id'],headers=self.headers)
+            self.assertEqual(detail.status_code,200,detail.text)
+            self.assertEqual(detail.json()['report']['status'],'recall_disabled')
             self.assertIsNotNone(get_report(conn,actor_id=reviewer,case_id=run['case_id'],version=1))
             original=conn.execute('SELECT sections FROM reports WHERE report_id=%s',(report['report_id'],)).fetchone()['sections']
             store.revoke_memory(conn,self.actor,UUID(self.subject),UUID(saved['memory_id']),1)

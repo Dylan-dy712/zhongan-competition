@@ -306,6 +306,14 @@ def get_analysis_run(conn, *, actor_id: UUID, run_id: UUID) -> AnalysisRun | Non
            WHERE r.run_id = %s""",
         (actor_id, run_id),
     ).fetchone()
+    if row and (row.get('context_snapshot') or {}).get('memory'):
+        # Progress metadata is readable by case delegates, while free-form model
+        # assessments can quote account-private report memory. Keep it in audit,
+        # not in the general analysis-status projection.
+        stages=dict(row['stage_results'])
+        if 'guidance' in stages:
+            stages['guidance']={key:value for key,value in stages['guidance'].items() if key!='reading_quality'}
+        row={**row,'stage_results':stages}
     return _to_run(row) if row else None
 
 
