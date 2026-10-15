@@ -18,7 +18,7 @@ const sample={sample_id:'synthetic-01',version:'v1',data_origin:'official_deiden
   claim_info:{kind:'住院医疗',cause:'待确认',diagnosis:'合成肩部损伤样例',start:'2026-09-20',end:'2026-09-25',total:'1200.00',social:'待确认',other:'待确认'},
   documents:[{id:'discharge',name:'合成出院记录.pdf',document_type:'出院记录',page_count:2},{id:'diagnosis',name:'合成诊断证明.pdf',document_type:'诊断证明',page_count:1},{id:'costs',name:'合成费用清单.pdf',document_type:'费用清单',page_count:5},{id:'outpatient',name:'合成复诊病历.pdf',document_type:'门诊病历',page_count:5}]};
 const legacyTitle='这是一组主办方比赛样例的脱敏体验资料，不代表账号使用者本人病史。'.slice(0,30);
-const calls=[];let uploadCount=0,failSecond=true,failSelection=true,conversation,turns=[];
+const calls=[];let uploadCount=0,failSecond=true,failSelection=true,holdPreparation=true,releaseFailed,releaseHeld,conversation,turns=[];
 globalThis.fetch=async(url,options={})=>{
   const p=new URL(url,'http://localhost').pathname;
   const body=typeof options.body==='string'?JSON.parse(options.body):options.body;
@@ -31,7 +31,8 @@ globalThis.fetch=async(url,options={})=>{
   if(p.startsWith('/judge/sample/files/')){
     assert.equal(new URL(url,'http://localhost').searchParams.get('version'),'v1');
     assert.equal(new URL(url,'http://localhost').searchParams.get('sample_id'),'synthetic-01');
-    if(failSelection){failSelection=false;return {ok:true,arrayBuffer:async()=>{throw new DOMException('The user aborted a request.','AbortError');}};}
+    if(failSelection){failSelection=false;return {ok:true,arrayBuffer:async()=>{await new Promise(resolve=>releaseFailed=resolve);throw new DOMException('The user aborted a request.','AbortError');}};}
+    if(holdPreparation&&p.endsWith('/diagnosis'))await new Promise(resolve=>releaseHeld=resolve);
     return new Response('%PDF-1.4\nSynthetic '+p,{headers:{'Content-Type':'application/pdf'}});
   }
   if(p==='/v1/me/consents')return Response.json({status:'active',consent_id:'synthetic-consent'});
@@ -66,6 +67,16 @@ try{
   assert.ok(!document.querySelector('.judge-sample-card').textContent.includes(sample.notice),'Private source metadata is not product copy');
   assert.equal(document.querySelector('.judge-sample-notice'),null);
   await click('开始评委体验');
+  const preparation=document.querySelector('.sample-preparation-dialog');assert.equal(preparation.open,true,'Preparation opens a modal');
+  assert.equal(preparation.querySelector('progress').value,2,'The dialog shows the actual completed file count');
+  assert.equal(document.querySelector('.claim-sample-status'),null,'No preparation status strip remains at the top');
+  const firstDownloads=calls.filter(call=>call.path.startsWith('/judge/sample/files/')).length;
+  await click('先返回首页');assert.equal(preparation.open,false,'Leaving the page closes its modal');
+  await click('开始评委体验');assert.equal(preparation.open,true,'Returning restores ongoing preparation');
+  assert.equal(calls.filter(call=>call.path.startsWith('/judge/sample/files/')).length,firstDownloads);
+  await act(async()=>releaseHeld());await flush();assert.equal(preparation.querySelector('progress').value,3);
+  holdPreparation=false;await act(async()=>releaseFailed());await flush();
+  assert.equal(preparation.open,true,'A failed preparation keeps actionable feedback in the modal');
   assert.equal(window.location.hash,'#/claim');
   assert.equal(document.querySelector('dialog.member-dialog'),null,'Judge experience selects the test account automatically');
   assert.equal(document.querySelector('.claim-react .judge-sample-card'),null,'No second import card in the claim form');
@@ -76,6 +87,7 @@ try{
   assert.match(document.querySelector('[role="alert"]').textContent,/示例资料载入超时/);
   assert.equal(calls.filter(call=>call.method==='POST').length,0);
   await click('重新准备示例资料');
+  assert.equal(preparation.open,false,'The modal automatically closes after all files are ready');
   for(const key of ['diagnosis','start','end','total'])assert.equal(document.querySelector(`[data-claim-field="${key}"]`).value,sample.claim_info[key]);
   const downloads=calls.filter(call=>call.path.startsWith('/judge/sample/files/')).length;
   await act(async()=>{const input=document.querySelector('[data-claim-field="diagnosis"]');input.value='已核对的合成诊断';input.dispatchEvent(new dom.window.Event('input',{bubbles:true}));});
@@ -87,7 +99,7 @@ try{
   const groups=document.querySelectorAll('.claim-material');
   assert.equal(groups[0].querySelectorAll('.claim-file-tile').length,3,'Discharge, diagnosis and outpatient files stay in the medical record category');
   assert.equal(groups[1].querySelectorAll('.claim-file-tile').length,1);
-  assert.match(document.body.textContent,/尚未提交/);
+  assert.equal(document.querySelector('.claim-sample-status'),null);
   assert.equal(calls.filter(call=>call.method==='POST').length,0,'Sample selection must stay in the browser');
   await click('查看合成出院记录.pdf');assert.ok(document.querySelector('iframe.claim-pdf-preview'));
   await click('关闭图片预览');
