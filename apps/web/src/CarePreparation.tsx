@@ -40,10 +40,10 @@ export default function CarePreparation(p:Props){
         <span className="care-preparation-eyebrow">就医关怀 · 由你决定</span>
         <h1>让暖暖结合资料，<br/>把这次就医讲清楚</h1>
         <p>将使用已上传的 {p.files.length} 份资料{p.supplements.length?`与补充的 ${p.supplements.length} 份资料`:''}，以及你核对的就医信息。</p>
-        <div className="care-privacy-item"><span>01</span><div><h2>用来做什么</h2><p>识别材料、整理就医经过与费用，生成解读，并梳理后续就医与关怀事项。</p></div></div>
-        <div className="care-privacy-item"><span>02</span><div><h2>资料与隐私</h2><p>病历可能包含姓名、病情等敏感信息。文件会上传并保存至当前关怀账号，相关内容会交由提供识别与解读的服务处理。</p><details><summary>查看服务与资料管理说明</summary><p>材料识别由火山引擎提供，报告解读由百度千帆提供。请只提交本人或已获授权的资料，避免添加无关个人信息。你可在“我的”中管理资料用途授权；撤回后停止后续分析，已保存的材料和对话不会因此自动删除。</p></details></div></div>
+        <div className="care-privacy-item"><span>01</span><div><h2>用来做什么</h2><p>暖暖会使用 AI 识别你提供的材料，整理就医经过与费用，生成解读，并梳理后续就医与关怀事项。</p></div></div>
+        <div className="care-privacy-item"><span>02</span><div><h2>资料与隐私</h2><p>你的资料会保存在当前关怀账号内，在授权范围内用于就医关怀，不会向其他用户公开。</p><details><summary>查看隐私与资料管理说明</summary><p>请只提交本人或已获授权的资料。上传前可隐藏姓名、证件号码、联系方式等与解读无关的信息，减少个人隐私数据的提供。你可在“我的”中管理资料用途授权；撤回后停止后续分析，已保存的材料和对话不会因此自动删除。</p></details></div></div>
         <div className="care-privacy-item"><span>03</span><div><h2>知情后再开始</h2><p>解读供理解材料与就医准备参考，不能代替医生诊疗或保险公司的审核结论。就医关怀为自愿使用，可以暂不开始。</p></div></div>
-        <label className="care-agreement"><input type="checkbox" checked={p.agreed} disabled={p.busy||p.locked} onChange={e=>p.onAgree(e.target.checked)}/><span>我已阅读并了解资料用途与隐私说明，同意使用上述资料进行识别和报告解读。</span></label>
+        <label className="care-agreement"><input type="checkbox" checked={p.agreed} disabled={p.busy||p.locked} onChange={e=>p.onAgree(e.target.checked)}/><span>我已阅读并了解资料用途与隐私说明，同意使用 AI 对上述资料进行识别和报告解读。</span></label>
         <button className="care-primary" disabled={!p.agreed||p.busy} onClick={p.onConfirm}>{p.busy?'正在提交…':p.locked?'重试解读':'确认提交，开始解读'}</button>
         <button className="care-later" onClick={p.onHome} disabled={p.busy}>暂不解读，返回首页</button>
       </section>}
