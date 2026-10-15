@@ -9,8 +9,9 @@ export type HomeReminder={
 
 function reminderLabel(text:string) {
   const visit=/复诊|复查|随访|回院|就诊/.test(text);
-  const medication=/服药|服用|用药|药物|处方|停药|换药|口服|餐前|餐后|饭前|饭后|注射|外用|吸入|滴眼|滴鼻|滴耳/.test(text);
-  return visit&&medication?'复诊与用药':visit?'复诊安排':medication?'用药医嘱':undefined;
+  const medication=/服药|服用|用药|药物|处方|抗生素|停药|口服|餐前|餐后|饭前|饭后|注射|外用|吸入|滴眼|滴鼻|滴耳/.test(text);
+  const nursing=/切口|伤口|创面|拆线/.test(text);
+  return visit&&medication?'复诊与用药':visit?'复诊安排':medication?'用药医嘱':nursing?'护理安排':undefined;
 }
 
 /** Preserve source wording, including relative dates, doses and uncertainty. */
@@ -19,7 +20,7 @@ export function homeReminders(snapshot:ChatSnapshot):HomeReminder[] {
     const actions=patientActions(snapshot.report).flatMap(action=>{
       const label=reminderLabel(action.action_text);
       return label?[{id:action.action_id,text:action.action_text,label,time:actionTime(action),refs:action.source_refs,
-        section:(label==='用药医嘱'?'recovery_plan':'next_visit_advice') as ReportSection['section_type']}]:[];
+        section:(label==='用药医嘱'||label==='护理安排'?'recovery_plan':'next_visit_advice') as ReportSection['section_type']}]:[];
     });
     // Completed/cancelled actions must not reappear through a source-text fallback.
     if(snapshot.report.actions?.length)return actions;
@@ -83,12 +84,12 @@ export function memberReminders(snapshots:ChatSnapshot[],records:MedicalRecord[]
     if(result.length>=3)break;
     const concern=[...snapshot.turns].reverse().find(turn=>turn.input_kind==='user'&&!isClaimSubmission(turn)&&reminderLabel(turn.question));
     if(!concern)continue;
-    const medication=/服药|服用|用药|药物|处方|口服|停药|换药/.test(concern.question);
-    const label=medication?'用药待核对':'复诊待核对';
+    const category=reminderLabel(concern.question),medication=category?.includes('用药'),nursing=category==='护理安排';
+    const label=medication?'用药待核对':nursing?'护理待核对':'复诊待核对';
     if(result.some(row=>row.label===label))continue;
     add({id:`concern:${snapshot.conversation.conversation_id}`,label,
-      text:medication?'你最近提到了用药问题。可回到这次对话继续核对，具体药名、剂量与疗程以处方或医生确认的内容为准。':'你最近提到了复诊安排。可回到这次对话核对时间、地点和需要携带的材料。',
-      refs:[],section:medication?'recovery_plan':'next_visit_advice',conversationId:snapshot.conversation.conversation_id,destination:'chat',sourceLabel:'近期沟通 · 待核对'});
+      text:medication?'你最近提到了用药问题。可回到这次对话继续核对，具体药名、剂量与疗程以处方或医生确认的内容为准。':nursing?'你最近提到了护理问题。可回到这次对话核对，具体护理方法和时间以医护人员确认的安排为准。':'你最近提到了复诊安排。可回到这次对话核对时间、地点和需要携带的材料。',
+      refs:[],section:medication||nursing?'recovery_plan':'next_visit_advice',conversationId:snapshot.conversation.conversation_id,destination:'chat',sourceLabel:'近期沟通 · 待核对'});
   }
   const record=[...records].sort((a,b)=>Date.parse(b.updated_at)-Date.parse(a.updated_at))[0];
   const profile=record?.portrait||record?.cases.find(batch=>Object.keys(batch.profile||{}).length)?.profile;

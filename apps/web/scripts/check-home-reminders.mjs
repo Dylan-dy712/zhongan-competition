@@ -90,6 +90,10 @@ try {
   assert.equal(homeReminders(relative)[0].text,'出院后一周复诊，具体日期待确认。');assert.equal(homeReminders(relative)[0].time,undefined);
   const drops={...latestState,material_report:{...latestState.material_report,sections:[{section_type:'recovery_plan',items:[{text:'合成滴眼医嘱：按原处方滴眼，频次待确认。',kind:'source',evidence_refs:[ref]}]}]}};
   assert.equal(homeReminders(drops)[0].label,'用药医嘱');
+  const wound={...latestState,material_report:{...latestState.material_report,sections:[{section_type:'recovery_plan',items:[{text:'切口换药，术后14天拆线。',kind:'source',evidence_refs:[ref]}]}]}};
+  assert.equal(homeReminders(wound)[0].label,'护理安排','Wound dressing is not a medication regimen');
+  const antibiotics={...latestState,material_report:{...latestState.material_report,sections:[{section_type:'next_visit_advice',items:[{text:'继续应用抗生素1周，术后1个月门诊复查。',kind:'source',evidence_refs:[ref]}]}]}};
+  assert.equal(homeReminders(antibiotics)[0].label,'复诊与用药');
 
   await render();
   latestState={...latestState,material_report:{...latestState.material_report,sections:[{section_type:'next_visit_advice',items:[{text:'最新医嘱：2026年10月22日复诊。',kind:'source',evidence_refs:[ref]}]}]}};
