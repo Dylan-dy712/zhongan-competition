@@ -125,6 +125,9 @@ def generate_title(messages):
 
 def _finish(conn, job, *, title=None, model_id=None, error=None, actor=None):
     with conn.transaction():
+        # Chat completion locks conversation before queue; use the same lock order.
+        conn.execute('SELECT conversation_id FROM conversations WHERE conversation_id=%s FOR UPDATE',
+                     (job['conversation_id'],))
         current = conn.execute("""SELECT * FROM conversation_title_jobs
             WHERE conversation_id=%s AND lease_token=%s AND status='running' FOR UPDATE""",
             (job['conversation_id'], job['lease_token'])).fetchone()

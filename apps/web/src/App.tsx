@@ -357,7 +357,9 @@ export default function App() {
       const opened=await openConversation(created.conversation_id,token,'chat');
       if(opened&&active.current===created.conversation_id)setReportUploadConversation(created.conversation_id);
     }catch(e){if(epoch.current===generation)setError(errorText(e));}
-    finally{if(epoch.current===generation){busyRef.current=false;setBusy(false);}}
+    finally{if(epoch.current===generation){busyRef.current=false;setBusy(false);
+      void listConversations(token).then(items=>{if(epoch.current===generation)setConversations(items);}).catch(()=>{});
+    }}
   };
   const startJudgeExperience=(sample:JudgeSample)=>{
     if(busyRef.current||uploadingRef.current||analysisSubmitting)return;
@@ -503,6 +505,7 @@ export default function App() {
     finally{
       try{await refresh(id,token,generation);}catch(e){if(epoch.current===generation)setAnalysisError(errorText(e));}
       if(epoch.current===generation){busyRef.current=false;setBusy(false);setAnalysisSubmitting(false);}
+      if(epoch.current===generation)void listConversations(token).then(items=>{if(epoch.current===generation)setConversations(items);}).catch(()=>{});
     }
   };
 
