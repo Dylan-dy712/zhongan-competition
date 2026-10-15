@@ -2,6 +2,9 @@ import {useEffect,useRef,useState} from 'react';
 import {prepareChatFiles} from './chatFiles';
 
 export type DraftAttachment={id:string;file:File};
+export function ChatSentAttachments({files}:{files:DraftAttachment[]}){
+ return files.length ? <div className="chat-sent-attachments" aria-label="已发送附件">{files.map(item=><span key={item.id}><FilePreview file={item.file}/><small>{item.file.name}</small></span>)}</div> : null;
+}
 function FilePreview({file}:{file:File}){
  const [url,setUrl]=useState('');
  useEffect(()=>{if(!file.type.startsWith('image/'))return;const next=URL.createObjectURL(file);setUrl(next);return()=>URL.revokeObjectURL(next);},[file]);

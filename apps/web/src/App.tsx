@@ -23,7 +23,7 @@ import OriginalChatGuide,{OriginalChatWelcome} from './OriginalChatGuide';
 import {prepareChatFiles} from './chatFiles';
 import {isClaimSubmission} from './claimChatPresentation';
 import {uploadChatAttachment} from './api';
-import {ChatDraftAttachments,ReportUploadDialog,type DraftAttachment} from './ChatUploads';
+import {ChatDraftAttachments,ChatSentAttachments,ReportUploadDialog,type DraftAttachment} from './ChatUploads';
 import PhotoReview from './PhotoReview';
 import EncounterOverview from './EncounterOverview';
 import DemoShowcase from './DemoShowcase';
@@ -97,6 +97,7 @@ export default function App() {
   const [input,setInput] = useState('');
   const [attachments,setAttachments] = useState<{document_id:string; name:string}[]>([]);
   const [draftFiles,setDraftFiles]=useState<DraftAttachment[]>([]);
+  const [sentMessages,setSentMessages]=useState<{turn:ChatTurn;files:DraftAttachment[]}[]>([]);
   const uploadedDrafts=useRef(new Map<string,string>());
   const [reportUploadConversation,setReportUploadConversation]=useState('');
   const [busy,setBusy] = useState(false);
@@ -146,7 +147,7 @@ export default function App() {
     const fresh=++epoch.current;active.current='';busyRef.current=false;
     setLoadingConversation(false);setPollError('');
     setSnapshot(null);setOlder([]);setEvidence(null);setAttachments([]);setPhotoReview(null);setInput('');setDelivery(null);
-    setDraftFiles([]);uploadedDrafts.current.clear();setReportUploadConversation('');pendingReportUpload.current=null;
+    setDraftFiles([]);setSentMessages([]);uploadedDrafts.current.clear();setReportUploadConversation('');pendingReportUpload.current=null;
     setConversations([]);setSubjects([]);setSubject('');setCaseInput('');setFeedbackNotice('');setBusy(false);setUploading(false);
     localStorage.removeItem('zhongan_last_conversation');
     pendingSend.current=null;careKeys.current.clear();
@@ -181,7 +182,7 @@ export default function App() {
     setClaimGuideConversation(fromClaim ? id : '');
     olderExhausted.current = false;
     setSnapshot(null); setOlder([]); setAttachments([]);setPhotoReview(null); setInput(''); setEvidence(null); setError('');setPollError('');
-    setDraftFiles([]);uploadedDrafts.current.clear();setReportUploadConversation('');pendingReportUpload.current=null;
+    setDraftFiles([]);setSentMessages([]);uploadedDrafts.current.clear();setReportUploadConversation('');pendingReportUpload.current=null;
     busyRef.current=false;setBusy(false);setUploading(false);
     setLoadingConversation(true);setHasOlder(false);setDelivery(null);setFeedbackNotice('');
     setPanel(destination);setReportFocus(undefined); setHistoryOpen(false); pendingSend.current = null;
@@ -321,7 +322,7 @@ export default function App() {
     busyRef.current=false;setBusy(false);setUploading(false);setLoadingConversation(false);
     setDelivery(null);setFeedbackNotice('');setHasOlder(false);setReportFocus(undefined);setCaseInput('');
     setSnapshot(null);setOlder([]);setAttachments([]);setPhotoReview(null);setInput('');setEvidence(null);setError('');
-    setDraftFiles([]);uploadedDrafts.current.clear();setReportUploadConversation('');
+    setDraftFiles([]);setSentMessages([]);uploadedDrafts.current.clear();setReportUploadConversation('');
     setHistoryOpen(false);pendingSend.current=null;
     setClaimGuideConversation('');
     setPanel('chat');
@@ -382,7 +383,7 @@ export default function App() {
     }
     if(snapshot?.conversation.subject_id===changedSubject&&active.current===snapshot.conversation.conversation_id&&!items.some(item=>item.conversation_id===snapshot.conversation.conversation_id)){
       ++epoch.current;active.current='';setSnapshot(null);setEvidence(null);setOlder([]);setAttachments([]);setPhotoReview(null);setInput('');setDelivery(null);
-      setDraftFiles([]);uploadedDrafts.current.clear();setReportUploadConversation('');
+      setDraftFiles([]);setSentMessages([]);uploadedDrafts.current.clear();setReportUploadConversation('');
       pendingSend.current=null;careKeys.current.clear();localStorage.removeItem('zhongan_last_conversation');
     }
   };
@@ -429,23 +430,43 @@ export default function App() {
     return()=>{stopped=true;clearTimeout(timer);};
   },[connected,snapshot?.conversation.conversation_id,token,refresh,completeNarrative]);
 
+  const titlesPending=conversations.some(item=>item.title_pending);
+  useEffect(()=>{
+    if(!connected||panel!=='chat'||!titlesPending)return;
+    const generation=epoch.current;
+    let stopped=false,timer:ReturnType<typeof setTimeout>;
+    const tick=async()=>{
+      try{const items=await listConversations(token);if(!stopped&&epoch.current===generation)setConversations(items);}
+      catch{/* Keep readable titles during a transient title refresh failure. */}
+      if(!stopped&&epoch.current===generation)timer=setTimeout(tick,5000);
+    };
+    timer=setTimeout(tick,5000);
+    return()=>{stopped=true;clearTimeout(timer);};
+  },[connected,panel,titlesPending,token,snapshot?.conversation.conversation_id]);
+
   const send = async (retry?:ChatTurn) => {
     const id=active.current, generation=epoch.current;
     if(!id || busyRef.current || busy || uploading) return;
-    const selected=[...draftFiles];
+    const localRetry=retry?.turn_id.startsWith('local:');
+    const selected=retry ? sentMessages.find(item=>item.turn.request_id===retry.request_id)?.files || [] : [...draftFiles];
     const text=retry?.question || input.trim() || (selected.length ? '请看看这些附件，帮我解释一下。' : '');
     if(!text)return;
     const docs=retry ? retry.attachments.filter(x=>x.kind!=='chat_attachment').map(x=>x.document_id) : [];
     const attachmentIds=retry ? retry.attachments.filter(x=>x.kind==='chat_attachment').map(x=>x.document_id) : [];
     const draftKey=retry?retry.turn_id:selected.map(file=>file.id).join(':');
-    const previous=pendingSend.current;
-    const req=retry?.request_id || (previous && previous.text===text && previous.draftKey===draftKey ? previous.id : requestId());
+    const req=retry?.request_id || requestId();
     pendingSend.current={id:req,text,docs,draftKey};busyRef.current=true;setBusy(true);setError('');
+    // Capture the submission before any upload/model await. The composer is only a draft.
+    if(!retry){
+      const turn:ChatTurn={turn_id:`local:${req}`,request_id:req,question:text,input_kind:'user',attachments:[],status:'running',answer:null,tool_events:[],created_at:new Date().toISOString(),error_code:null};
+      setSentMessages(items=>[...items.slice(-19),{turn,files:selected}]);
+      setInput('');setDraftFiles([]);
+    }else setSentMessages(items=>items.map(item=>item.turn.request_id===req?{...item,turn:{...item.turn,status:'running'}}:item));
     try {
       if(retry?.input_kind==='analysis_ready' && snapshot?.analysis.run_id) {
         await continueAnalysis(token,id,snapshot.analysis.run_id);
       } else {
-        if(!retry&&selected.length){
+        if((!retry||localRetry)&&selected.length){
           uploadingRef.current=true;setUploading(true);
           for(const item of selected){
             let attachmentId=uploadedDrafts.current.get(item.id);
@@ -458,10 +479,13 @@ export default function App() {
         }
         await sendChatMessage(token,id,req,text,docs,attachmentIds);
       }
-      if(epoch.current===generation){setInput('');setDraftFiles([]);uploadedDrafts.current.clear();pendingSend.current=null;}
-    } catch(e){if(!invalidateAccess(e,id,generation) && epoch.current===generation)setError(errorText(e));}
+      if(epoch.current===generation)pendingSend.current=null;
+    } catch(e){if(!invalidateAccess(e,id,generation) && epoch.current===generation){
+      setSentMessages(items=>items.map(item=>item.turn.request_id===req?{...item,turn:{...item.turn,status:'failed'}}:item));
+      setError(errorText(e));
+    }}
     finally {
-      try {await refresh(id,token,generation);if(epoch.current===generation)setConversations(await listConversations(token));}
+      try {await refresh(id,token,generation);const items=await listConversations(token);if(epoch.current===generation)setConversations(items);}
       catch(e){if(epoch.current===generation)setError(errorText(e));}
       if(epoch.current===generation){busyRef.current=false;uploadingRef.current=false;setUploading(false);setBusy(false);}
     }
@@ -538,7 +562,7 @@ export default function App() {
     sessionStorage.removeItem('zhongan_account_name');
     setToken('');setConnected(false);setConversations([]);setSnapshot(null);
     setOlder([]);setAttachments([]);setPhotoReview(null);setEvidence(null);setError('');setPollError('');setHistoryOpen(false);pendingSend.current=null;
-    setDraftFiles([]);uploadedDrafts.current.clear();setReportUploadConversation('');pendingReportMember.current='';pendingReportUpload.current=null;
+    setDraftFiles([]);setSentMessages([]);uploadedDrafts.current.clear();setReportUploadConversation('');pendingReportMember.current='';pendingReportUpload.current=null;
     setSubjects([]);setSubject('');setCaseInput('');setInput('');localStorage.removeItem('zhongan_last_conversation');
     ++memberEpoch.current;setClaimSubject('');setClaimDirty(false);setMembers([]);setViewSubject('');setMemberPicker(undefined);setRecordCase(undefined);
     if(memberCacheKey.current)localStorage.removeItem(memberCacheKey.current);memberCacheKey.current='';
@@ -550,7 +574,8 @@ export default function App() {
     try {await revokeSession(token);logout();}
     catch(e){setError(errorText(e));}
   };
-  const turns=[...older,...(snapshot?.turns || [])].filter((t,i,all)=>all.findIndex(x=>x.turn_id===t.turn_id)===i);
+  const savedTurns=[...older,...(snapshot?.turns || [])].filter((t,i,all)=>all.findIndex(x=>x.turn_id===t.turn_id)===i);
+  const turns=[...savedTurns,...sentMessages.filter(item=>!savedTurns.some(t=>t.request_id===item.turn.request_id)).map(item=>item.turn)];
   const narrative=currentNarrative(turns,snapshot?.analysis.run_id);
   const showClaimGuide=!!snapshot && claimGuideConversation===snapshot.conversation.conversation_id;
   const working=busy || uploading || loadingConversation || !!snapshot?.turns.some(t=>t.status==='running');
@@ -569,7 +594,7 @@ export default function App() {
       <button className="new-chat" disabled={working} onClick={()=>requestBusiness('chat')}>＋ 新建对话</button>
       <div className="history-list"><p>以前的对话</p>{conversations.length===0 && <p>还没有历史对话</p>}{conversations.map(c=><button disabled={working} key={c.conversation_id}
         className={active.current===c.conversation_id?'selected':''} onClick={()=>void openConversation(c.conversation_id,token,'chat')}>
-        <strong>{c.title}</strong><small>{new Date(c.updated_at).toLocaleDateString('zh-CN')}</small></button>)}</div>
+        <strong title={c.title}>{c.title}</strong><small>{new Date(c.updated_at).toLocaleDateString('zh-CN')}</small></button>)}</div>
       <button className="quiet-button" disabled={working} onClick={()=>void signOut()}>退出登录</button>
     </aside>;
 
@@ -630,7 +655,7 @@ export default function App() {
         <div className="messages">{turns.length===0 && <div className="message-row assistant"><div className="avatar">✦</div><div className="message-bubble"><div className="nuan-reply-label"><DemoIcon name="leaf"/>暖暖</div><p>你好，我是暖暖。你可以从最想说的事情聊起，不用一下子把所有事情讲清楚。如果有看不懂的病历或发票，我也会陪你一点点看。</p></div></div>}
           {turns.map(t=><div className="chat-turn" key={t.turn_id} id={`turn-${t.turn_id}`}>
             {t.input_kind==='analysis_ready' ? <p className="analysis-continuation">材料已整理 · 暖暖为你解读</p> : isClaimSubmission(t) ? <p className="analysis-continuation">材料已提交 · 暖暖为你整理</p> : <div className="message-row user"><div className="message-bubble"><p>{t.question}</p>
-            {t.attachments.map(a=><span className="attachment" key={a.document_id}>▤ {a.name}</span>)}</div></div>}
+            {sentMessages.find(item=>item.turn.request_id===t.request_id)?.files.length ? <ChatSentAttachments files={sentMessages.find(item=>item.turn.request_id===t.request_id)!.files}/> : t.attachments.map(a=><span className="attachment" key={a.document_id}>▤ {a.name}</span>)}</div></div>}
             <div className="message-row assistant"><span className="nuan-avatar" aria-hidden="true">✦</span><div className={`message-bubble ${t.input_kind==='analysis_ready'?'narrative-bubble':''}`}><div className="nuan-reply-label"><DemoIcon name="leaf"/>暖暖{t.input_kind==='analysis_ready' && <span>· 材料解读</span>}</div>{t.input_kind!=='analysis_ready' && <ToolActivity events={t.tool_events}/>}
               {t.answer ? <>{t.input_kind==='analysis_ready'?<AnalysisNarrative turn={t} onEvidence={id=>void showEvidence(id)}/>:<><p><CitedText text={t.answer.text} citations={t.answer.citations} sources={t.answer.knowledge_sources} onEvidence={id=>void showEvidence(id)}/></p></>}
 
