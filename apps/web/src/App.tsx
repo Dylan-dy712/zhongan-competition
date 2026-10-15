@@ -660,7 +660,7 @@ export default function App() {
               {t.answer ? <>{t.input_kind==='analysis_ready'?<AnalysisNarrative turn={t} onEvidence={id=>void showEvidence(id)}/>:<><p><CitedText text={t.answer.text} citations={t.answer.citations} sources={t.answer.knowledge_sources} onEvidence={id=>void showEvidence(id)}/></p></>}
 
                 {t.answer.history_refs.length>0 && <small className="history-reference">参考了 {t.answer.history_refs.length} 条你允许回忆的历史记录</small>}</>
-                : t.status==='failed' ? <><p>这次回答没有完成，你的消息已保存。</p><button disabled={working} onClick={()=>void send(t)}>重试这条消息</button></>
+                : t.status==='failed' ? <><p>{t.turn_id.startsWith('local:')?'这次消息没有发送成功，可以重试。':'这次回答没有完成，你的消息已保存。'}</p><button disabled={working} onClick={()=>void send(t)}>重试这条消息</button></>
                 : <p role="status">{t.input_kind==='analysis_ready'?'材料已经整理好，暖暖正在结合你的资料写解读…':'暖暖正在认真看你说的话…'}</p>}
             </div></div></div>)}
         </div><div ref={bottom}/></main>

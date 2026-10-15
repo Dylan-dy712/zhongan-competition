@@ -56,6 +56,8 @@ def prepare_list(conn, items):
         pending = {job['conversation_id'] for job in jobs if job['status'] in ('queued', 'running')}
         current_titles = {job['conversation_id']:job['title'] for job in jobs}
         for item in items:
+            if item['conversation_id'] not in current_titles:
+                continue
             item['title_pending'] = item['conversation_id'] in pending
             item['title'] = current_titles.get(item['conversation_id'],item['title'])
     except Exception:
