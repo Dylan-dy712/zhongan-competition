@@ -1,36 +1,31 @@
 import assert from 'node:assert/strict';
-import {build} from 'rolldown';
-import {mkdir,rm} from 'node:fs/promises';
-import {fileURLToPath,pathToFileURL} from 'node:url';
-import path from 'node:path';
+import {loadTestModules} from './test-modules.mjs';
 import {JSDOM} from 'jsdom';
 import React,{act} from 'react';
 
-const rootDir=path.resolve(fileURLToPath(new URL('..',import.meta.url)));
-const out=path.resolve(rootDir,'.test-judge-upload');assert.ok(out.startsWith(rootDir+path.sep));
-await mkdir(out,{recursive:true});
-await build({input:path.join(rootDir,'src/ClaimIntake.tsx'),external:id=>/^(react|react-dom)(\/|$)/.test(id),
-  transform:{jsx:{runtime:'automatic'},define:{'import.meta.env':'{}'}},
-  plugins:[{name:'test-assets',load(id){if(/\.(css|webp)$/.test(id))return {code:'export default "asset";',moduleType:'js'};}}],
-  output:{dir:out,format:'esm',entryFileNames:'ClaimIntake.mjs'}});
-const dom=new JSDOM('<div id="root"></div>',{url:'http://localhost'});
-for(const key of ['window','document','HTMLElement'])globalThis[key]=dom.window[key];
+const dom=new JSDOM('<div id="root"></div>',{url:'http://localhost/#/home'});
+for(const key of ['window','document','sessionStorage','localStorage','HTMLElement'])globalThis[key]=dom.window[key];
 globalThis.IS_REACT_ACT_ENVIRONMENT=true;
+dom.window.HTMLElement.prototype.scrollIntoView=function(){};
+dom.window.confirm=()=>{throw Error('Fresh judge experience must not require an extra confirmation');};
 dom.window.HTMLDialogElement.prototype.showModal=function(){this.open=true;};
 dom.window.HTMLDialogElement.prototype.close=function(){this.open=false;};
 const oldCreate=URL.createObjectURL,oldRevoke=URL.revokeObjectURL;
 URL.createObjectURL=()=> 'blob:synthetic-preview';URL.revokeObjectURL=()=>{};
 const {createRoot}=await import('react-dom/client');
-const {default:ClaimIntake}=await import(pathToFileURL(path.join(out,'ClaimIntake.mjs')).href);
+const modules=await loadTestModules();const {App}=modules;
 const sample={sample_id:'synthetic-01',version:'v1',data_origin:'official_deidentified',title:'合成病例流程测试',summary:'测试',notice:'合成测试，非患者资料',file_count:4,page_count:13,
   claim_info:{kind:'住院医疗',cause:'待确认',diagnosis:'合成肩部损伤样例',start:'2026-09-20',end:'2026-09-25',total:'1200.00',social:'待确认',other:'待确认'},
   documents:[{id:'discharge',name:'合成出院记录.pdf',document_type:'出院记录',page_count:2},{id:'diagnosis',name:'合成诊断证明.pdf',document_type:'诊断证明',page_count:1},{id:'costs',name:'合成费用清单.pdf',document_type:'费用清单',page_count:5},{id:'outpatient',name:'合成复诊病历.pdf',document_type:'门诊病历',page_count:5}]};
-const calls=[],opens=[];let uploadCount=0,failSecond=true,failSelection=true;
+const calls=[];let uploadCount=0,failSecond=true,failSelection=true,conversation;
 globalThis.fetch=async(url,options={})=>{
   const p=new URL(url,'http://localhost').pathname;
   const body=typeof options.body==='string'?JSON.parse(options.body):options.body;
   calls.push({path:p,method:options.method||'GET',body});
   if(p==='/judge/sample')return options.headers.Authorization.includes('ordinary')?Response.json({}, {status:403}):Response.json(sample);
+  if(p==='/v1/chat/subjects')return Response.json([{subject_id:'synthetic-subject',consent_id:'synthetic-consent'}]);
+  if(p==='/v1/me/members')return Response.json([{subject_id:'synthetic-subject',relationship:'self',name:'合成评委',profile_completed:true}]);
+  if(p==='/v1/medical-records')return Response.json({records:[],unorganized_count:0,processing_count:0});
   if(p.startsWith('/judge/sample/files/')){
     assert.equal(new URL(url,'http://localhost').searchParams.get('version'),'v1');
     assert.equal(new URL(url,'http://localhost').searchParams.get('sample_id'),'synthetic-01');
@@ -39,7 +34,11 @@ globalThis.fetch=async(url,options={})=>{
   }
   if(p==='/v1/me/consents')return Response.json({status:'active',consent_id:'synthetic-consent'});
   if(p==='/v1/cases')return Response.json({case_id:'synthetic-case'});
-  if(p==='/v1/conversations')return Response.json({});
+  if(p==='/v1/conversations'){
+    if(options.method==='POST')conversation={conversation_id:body.conversation_id,case_id:'synthetic-case',subject_id:'synthetic-subject',title:'合成测试记录',created_at:'2026-10-01',updated_at:'2026-10-01'};
+    return Response.json(options.method==='POST'?{}:conversation?[conversation]:[]);
+  }
+  if(conversation&&p==='/v1/conversations/'+conversation.conversation_id)return Response.json({conversation,turns:[],analysis:{status:'queued',run_id:'synthetic-run'},report:{status:'not_generated',actions:[],sections:[]}});
   if(p.endsWith('/documents')){
     uploadCount++;
     if(uploadCount===2&&failSecond){failSecond=false;return Response.json({message:'合成上传中断'},{status:500});}
@@ -52,13 +51,27 @@ let root=createRoot(document.getElementById('root'));
 const flush=()=>act(async()=>{await new Promise(r=>setTimeout(r,15));});
 const button=text=>[...document.querySelectorAll('button')].find(node=>node.textContent.replace(/\s*→\s*$/,'').trim()===text||node.getAttribute('aria-label')===text);
 async function click(text){const node=button(text);assert.ok(node,'Missing button '+text);assert.equal(node.disabled,false);await act(async()=>node.click());await flush();}
-const props={token:'synthetic-judge',subject:'synthetic-subject',visible:true,onAuthorize:()=>{},onExit:()=>{},onOpen:async id=>opens.push(id)};
 try{
-  await act(async()=>root.render(React.createElement(ClaimIntake,props)));await flush();
-  await click('导入示例病例');
+  sessionStorage.setItem('zhongan_chat_token','synthetic-judge');
+  await act(async()=>root.render(React.createElement(App)));await flush();
+  assert.equal(document.querySelectorAll('.judge-sample-card').length,1);
+  assert.doesNotMatch(document.body.textContent,/没有病例资料|没有病历资料/);
+  await click('开始评委体验');
+  assert.equal(window.location.hash,'#/claim');
+  assert.equal(document.querySelector('dialog.member-dialog'),null,'Judge experience selects the test account automatically');
+  assert.equal(document.querySelector('.claim-react .judge-sample-card'),null,'No second import card in the claim form');
+  assert.equal(document.querySelector('[data-claim-field="diagnosis"]').value,sample.claim_info.diagnosis);
+  assert.equal(document.querySelector('[data-claim-field="total"]').value,sample.claim_info.total);
   assert.match(document.querySelector('[role="alert"]').textContent,/示例资料载入超时/);
   assert.equal(calls.filter(call=>call.method==='POST').length,0);
-  await click('导入示例病例');
+  await click('重新准备示例资料');
+  for(const key of ['diagnosis','start','end','total'])assert.equal(document.querySelector(`[data-claim-field="${key}"]`).value,sample.claim_info[key]);
+  const downloads=calls.filter(call=>call.path.startsWith('/judge/sample/files/')).length;
+  await act(async()=>{const input=document.querySelector('[data-claim-field="diagnosis"]');input.value='已核对的合成诊断';input.dispatchEvent(new dom.window.Event('input',{bubbles:true}));});
+  await act(async()=>document.querySelector('[data-claim-action="exit"]').click());await flush();await click('开始评委体验');
+  assert.equal(document.querySelector('[data-claim-field="diagnosis"]').value,'已核对的合成诊断','Re-entry keeps edits and pending sample files');
+  assert.equal(calls.filter(call=>call.path.startsWith('/judge/sample/files/')).length,downloads,'Re-entry does not download the same draft twice');
+  await click('下一步，上传材料');
   assert.equal(document.querySelectorAll('.claim-file-tile').length,4);
   const groups=document.querySelectorAll('.claim-material');
   assert.equal(groups[0].querySelectorAll('.claim-file-tile').length,3,'Discharge, diagnosis and outpatient files stay in the medical record category');
@@ -82,13 +95,18 @@ try{
   await click('查看相关报告');
   const analysis=calls.find(call=>call.path.endsWith('/analyses'));
   assert.equal(analysis.body.document_ids.length,4);assert.match(analysis.body.message,/不代表账号使用者本人病史/);
-  assert.equal(opens.length,1);
+  assert.equal(window.location.hash,'#/chat');
   await act(async()=>root.unmount());
   root=createRoot(document.getElementById('root'));
-  await act(async()=>root.render(React.createElement(ClaimIntake,{...props,token:'ordinary'})));await flush();
+  sessionStorage.setItem('zhongan_chat_token','ordinary');window.location.hash='/home';conversation=undefined;
+  await act(async()=>root.render(React.createElement(App)));await flush();
   assert.equal(document.querySelector('.judge-sample-card'),null,'Ordinary users do not receive the judge library');
-  console.log('PASS: sample selection has no writes, previews and confirmation, real multipart upload, retry preserves files/case, analysis starts only after report click, account library scope.');
+  await click('提交理赔材料');
+  await act(async()=>document.querySelector('dialog.member-dialog .member-list button').click());await flush();
+  assert.equal(document.querySelector('[data-claim-field="diagnosis"]').value,'','Ordinary claim entry stays blank');
+  assert.equal(document.querySelector('.claim-sample-status'),null);
+  console.log('PASS: one-click judge entry auto-fills claim and files, no duplicate import card/member picker, preparation retry, draft preservation, preview, confirmed multipart upload, upload retry, explicit report generation, ordinary account isolation.');
 }finally{
   await act(async()=>root.unmount());dom.window.close();URL.createObjectURL=oldCreate;URL.revokeObjectURL=oldRevoke;
-  assert.ok(out.startsWith(rootDir+path.sep));await rm(out,{recursive:true,force:true});
+  await modules.close();
 }
