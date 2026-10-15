@@ -113,6 +113,8 @@ def main():
         with patch('services.api.app.conversation_agent.AgentModel',return_value=model):
             next_response=client.post(base+'/messages',headers=headers,json={'request_id':str(uuid4()),'message':'我刚才关心什么？'})
         check(next_response.status_code==200 and any(m.get('content')=='我最关心费用' for m in model.messages), 'model receives preceding conversation')
+        check(not client.get('/v1/conversations',headers=headers).json()[0].get('has_interpretation_report'),
+              'ordinary completed chat does not have a report badge')
         check(len(TestClient(api.app).get(base,headers=headers).json()['turns'])==2,'history survives a new HTTP client')
 
         with tempfile.TemporaryDirectory(prefix='zhongan-chat-files-') as storage:
@@ -133,6 +135,8 @@ def main():
             with patch('services.api.app.conversation_agent.AgentModel',side_effect=AssertionError('Report entry queues directly')):
                 sent=client.post(base+'/analyses',headers=headers,json={'request_id':str(uuid4()),'message':'分析刚上传的票据','document_ids':[document_id]})
             check(sent.status_code==200,'explicit report entry invokes real analysis queue')
+            check(not client.get('/v1/conversations',headers=headers).json()[0].get('has_interpretation_report'),
+                  'queued report does not claim a completed interpretation')
             run_id=sent.json()['tool_events'][0]['run_id']
             with connection() as conn:
                 conn.autocommit=True
@@ -305,6 +309,9 @@ def main():
             with patch('services.api.app.conversation_agent.AgentModel',return_value=model):
                 completed=client.post(base+f'/analyses/{run_id}/continue',headers=headers)
             check(completed.status_code==200,'analysis completion continues with real evidence')
+            check(next(c for c in client.get('/v1/conversations',headers=headers).json()
+                       if c['conversation_id']==conversation_id).get('has_interpretation_report') is True,
+                  'completed narrative is marked as a report in history')
             check(completed.json()['answer']['analysis_run_id']==str(run_id) and
                   completed.json()['answer']['prompt_version']==ANALYSIS_PROMPT_VERSION,
                   'personal narrative is model-generated and bound to the exact analysis run')
@@ -496,6 +503,9 @@ def main():
 
         follow_id=str(uuid4())
         check(client.post('/v1/conversations',headers=headers,json={'conversation_id':follow_id,'case_id':case_id}).status_code==201,'new conversation can continue same case')
+        check(not next(c for c in client.get('/v1/conversations',headers=headers).json()
+                       if c['conversation_id']==follow_id).get('has_interpretation_report'),
+              'report badge belongs to its conversation rather than every chat for the same case')
         with connection() as conn:
             found=chats.search_history(conn,actor,follow_id,'费用')
             check(bool(found['messages']),'new conversation finds prior topic')
