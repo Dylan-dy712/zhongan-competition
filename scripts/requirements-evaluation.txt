@@ -1,0 +1,2 @@
+# Optional local orientation preparation; production OCR remains Tencent OCR.
+rapidocr-onnxruntime==1.4.4

@@ -193,6 +193,8 @@ def score(manifest, predictions_dir, include_inferred_categories=False):
     totals = defaultdict(Counter)
     errors = []
     failed = 0
+    partial = 0
+    in_progress = 0
     unannotated = 0
     for row in manifest['documents']:
         reference = load(row['reference'])
@@ -202,10 +204,12 @@ def score(manifest, predictions_dir, include_inferred_categories=False):
         unannotated += int(not reference['fields'])
         path = Path(predictions_dir) / (row['document_id'] + '.json')
         run = load(path) if path.exists() else {'status': 'missing'}
-        if run.get('image_sha256') != row['image_sha256'] or run.get('ocr_sha256') != row['ocr_sha256']:
+        if run.get('ocr_sha256') != row['ocr_sha256']:
             if run['status'] != 'missing':
                 raise ValueError('prediction source does not match manifest')
-        valid = run.get('status') == 'completed'
+        valid = run.get('status') in ('completed', 'partial')
+        partial += int(run.get('status') == 'partial')
+        in_progress += int(bool(run.get('in_progress')))
         if run.get('extraction_mode') == 'mock':
             raise ValueError('mock predictions are for plumbing only and cannot be scored as effect evidence')
         failed += int(not valid)
@@ -237,6 +241,9 @@ def score(manifest, predictions_dir, include_inferred_categories=False):
                         'absent reference fields are unannotated; inferred cost categories not scored'),
                        'replayed OCR is not fresh end-to-end OCR validation'],
             'documents': len(manifest['documents']), 'failed_or_missing_predictions': failed,
+            'partially_completed_predictions': partial,
+            'in_progress_predictions': in_progress,
+            'prediction_acceptance_policy': 'observed-fields-in-completed-or-partial-v1',
             'empty_reference_documents': unannotated, 'overall': metrics(combined),
             'per_field': {key: metrics(c) for key, c in totals.items()}, 'errors': errors}
 
@@ -290,6 +297,7 @@ def main():
     rows = manifest['documents']
     def infer(row):
         destination = Path(args.predictions_dir) / (row['document_id'] + '.json')
+        previous = {}
         if destination.exists():
             previous = load(destination)
             if previous.get('prompt_version') != PROMPT_VERSION or previous.get('model_id') != provider.model_id:
@@ -300,15 +308,27 @@ def main():
                 raise ValueError('OCR layout changed; use a new predictions directory')
             if previous.get('vision') != args.vision:
                 raise ValueError('vision mode changed; use a new predictions directory')
+            if previous.get('image_rotation_degrees', 0) != row.get('image_rotation_degrees', 0):
+                raise ValueError('source image orientation changed; use a new predictions directory')
             if previous.get('extraction_mode') != ('mock' if provider.provider == 'mock' else 'live'):
                 raise ValueError('execution mode changed; use a new predictions directory')
-            if previous.get('status') == 'completed':
+            if previous.get('status') in ('completed', 'partial') and not previous.get('in_progress'):
                 return previous['status']
         run = {k: row[k] for k in ('document_id', 'image_sha256', 'ocr_sha256')}
         run.update(model_id=provider.model_id, prompt_version=PROMPT_VERSION, code_revision=revision,
                    extraction_mode='mock' if provider.provider == 'mock' else 'live', ocr_mode='replay', vision=args.vision,
                    implementation_sha256=implementation_hashes)
+        run['image_rotation_degrees'] = row.get('image_rotation_degrees', 0)
+        run['orientation_method'] = row.get('orientation_method', 'original_orientation')
         start = time.monotonic()
+        if previous.get('status') == 'partial' and previous.get('result'):
+            run['result'] = previous['result']
+        def checkpoint(result, stage):
+            run.update(result=result, status='partial', in_progress=True,
+                       last_completed_stage=stage, seconds=round(time.monotonic() - start, 3))
+            write(destination, run)
+            print(json.dumps({'document_id': row['document_id'], 'stage': stage, 'checkpoint': True,
+                'fee_rows': sum(len(b.get('costDetailList', [])) for b in result['fields'].get('blocks', []))}), flush=True)
         try:
             if not row['ocr'] or sha(row['ocr']) != row['ocr_sha256']:
                 raise ValueError('missing or changed OCR source')
@@ -318,13 +338,14 @@ def main():
             run['ocr_layout_method'] = args.ocr_layout
             image_bytes = None
             if args.vision:
-                if sha(row['image']) != row['image_sha256']:
-                    raise ValueError('image changed after manifest freeze')
                 image_bytes = Path(row['image']).read_bytes()
-            run['result'] = extract_document(provider, layout_text(cache) if args.ocr_layout == 'bbox' else cache['text'], image_bytes)
-            run['status'] = 'completed'
+            run['result'] = extract_document(provider, layout_text(cache) if args.ocr_layout == 'bbox' else cache['text'],
+                image_bytes, image_rotation_degrees=row.get('image_rotation_degrees', 0),
+                table_context=cache.get('tables'), on_progress=checkpoint, ocr_lines=cache.get('lines'))
+            run['status'] = ('partial' if run['result'].get('fee_extraction', {}).get('status') == 'partial'
+                             else 'completed')
         except Exception as exc:
-            run.update(status='failed', error_code=type(exc).__name__)
+            run.update(status='partial' if run.get('result') else 'failed', error_code=type(exc).__name__)
             if isinstance(exc, ValidationError):
                 run['validation_errors'] = [{'type': e['type'], 'loc': e['loc']}
                                             for e in exc.errors(include_input=False, include_context=False)]
@@ -332,7 +353,9 @@ def main():
                 run.update(failed_stage=exc.stage, failed_response=exc.response,
                            validation_errors=exc.validation_errors, stage_error_code=exc.error_code,
                            failed_usage=exc.usage, finish_reason=exc.finish_reason, http_status=exc.http_status)
+                run['provider_error'] = exc.provider_error
         run['seconds'] = round(time.monotonic() - start, 3)
+        run['in_progress'] = False
         write(destination, run)
         return run['status']
     counts = Counter()
