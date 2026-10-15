@@ -597,7 +597,7 @@ export default function App() {
       <button className="new-chat" disabled={working} onClick={()=>requestBusiness('chat')}>＋ 新建对话</button>
       <div className="history-list"><p>以前的对话</p>{conversations.length===0 && <p>还没有历史对话</p>}{conversations.map(c=><button disabled={working} key={c.conversation_id}
         className={active.current===c.conversation_id?'selected':''} onClick={()=>void openConversation(c.conversation_id,token,'chat')}>
-        <strong title={c.title}>{c.title}</strong><small>{new Date(c.updated_at).toLocaleDateString('zh-CN')}</small></button>)}</div>
+        <strong title={c.title}>{c.title}</strong><span className="history-item-meta">{c.has_interpretation_report&&<span className="history-report-badge">解读报告</span>}<small>{new Date(c.updated_at).toLocaleDateString('zh-CN')}</small></span></button>)}</div>
       <button className="quiet-button" disabled={working} onClick={()=>void signOut()}>退出登录</button>
     </aside>;
 

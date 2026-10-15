@@ -135,6 +135,8 @@
 .chat-view .chat-sidebar .history-list>button{color:#365343;padding:14px 12px;border-radius:12px}
 .chat-view .chat-sidebar .history-list strong{font-size:13px;margin-bottom:5px}
 .chat-view .chat-sidebar .history-list>button.selected{background:#e0fcf0;box-shadow:inset 3px 0 #00ba8c}
+.history-item-meta{display:flex;align-items:center;flex-wrap:wrap;gap:6px 8px}
+.history-report-badge{display:inline-block;padding:2px 6px;border:1px solid #90cdb0;border-radius:4px;background:#e9f7ee;color:#21734c;font-size:10px;line-height:1.4;white-space:nowrap}
 .chat-view .chat-sidebar .new-chat{background:linear-gradient(110deg,#50dc83,#00bd95 40%,#00aa86);color:#fff;border:0;border-radius:12px;min-height:46px;font-size:13px;box-shadow:0 4px 10px #0085650d}
 .chat-view .chat-sidebar .history-close{background:#fff;color:#305942;border-color:#e0eae4}
 .chat-view .chat-sidebar .quiet-button{color:#75867a}

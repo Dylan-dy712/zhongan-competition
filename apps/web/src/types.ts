@@ -63,6 +63,7 @@ export interface Conversation {
   subject_id: string;
   conversation_id: string; case_id: string; title: string; recall_enabled: boolean;
   title_pending?:boolean;
+  has_interpretation_report?:boolean;
   report_context_enabled?:boolean; report_context_version?:number;
   created_at: string; updated_at: string;
 }

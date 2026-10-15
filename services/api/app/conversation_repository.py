@@ -34,10 +34,17 @@ def list_conversations(conn, actor_id, subject_id=None):
                               (actor_id,subject_id)).fetchone()
         if not access:
             raise AccessDenied()
-    return conn.execute("SELECT v.*,c.subject_id" + AUTHORIZED +
+    rows = conn.execute("""SELECT v.*,c.subject_id,EXISTS(
+                            SELECT 1 FROM conversation_turns t WHERE t.conversation_id=v.conversation_id
+                            AND t.input_kind='analysis_ready' AND t.status='completed'
+                            AND btrim(coalesce(t.answer->>'text',''))<>'') AS has_interpretation_report""" + AUTHORIZED +
                         " AND (%s::uuid IS NULL OR c.subject_id=%s) ORDER BY v.updated_at DESC,v.conversation_id" +
                         (" LIMIT 100" if subject_id is None else ""),
                         (actor_id,subject_id,subject_id)).fetchall()
+    for row in rows:
+        if not row['has_interpretation_report']:
+            row.pop('has_interpretation_report')
+    return rows
 
 
 def available_subjects(conn, actor_id):

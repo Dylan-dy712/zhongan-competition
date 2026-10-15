@@ -11,7 +11,7 @@ dom.window.HTMLDialogElement.prototype.showModal=function(){this.open=true;};dom
 const oldCreate=URL.createObjectURL,oldRevoke=URL.revokeObjectURL;let revoked=0;
 URL.createObjectURL=()=> 'blob:synthetic-image';URL.revokeObjectURL=()=>revoked++;
 const {createRoot}=await import('react-dom/client');
-let conversation={conversation_id:'attachment-ui',subject_id:'synthetic',case_id:'case-ui',title:'合成报告后的对话',title_pending:true,updated_at:'2026-10-15'};
+let conversation={conversation_id:'attachment-ui',subject_id:'synthetic',case_id:'case-ui',title:'合成报告后的对话',title_pending:true,has_interpretation_report:true,updated_at:'2026-10-15'};
 const originalTimeout=globalThis.setTimeout;
 globalThis.setTimeout=(fn,ms,...args)=>originalTimeout(fn,ms===5000?20:ms,...args);
 let titleLists=0;
@@ -24,7 +24,7 @@ globalThis.fetch=async(url,options={})=>{
  const path=new URL(url,'http://localhost').pathname;const body=typeof options.body==='string'?JSON.parse(options.body):options.body;
  calls.push({path,method:options.method||'GET',body});
  if(path==='/v1/conversations'){
-  if(options.method==='POST'){conversation={...conversation,conversation_id:body.conversation_id,subject_id:body.subject_id};turns=[];analysis={status:'not_started'};return Response.json(conversation);}
+  if(options.method==='POST'){conversation={...conversation,conversation_id:body.conversation_id,subject_id:body.subject_id,has_interpretation_report:false};turns=[];analysis={status:'not_started'};return Response.json(conversation);}
   if(++titleLists>1)conversation={...conversation,title:'票据内容与费用解读',title_pending:false};
   return Response.json([conversation]);
  }
@@ -51,6 +51,7 @@ try{
  await act(async()=>root.render(React.createElement(modules.App)));await flush();
  await flush();
  assert.match(document.querySelector('.history-list').textContent,/票据内容与费用解读/,'Background AI titles refresh in the sidebar');
+ assert.equal(document.querySelector('.history-report-badge')?.textContent,'解读报告','Saved report conversations show a separate report badge');
  assert.ok(button('新建解读报告'));assert.ok(button('新建对话'));
  const writes=()=>calls.filter(c=>c.method==='POST');
  await select(['合成图片.png']);await select(['额外图片.png','移除图片.png']);
@@ -83,6 +84,7 @@ try{
  await click('新建对话');
  await act(async()=>{const select=document.querySelector('.connect-form select');select.value='synthetic';select.dispatchEvent(new dom.window.Event('change',{bubbles:true}));});
  await click('开始新的对话');await select(['普通聊天图片.png']);
+ assert.equal(document.querySelector('.history-report-badge'),null,'Ordinary image chats have no report badge');
  assert.equal(writes().filter(c=>c.path.endsWith('/attachments')).length,2,'A new ordinary chat also keeps its selection local');
  await click('发送消息');assert.equal(calls.filter(c=>c.path.endsWith('/messages')).length,3);
  assert.equal(document.querySelector('dialog.report-upload-dialog'),null);
