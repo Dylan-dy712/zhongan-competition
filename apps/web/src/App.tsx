@@ -13,11 +13,11 @@ import {publishedCare,type CarePanel} from './carePresentation';
 import {readCarePanel,useCareNavigation} from './careNavigation';
 import {PageBoundary} from './PageBoundary';
 import AuthPage from './AuthPage';
-import ClaimIntake from './ClaimIntake';
+import ClaimIntake,{type JudgeSampleRequest} from './ClaimIntake';
 import AccountPage from './AccountPage';
 import {MemberEditor,MemberPicker,MemberConsentDialog} from './MemberControls';
 import PersonalRecords from './PersonalRecords';
-import type {MemberResponse} from './api';
+import type {MemberResponse,JudgeSample} from './api';
 import {revokeSession} from './api';
 import OriginalChatGuide,{OriginalChatWelcome} from './OriginalChatGuide';
 import {prepareChatFiles} from './chatFiles';
@@ -68,6 +68,8 @@ export default function App() {
   const [subject,setSubject] = useState('');
   const [claimSubject,setClaimSubject]=useState('');
   const [claimDirty,setClaimDirty]=useState(false);
+  const [judgeSampleRequest,setJudgeSampleRequest]=useState<(JudgeSampleRequest&{subjectId:string})>();
+  useEffect(()=>setJudgeSampleRequest(undefined),[token]);
   const [members,setMembers]=useState<MemberResponse[]>([]);
   const [viewSubject,setViewSubject]=useState('');
   const [recordCase,setRecordCase]=useState<string>();
@@ -321,12 +323,24 @@ export default function App() {
     if(destination==='claim'&&panel==='claim')return;
     if(personId){
       if(claimSubject&&claimSubject!==personId&&claimDirty&&!window.confirm('切换就医人员将清除尚未提交的表单和材料，是否继续？'))return;
-      if(claimSubject!==personId)setClaimDirty(false);setClaimSubject(personId);setPanel('claim');
+      if(claimSubject!==personId){setClaimDirty(false);setJudgeSampleRequest(undefined);}setClaimSubject(personId);setPanel('claim');
     }
     else setMemberPicker(destination);
   };
   const chooseBusinessMember=(id:string)=>{
     const destination=memberPicker;setMemberPicker(undefined);if(destination)requestBusiness(destination,id);
+  };
+  const startJudgeExperience=(sample:JudgeSample)=>{
+    if(busyRef.current||uploadingRef.current||analysisSubmitting)return;
+    if(!selfMember)throw new Error('请先完善本人资料，再开始评委体验。');
+    const sameDraft=claimDirty&&claimSubject===selfMember.subject_id&&judgeSampleRequest?.subjectId===claimSubject
+      &&judgeSampleRequest.sample.sample_id===sample.sample_id&&judgeSampleRequest.sample.version===sample.version;
+    if(!sameDraft){
+      if(claimDirty&&!window.confirm('用示例体验替换当前尚未提交的表单和材料？'))return;
+      setJudgeSampleRequest({id:requestId(),subjectId:selfMember.subject_id,sample});
+      setClaimDirty(false);
+    }
+    setClaimSubject(selfMember.subject_id);setMemberPicker(undefined);setPanel('claim');
   };
   const refreshAccess=async(changedSubject:string)=>{
     const generation=++memberEpoch.current;
@@ -524,7 +538,7 @@ export default function App() {
         {delivery.receipt_state==='read' ? <span>已查看</span> : <button onClick={()=>openReport()}>查看指引</button>}</div>}
       {(error || pollError) && <div role="alert" className="chat-error persistent-error">{error || pollError}<button aria-label="关闭提示" onClick={()=>{setError('');setPollError('');}}>×</button></div>}
       <PageBoundary resetKey={`${panel}:${snapshot?.conversation.conversation_id || ''}`}>
-      {connected && !needsProfile && claimSubject && <div className="claim-panel" hidden={panel!=='claim'}><ClaimIntake key={`${token}:${claimSubject}`} token={token} onDirty={setClaimDirty} subject={subjects.some(item=>item.subject_id===claimSubject)?claimSubject:''} visible={panel==='claim'} onExit={()=>setPanel('home')} onAuthorize={()=>setConsentMember(claimSubject)} onOpen={async (id,report=false)=>{
+      {connected && !needsProfile && claimSubject && <div className="claim-panel" hidden={panel!=='claim'}><ClaimIntake key={`${token}:${claimSubject}`} token={token} sampleRequest={judgeSampleRequest?.subjectId===claimSubject?judgeSampleRequest:undefined} onDirty={setClaimDirty} subject={subjects.some(item=>item.subject_id===claimSubject)?claimSubject:''} visible={panel==='claim'} onExit={()=>setPanel('home')} onAuthorize={()=>setConsentMember(claimSubject)} onOpen={async (id,report=false)=>{
           const generation=epoch.current;const items=await listConversations(token);
           if(epoch.current!==generation)return;setConversations(items);await openConversation(id,token,'chat',true);if(report)openReport();}}/></div>}
       {!connected ? token ? <main className="start-screen" role="status"><h1>{busy?'正在连接服务…':'服务暂时不可用'}</h1><p>登录状态已保留，恢复连接后可继续。</p><button className="care-primary" disabled={busy} onClick={()=>void connect(token)}>{busy?'正在连接…':'重新连接'}</button></main> : <AuthPage onAuthenticated={auth=>connect(auth,true)}/>
@@ -540,7 +554,7 @@ export default function App() {
       : panel==='demo' ? <DemoShowcase token={token} busy={working} canRun={subjects.some(s=>s.subject_id===viewMember?.subject_id)} onRun={file=>void runDemo(file)} onBack={()=>setPanel('home')}/>
       : panel==='home' ? <DemoHome token={token} member={viewMember} onOpen={(id,destination,section)=>{
           void openConversation(id,token,destination).then(()=>{if(active.current===id)setReportFocus(section);});
-        }} onClaim={()=>requestBusiness('claim')}/>
+        }} onClaim={()=>requestBusiness('claim')} onJudgeExperience={startJudgeExperience} disabled={working}/>
       : !snapshot ? <main className="original-chat-start"><OriginalChatWelcome/><div className="nuan-message"><span className="nuan-avatar" aria-hidden="true">✦</span><div className="nuan-message-body"><p>你好，我是暖暖。你现在有什么想说的，我愿意听。想聊聊身体上的不舒服、心里的牵挂，或一起看看材料，都可以按你的节奏来。</p></div></div>
         <button className="claim-entry-link" onClick={()=>requestBusiness('claim')}>整理理赔资料，开启专属关怀</button>
         <div className="connect-form member-start-card"><label>咨询对象<select value={subject} onChange={e=>setSubject(e.target.value)}><option value="">请选择人员</option>

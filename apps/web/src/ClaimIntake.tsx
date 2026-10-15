@@ -1,9 +1,9 @@
 import {useEffect,useLayoutEffect,useRef,useState} from 'react';
-import {createConversation,startChatAnalysis,uploadChatDocument,createJudgeSampleUploadCase,type JudgeSample} from './api';
-import JudgeSampleEntry from './JudgeSampleEntry';
+import {createConversation,startChatAnalysis,uploadChatDocument,createJudgeSampleUploadCase,chooseJudgeSampleFiles,type JudgeSample} from './api';
 import AnalysisFlow,{type UploadProgress} from './AnalysisFlow';
 import {claimTemplate,initialClaimForm,validateClaimInfo,type ClaimFile,type ClaimForm} from './claimTemplate';
 import './claim-original.css';
+import './judge-sample.css';
 import {syncClaimMarkup} from './claimDom';
 import PhotoReview from './PhotoReview';
 
@@ -13,7 +13,9 @@ function uuid() {
   return `${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20)}`;
 }
 
-export default function ClaimIntake({token,subject,visible,onOpen,onAuthorize,onExit,onDirty}:{onDirty?:(dirty:boolean)=>void;token:string;subject:string;visible:boolean;onAuthorize:()=>void;onExit:()=>void;onOpen:(id:string,report?:boolean)=>Promise<void>}) {
+export type JudgeSampleRequest={id:string;sample:JudgeSample};
+
+export default function ClaimIntake({token,subject,visible,onOpen,onAuthorize,onExit,onDirty,sampleRequest}:{sampleRequest?:JudgeSampleRequest;onDirty?:(dirty:boolean)=>void;token:string;subject:string;visible:boolean;onAuthorize:()=>void;onExit:()=>void;onOpen:(id:string,report?:boolean)=>Promise<void>}) {
   const [step,setStep]=useState(0);
   const form=useRef<ClaimForm>(initialClaimForm());
   const [files,setFiles]=useState<ClaimFile[]>([]);
@@ -25,6 +27,8 @@ export default function ClaimIntake({token,subject,visible,onOpen,onAuthorize,on
   const [previewFile,setPreviewFile]=useState<ClaimFile|null>(null);
   const [previewPdf,setPreviewPdf]=useState('');
   const [judgeSample,setJudgeSample]=useState<JudgeSample|null>(null);
+  const [sampleLoading,setSampleLoading]=useState(false),[sampleProgress,setSampleProgress]=useState(0);
+  const [sampleError,setSampleError]=useState(''),[sampleRetry,setSampleRetry]=useState(0);
   useEffect(()=>{if(!previewFile||previewFile.url){setPreviewPdf('');return;}
     const url=URL.createObjectURL(previewFile.file);setPreviewPdf(url);
     return()=>URL.revokeObjectURL(url);
@@ -73,6 +77,22 @@ export default function ClaimIntake({token,subject,visible,onOpen,onAuthorize,on
     finally{running.current=false;if(mounted.current){setBusy(false);setSubmission(false);}}
   };
   useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;};},[]);
+  useEffect(()=>{
+    if(!sampleRequest)return;
+    if(running.current){setSampleError('材料正在提交，请完成后再从首页开始体验。');return;}
+    let active=true;const sample=sampleRequest.sample;
+    fileRef.current.forEach(entry=>{if(entry.url)URL.revokeObjectURL(entry.url);});
+    form.current={...initialClaimForm(),...sample.claim_info};pending.current=null;
+    setJudgeSample(sample);setFiles([]);setStep(0);setConfirmed(false);setFinished(false);setLocked(false);
+    setError('');setSampleError('');setSampleProgress(0);setSampleLoading(true);
+    setPreviewFile(null);preview.current?.close();source.current?.close();setReviewPhotos(false);
+    setProgressOpen(false);setProgress(undefined);
+    chooseJudgeSampleFiles(token,sample,completed=>{if(active)setSampleProgress(completed);}).then(selected=>{
+      if(active)setFiles(selected.map(entry=>({id:uuid(),name:entry.file.name,size:entry.file.size,category:entry.category,sample:true,url:null,file:entry.file})));
+    }).catch(e=>{if(active)setSampleError(e instanceof Error?e.message:'示例资料准备中断，请重试。');})
+      .finally(()=>{if(active)setSampleLoading(false);});
+    return()=>{active=false;};
+  },[token,sampleRequest,sampleRetry]);
   const submit=async(checkedFiles?:ClaimFile[])=>{
     if(running.current || !confirmed || !subject)return;
     const invalid=validateClaimInfo(form.current);if(invalid){setError(invalid);setStep(0);return;}
@@ -105,8 +125,8 @@ export default function ClaimIntake({token,subject,visible,onOpen,onAuthorize,on
     finally{running.current=false;if(mounted.current){setBusy(false);setProgress(undefined);setSubmission(false);}}
   };
   const template=claimTemplate(form.current,files,step,finished);
-  useEffect(()=>{onDirty?.(!finished&&!!(files.length||step>0||locked));},[files.length,step,locked,finished,onDirty]);
-  const html=locked&&!finished?template.html.replace(/<(input|select) /g,'<$1 disabled '):template.html;
+  useEffect(()=>{onDirty?.(!finished&&!!(judgeSample||files.length||step>0||locked));},[judgeSample,files.length,step,locked,finished,onDirty]);
+  const html=(locked&&!finished)||sampleLoading?template.html.replace(/<(input|select) /g,'<$1 disabled '):template.html;
   useLayoutEffect(()=>{if(shell.current)syncClaimMarkup(shell.current,html);},[html]);
   useLayoutEffect(()=>{shell.current?.querySelector('.claim-main')?.scrollTo?.(0,0);},[step]);
   const next=()=>{
@@ -115,15 +135,8 @@ export default function ClaimIntake({token,subject,visible,onOpen,onAuthorize,on
     setError('');setStep(step+1);shell.current?.querySelector('.claim-main')?.scrollTo?.(0,0);
   };
   return <main className="claim-react">
-    {!finished&&step<2&&(!judgeSample||!files.length)&&<JudgeSampleEntry token={token} prepareFiles disabled={locked||busy} onChoose={(sample,selected)=>{
-      if(locked||running.current)return;
-      if(files.length&&!window.confirm('用示例资料替换当前尚未提交的材料？'))return;
-      files.forEach(entry=>{if(entry.url)URL.revokeObjectURL(entry.url);});
-      form.current={...initialClaimForm(),...sample.claim_info};
-      setFiles(selected.map(entry=>({id:uuid(),name:entry.file.name,size:entry.file.size,category:entry.category,sample:true,url:null,file:entry.file})));
-      setJudgeSample(sample);setStep(1);setConfirmed(false);setError('');onDirty?.(true);
-    }}/>}
-    {judgeSample&&!finished&&<p className="claim-sample-status" role="status">示例资料已加入待上传列表，尚未提交。请预览材料，核对后确认上传。</p>}
+    {judgeSample&&!finished&&<p className="claim-sample-status" role="status">{sampleLoading?`申请信息已填好，正在准备示例材料（${sampleProgress}/${judgeSample.file_count}）…`:sampleError?'申请信息已填好，示例材料尚未准备完成。':'申请信息与示例材料已自动填好，尚未提交。核对后即可确认上传。'}</p>}
+    {sampleError&&<p className="claim-error" role="alert">{sampleError} <button className="claim-text" disabled={sampleLoading||busy||locked} onClick={()=>setSampleRetry(value=>value+1)}>重新准备示例资料</button></p>}
     {reviewPhotos&&<PhotoReview token={token} subjectId={subject} files={files.map(f=>f.file)} onCancel={()=>setReviewPhotos(false)} onContinue={checked=>{
       const updated=files.map((entry,index)=>entry.file===checked[index]?entry:{...entry,file:checked[index],name:checked[index].name,size:checked[index].size,url:URL.createObjectURL(checked[index])});
       files.forEach((entry,index)=>{if(entry!==updated[index]&&entry.url)URL.revokeObjectURL(entry.url);});
@@ -141,7 +154,7 @@ export default function ClaimIntake({token,subject,visible,onOpen,onAuthorize,on
       const button=(e.target as HTMLElement).closest<HTMLButtonElement>('button');if(!button||button.disabled)return;
       const action=button.dataset.claimAction;
       if(action==='exit'){onExit();return;}
-      if(locked && !finished)return;
+      if((locked && !finished)||sampleLoading)return;
       if(action==='example'){form.current={...initialClaimForm(),diagnosis:'肺炎（虚构示例）',start:'2026-09-20',end:'2026-09-25',total:'1200.00',social:'是'};redraw(n=>n+1);setError('');}
       else if(action?.startsWith('step-')){setStep(Number(action.slice(5)));setError('');setConfirmed(false);}
       else if(action?.startsWith('pick-')){category.current=action.slice(5);setSourceCategory(template.groups.find(g=>g.id===category.current)?.title||'理赔材料');source.current?.showModal();}
@@ -154,7 +167,7 @@ export default function ClaimIntake({token,subject,visible,onOpen,onAuthorize,on
       {!finished && step===2 && <label className="claim-consent"><input type="checkbox" checked={confirmed} disabled={locked} onChange={e=>setConfirmed(e.target.checked)}/><span>我已核对信息，同意将{judgeSample?'脱敏示例资料':'合成材料'}上传并用于关怀分析<small>不会向保险公司提交理赔申请。</small></span></label>}
       {!subject && !finished && <button className="claim-text" onClick={onAuthorize}>确认资料用途授权</button>}
       {step>0 && !finished && <button className="claim-finish" disabled={locked||busy} onClick={()=>{setStep(step-1);setError('');}}>返回修改</button>}
-      <button className="claim-primary" disabled={busy||(!finished&&step===2&&(!confirmed||!subject))} onClick={()=>{if(finished)void viewReport();else if(step<2)next();else void submit();}}>{busy?(finished?'正在开始分析…':'正在上传材料…'):finished?'查看相关报告':step===0?'下一步，上传材料':step===1?'下一步，核对申请':locked?'重试提交':'确认提交材料'}</button>
+      <button className="claim-primary" disabled={busy||(!finished&&(sampleLoading||!!sampleError||step===2&&(!confirmed||!subject)))} onClick={()=>{if(finished)void viewReport();else if(step<2)next();else void submit();}}>{busy?(finished?'正在开始分析…':'正在上传材料…'):finished?'查看相关报告':step===0?'下一步，上传材料':step===1?'下一步，核对申请':locked?'重试提交':'确认提交材料'}</button>
     </footer>
     <input ref={picker} hidden aria-label="添加就医材料" type="file" multiple accept=".pdf,.jpg,.jpeg,.png" onChange={e=>{
       const added=Array.from(e.target.files||[]).map(file=>file.type?file:new File([file],file.name,{type:/\.pdf$/i.test(file.name)?'application/pdf':/\.png$/i.test(file.name)?'image/png':'image/jpeg',lastModified:file.lastModified}));e.target.value='';
