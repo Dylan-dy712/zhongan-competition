@@ -214,8 +214,10 @@ class PatientProfileDatabaseTests(unittest.TestCase):
             statement = '医生只说再联系，我还没确定复查时间。'
             request = {'request_id': str(uuid4()), 'message': statement}
             model = MagicMock()
-            model.complete.return_value = response(suggested_questions=SUGGESTIONS,
-                patient_updates=[{'field': 'followup_time', 'statement': statement}])
+            model.complete.return_value = {'content': json.dumps({'paragraphs':[
+                {'text':'咱们一起把后续安排记清楚。','source_refs':[]}],
+                'suggested_questions':SUGGESTIONS,
+                'patient_updates':[{'field':'followup_time','statement':statement}]})}
             with patch('services.api.app.conversation_agent.AgentModel', return_value=model):
                 first = client.post(base + '/messages', headers=headers, json=request)
             self.assertEqual(first.status_code, 200)
