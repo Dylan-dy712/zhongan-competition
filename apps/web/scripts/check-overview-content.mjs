@@ -56,14 +56,17 @@ try{
  assert.match(document.querySelector('.overview-ai-content').textContent,/复诊时间未提供/,'Care guidance in the body is preserved when its heading does not contain care keywords');
  sessionStorage.setItem('zhongan_chat_token','synthetic');
  await act(async()=>root.render(React.createElement(modules.App)));await flush();
- assert.equal(document.querySelectorAll('.chat-analysis-nav button').length,4,'All four sections are reachable above the long report');
- await click('康复指引');assert.equal(window.location.hash,'#/overview');
- assert.match(document.querySelector('.overview-ai-content').textContent,/复诊时间未提供/,'Direct entry opens the selected section');
+ assert.equal(document.querySelector('.chat-analysis-nav'),null,'Chat does not show the removed analysis card');
+ assert.doesNotMatch(document.body.textContent,/本次分析|摘要、提醒与后续安排/);
+ assert.match(document.querySelector('.analysis-narrative').textContent,/疑似肺炎/,'The generated report remains visible in chat');
+ await act(async()=>{window.location.hash='/overview';});await flush();
+ await click('康复指引');
+ assert.match(document.querySelector('.overview-ai-content').textContent,/复诊时间未提供/,'The overview route still displays saved report content');
  await click('‹ 返回暖暖解读');assert.equal(window.location.hash,'#/chat');
  const home=[...document.querySelectorAll('.care-navigation button')].find(n=>n.textContent.trim()==='首页');await act(async()=>home.click());await flush();
  assert.equal(document.querySelector('.home-analysis-entry'),null,'Home does not show the removed medical overview section');
  assert.ok(document.querySelector('.home-reminders'),'Home retains follow-up and medication reminders');
  assert.equal(requests.filter(r=>r.method==='POST').length,0);
- console.log('PASS: chat analysis entries, simplified home with reminders, real saved narrative in four sections, preserved qualifiers/citations, independent data recovery, selected tabs and no generation calls. Synthetic fixtures only.');
+ console.log('PASS: chat analysis card removed, generated report preserved, simplified home with reminders, real saved narrative in four sections, preserved qualifiers/citations, independent data recovery, selected tabs and no generation calls. Synthetic fixtures only.');
 }finally{await act(async()=>root.unmount());await modules.close();dom.window.close();}
 
