@@ -26,20 +26,20 @@ export function analysisView(snapshot:ChatSnapshot|null,upload?:UploadProgress,s
   if(error)return {kind:'failed',title:'这次分析没有完成',detail:error,percent:null,index:-1};
   if(upload)return {kind:'upload',title:'正在上传材料',detail:`已上传 ${upload.done} / ${upload.total} 份`,percent:Math.floor(upload.done/upload.total*100),index:-1};
   // A new submission must not inherit the previous run's completed/failed stage.
-  if(submitting)return {kind:'processing',title:'正在提交分析任务',detail:'材料已收到，准备开始分析',percent:null,index:-1};
+  if(submitting)return {kind:'processing',title:'正在提交分析任务',detail:'材料已收到，准备开始分析',percent:0,index:-1};
   const material=snapshot?.material_report;
-  if(material?.status==='available')return {kind:'processing',title:'暖暖正在把情况讲清楚',detail:'正在写好解读并核对内容，准备好后会直接显示在对话里',percent:null,index:4};
+  if(material?.status==='available')return {kind:'processing',title:'暖暖正在把情况讲清楚',detail:'正在写好解读并核对内容，准备好后会直接显示在对话里',percent:Math.round((steps.length-1)/steps.length*100),index:4};
   if((snapshot?.analysis.error as {code?:string}|undefined)?.code==='REPORT_MODEL_BALANCE_EXHAUSTED')return {kind:'failed',title:'分析服务暂不可用',detail:'材料已保存，无需重新上传。服务恢复后可以重新分析。',percent:null,index:-1};
   if(material?.status==='failed' || snapshot?.analysis.status==='failed')return {kind:'failed',title:'报告生成没有完成',detail:'材料已保存，可以重新分析。',percent:null,index:-1};
   if(snapshot?.analysis.status==='cancelled')return {kind:'failed',title:'这次分析已取消',detail:'材料已保存，可以重新分析。',percent:null,index:-1};
   const status=snapshot?.analysis.status;
-  if(!status || status==='not_started')return {kind:'processing',title:'正在提交分析任务',detail:'材料已收到，准备开始分析',percent:null,index:-1};
+  if(!status || status==='not_started')return {kind:'processing',title:'正在提交分析任务',detail:'材料已收到，准备开始分析',percent:0,index:-1};
   if(material?.status==='outdated')return {kind:'failed',title:'材料或授权已更新',detail:'请重新分析，生成与当前材料对应的报告。',percent:null,index:-1};
-  if(status==='queued')return {kind:'processing',title:'材料已排队',detail:'等待分析服务开始处理',percent:null,index:-1};
+  if(status==='queued')return {kind:'processing',title:'材料已排队',detail:'等待分析服务开始处理',percent:0,index:-1};
   const index=analysisStageIndex(snapshot?.analysis.stage);
   const step=index>=0?steps.at(index):undefined;
   return {kind:'processing',title:step?`暖暖正在${step[1]}`:'暖暖正在处理材料',
-    detail:index===1?'正在提取材料信息，同时核对需要关注的内容':index>=0?'正在结合材料逐项处理，请稍候':'正在同步当前处理步骤，请稍候',percent:null,index};
+    detail:index===1?'正在提取材料信息，同时核对需要关注的内容':index>=0?'正在结合材料逐项处理，请稍候':'正在同步当前处理步骤，请稍候',percent:index>=0?Math.round(index/steps.length*100):null,index};
 }
 
 export function MaterialReportContent({report,onEvidence,onAsk}:{report:MaterialReport;onEvidence:(id:string)=>void;onAsk:(question:string)=>void}) {
@@ -77,8 +77,8 @@ export default function AnalysisFlow({open,snapshot,upload,submitting,error,onCl
     tick();const timer=setInterval(tick,1000);return()=>clearInterval(timer);
   },[open,processing,stageKey,view.index]);
   const completedSteps=Math.max(0,view.index);
-  const progressMax=processing?steps.length:100;
-  const progressValue=processing?(view.index>=0?completedSteps:undefined):view.percent??undefined;
+  const progressMax=100;
+  const progressValue=view.percent??undefined;
   const waitingLong=processing && waiting.key===stageKey && waiting.elapsed>60;
   useEffect(()=>{
     const node=dialog.current;if(!node || !open)return;
@@ -96,13 +96,14 @@ export default function AnalysisFlow({open,snapshot,upload,submitting,error,onCl
       </div>
     </header>
     {(processing || view.percent!==null) && <section className="analysis-status-card" aria-label="材料分析进度与阶段">
-      <div className="analysis-percent"><strong>{processing?completedSteps:view.percent}<small>{processing?`/ ${steps.length} 步`:'%'}</small></strong><span>{view.kind==='upload'?'上传进度':processing?'已完成步骤':'分析完成'}</span></div>
+      <div className="analysis-percent">{view.percent!==null?<strong>{view.percent}<small>%</small></strong>:<strong className="analysis-syncing">同步中</strong>}<span>{view.kind==='upload'?'上传进度':processing?'整体进度':'分析完成'}</span></div>
+      {processing&&<p className="analysis-step-summary">已完成 {completedSteps} / {steps.length} 步{view.index>=0?` · 当前第 ${view.index+1} 步`:''}</p>}
       <div className={`analysis-progress-track ${processing || view.kind==='upload'?'active':''} ${progressValue===undefined?'indeterminate':''}`}>
-        <progress max={progressMax} value={progressValue} aria-label={view.kind==='upload'?'材料上传进度':processing?'材料分析已完成步骤':'材料分析进度'} aria-valuetext={processing?`已完成 ${completedSteps} / ${steps.length} 步，${view.index>=0?`当前正在${steps[view.index][1]}`:'等待处理状态'}`:undefined}/>
+        <progress max={progressMax} value={progressValue} aria-label={view.kind==='upload'?'材料上传进度':'材料分析进度'} aria-valuetext={processing?`${view.percent!==null?`进度 ${view.percent}%，`:''}已完成 ${completedSteps} / ${steps.length} 步，${view.index>=0?`当前正在${steps[view.index][1]}`:'等待处理状态'}`:undefined}/>
         <span className="analysis-progress-fill" style={progressValue===undefined?undefined:{width:`${progressValue/progressMax*100}%`}} aria-hidden="true"/>
       </div>
       {processing && <div className="analysis-live-panel"><div className="analysis-live-note"><span aria-hidden="true"/>{waitingLong?'这一步耗时较长，可以收起窗口稍后查看':'完成当前步骤后会自动继续'}</div>
-        <p className="analysis-progress-note">按实际处理步骤更新，各步骤耗时不同</p></div>}
+        <p className="analysis-progress-note">百分比按实际完成步骤计算，各步骤耗时不同</p></div>}
       {view.kind!=='upload' && <ol className="analysis-steps">{steps.map(([key,title],i)=>{
         const status=i<view.index?'done':i===view.index?'current':'pending';
         return <li key={key} className={status} aria-current={status==='current'?'step':undefined}>
