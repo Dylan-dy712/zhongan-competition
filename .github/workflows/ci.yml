@@ -68,6 +68,7 @@ jobs:
       - run: node apps/web/scripts/check-judge-upload.mjs
       - run: npm run test:availability --prefix apps/web
       - run: npm run test:reminders --prefix apps/web
+      - run: npm run test:followups --prefix apps/web
       - run: npm run test:medical-records --prefix apps/web
       - run: node apps/web/scripts/check-analysis-flow.mjs
       - run: node apps/web/scripts/check-chat-attachments.mjs

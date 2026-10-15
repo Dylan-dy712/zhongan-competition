@@ -1,0 +1,22 @@
+.chat-original .chat-followups{margin-top:20px;padding-top:18px;border-top:1px solid #e3eee8;color:#294b3b;min-width:0}
+.chat-original .chat-followups h3{font-size:13px;line-height:1.6;font-weight:600;margin:0 0 10px;color:#426253}
+.clarification-section{padding:14px 16px;background:#f0faf5;border:1px solid #d8eee2;border-radius:14px}
+.chat-original .clarification-question p{font-size:14px;line-height:1.7;margin:0 0 10px;color:#244e3c;overflow-wrap:anywhere}
+.clarification-question+.clarification-question{margin-top:15px;padding-top:14px;border-top:1px solid #d8eee2}
+.clarification-choices{display:flex;flex-wrap:wrap;gap:7px}
+.chat-original .clarification-choices button{padding:7px 12px;border:1px solid #cbe6d7;border-radius:18px;background:#fff;color:#286647;font-size:12px;line-height:1.5;min-height:34px;white-space:normal;overflow-wrap:anywhere}
+.chat-original .clarification-section>small{display:block;margin-top:11px;font-size:11px;line-height:1.6;color:#70867a}
+.clarification-form{display:grid;gap:8px;margin-top:12px}
+.clarification-form label{display:grid;gap:5px;font-size:12px;color:#486454}
+.clarification-form textarea{box-sizing:border-box;width:100%;min-width:0;resize:vertical;padding:10px;border:1px solid #cbe2d4;border-radius:9px;background:#fff;color:#244e3c;font:inherit;line-height:1.7}
+.chat-original .clarification-form button{justify-self:end;padding:7px 13px;border:0;border-radius:9px;background:#218254;color:#fff;font-size:12px;min-height:34px}
+.chat-original .suggested-section:not(:first-child){margin-top:17px}
+.suggested-questions{display:grid;gap:7px}
+.chat-original .suggested-questions button{display:flex;justify-content:space-between;align-items:center;gap:12px;text-align:left;padding:10px 13px;border:1px solid #e0e9e3;border-radius:11px;background:#fff;color:#466452;font-size:13px;line-height:1.65;min-height:40px;width:100%;white-space:normal}
+.suggested-questions button span:first-child{min-width:0;overflow-wrap:anywhere}
+.suggested-questions button span:last-child{color:#6d9e82;flex:none}
+.chat-original .chat-followups button:hover:not(:disabled){background:#e7f5ed;border-color:#a6cfb8}
+.chat-followups :is(button,textarea):focus-visible{outline:2px solid #348d60;outline-offset:3px}
+.chat-followups button:disabled{opacity:.5;cursor:default}
+.chat-original .patient-update-notice{display:block;margin-top:14px;color:#668573;font-size:11px;line-height:1.6}
+@media(max-width:480px){.clarification-section{padding:12px}.chat-original .suggested-questions button{font-size:12px}.chat-original .chat-followups{margin-top:16px;padding-top:14px}}

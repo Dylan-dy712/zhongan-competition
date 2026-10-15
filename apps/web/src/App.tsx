@@ -6,6 +6,7 @@ import {startChatAnalysis} from './api';
 import {replaceChatDocument} from './api';
 import AnalysisFlow,{analysisView,type UploadProgress} from './AnalysisFlow';
 import AnalysisNarrative,{currentNarrative} from './AnalysisNarrative';
+import ChatFollowups from './ChatFollowups';
 import type {ChatSnapshot, ChatSubject, ChatTurn, Conversation, Evidence, ToolEvent, DeliveryNotice, FeedbackType,ReportSection} from './types';
 import {CareReport,EvidencePanel,brand} from './CarePages';
 import {DemoHome,DemoIcon} from './DemoPages';
@@ -442,24 +443,27 @@ export default function App() {
     return()=>{stopped=true;clearTimeout(timer);};
   },[connected,panel,titlesPending,token,snapshot?.conversation.conversation_id]);
 
-  const send = async (retry?:ChatTurn) => {
+  const send = async (retry?:ChatTurn,quickMessage?:string):Promise<boolean> => {
     const id=active.current, generation=epoch.current;
-    if(!id || busyRef.current || busy || uploading) return;
+    if(!id || busyRef.current || busy || uploading || loadingConversation || snapshot?.turns.some(t=>t.status==='running')) return false;
+    const quick=quickMessage!==undefined;
     const localRetry=retry?.turn_id.startsWith('local:');
-    const selected=retry ? sentMessages.find(item=>item.turn.request_id===retry.request_id)?.files || [] : [...draftFiles];
-    const text=retry?.question || input.trim() || (selected.length ? '请看看这些附件，帮我解释一下。' : '');
-    if(!text)return;
+    const selected=retry ? sentMessages.find(item=>item.turn.request_id===retry.request_id)?.files || [] : quick ? [] : [...draftFiles];
+    const text=quick ? quickMessage.trim() : retry?.question || input.trim() || (selected.length ? '请看看这些附件，帮我解释一下。' : '');
+    if(!text)return false;
     const docs=retry ? retry.attachments.filter(x=>x.kind!=='chat_attachment').map(x=>x.document_id) : [];
     const attachmentIds=retry ? retry.attachments.filter(x=>x.kind==='chat_attachment').map(x=>x.document_id) : [];
-    const draftKey=retry?retry.turn_id:selected.map(file=>file.id).join(':');
-    const req=retry?.request_id || requestId();
+    const draftKey=quick?'quick':retry?retry.turn_id:selected.map(file=>file.id).join(':');
+    const previous=pendingSend.current;
+    const req=retry?.request_id || (quick&&previous?.draftKey==='quick'&&previous.text===text?previous.id:requestId());
     pendingSend.current={id:req,text,docs,draftKey};busyRef.current=true;setBusy(true);setError('');
     // Capture the submission before any upload/model await. The composer is only a draft.
-    if(!retry){
+    if(!retry && !(quick&&sentMessages.some(item=>item.turn.request_id===req))){
       const turn:ChatTurn={turn_id:`local:${req}`,request_id:req,question:text,input_kind:'user',attachments:[],status:'running',answer:null,tool_events:[],created_at:new Date().toISOString(),error_code:null};
       setSentMessages(items=>[...items.slice(-19),{turn,files:selected}]);
-      setInput('');setDraftFiles([]);
+      if(!quick){setInput('');setDraftFiles([]);}
     }else setSentMessages(items=>items.map(item=>item.turn.request_id===req?{...item,turn:{...item.turn,status:'running'}}:item));
+    let sent=false;
     try {
       if(retry?.input_kind==='analysis_ready' && snapshot?.analysis.run_id) {
         await continueAnalysis(token,id,snapshot.analysis.run_id);
@@ -469,7 +473,7 @@ export default function App() {
           for(const item of selected){
             let attachmentId=uploadedDrafts.current.get(item.id);
             if(!attachmentId){const uploaded=await uploadChatAttachment(token,id,item.file);
-              if(epoch.current!==generation)return;
+              if(epoch.current!==generation)return false;
               attachmentId=uploaded.attachment_id;uploadedDrafts.current.set(item.id,attachmentId);}
             attachmentIds.push(attachmentId);
           }
@@ -477,6 +481,7 @@ export default function App() {
         }
         await sendChatMessage(token,id,req,text,docs,attachmentIds);
       }
+      sent=true;
       if(epoch.current===generation)pendingSend.current=null;
     } catch(e){if(!invalidateAccess(e,id,generation) && epoch.current===generation){
       setSentMessages(items=>items.map(item=>item.turn.request_id===req?{...item,turn:{...item.turn,status:'failed'}}:item));
@@ -487,6 +492,7 @@ export default function App() {
       catch(e){if(epoch.current===generation)setError(errorText(e));}
       if(epoch.current===generation){busyRef.current=false;uploadingRef.current=false;setUploading(false);setBusy(false);}
     }
+    return sent;
   };
 
   const startMaterialAnalysis=async(docs=attachments.map(a=>a.document_id),message=input.trim() || '请分析本次上传材料，整理就医经过、费用与待补充信息。',forceNew=false)=>{
@@ -575,6 +581,7 @@ export default function App() {
   };
   const savedTurns=[...older,...(snapshot?.turns || [])].filter((t,i,all)=>all.findIndex(x=>x.turn_id===t.turn_id)===i);
   const turns=[...savedTurns,...sentMessages.filter(item=>!savedTurns.some(t=>t.request_id===item.turn.request_id)).map(item=>item.turn)];
+  const latestAnswered=[...turns].reverse().find(t=>t.status==='completed'&&t.answer)?.turn_id;
   const narrative=currentNarrative(turns,snapshot?.analysis.run_id);
   const working=busy || uploading || loadingConversation || !!snapshot?.turns.some(t=>t.status==='running');
   const submit=(e:FormEvent)=>{e.preventDefault();void send();};
@@ -657,7 +664,9 @@ export default function App() {
             <div className="message-row assistant"><span className="nuan-avatar" aria-hidden="true">✦</span><div className={`message-bubble ${t.input_kind==='analysis_ready'?'narrative-bubble':''}`}><div className="nuan-reply-label"><DemoIcon name="leaf"/>暖暖{t.input_kind==='analysis_ready' && <span>· 材料解读</span>}</div>{t.input_kind!=='analysis_ready' && <ToolActivity events={t.tool_events}/>}
               {t.answer ? <>{t.input_kind==='analysis_ready'?<AnalysisNarrative turn={t} onEvidence={id=>void showEvidence(id)}/>:<><p><CitedText text={t.answer.text} citations={t.answer.citations} sources={t.answer.knowledge_sources} onEvidence={id=>void showEvidence(id)}/></p></>}
 
-                {t.answer.history_refs.length>0 && <small className="history-reference">参考了 {t.answer.history_refs.length} 条你允许回忆的历史记录</small>}</>
+                {t.answer.history_refs.length>0 && <small className="history-reference">参考了 {t.answer.history_refs.length} 条你允许回忆的历史记录</small>}
+                {!!t.answer.patient_updates?.length&&<small className="patient-update-notice">已记录你的补充 · 作为用户自述供后续交流参考</small>}
+                {t.status==='completed'&&t.turn_id===latestAnswered&&<ChatFollowups answer={t.answer} disabled={working} onSend={message=>send(undefined,message)}/>}</>
                 : t.status==='failed' ? <><p>{t.turn_id.startsWith('local:')?'这次消息没有发送成功，可以重试。':'这次回答没有完成，你的消息已保存。'}</p><button disabled={working} onClick={()=>void send(t)}>重试这条消息</button></>
                 : <p role="status">{t.input_kind==='analysis_ready'?'材料已经整理好，暖暖正在结合你的资料写解读…':'暖暖正在认真看你说的话…'}</p>}
             </div></div></div>)}

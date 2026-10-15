@@ -10,12 +10,13 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 from .llm_extractor import OpenAiCompatibleExtractor
 from .report_builder import SECTION_TYPES
 from .analysis_sources import compact_schema
+from .patient_followup import FollowupPayload, FOLLOWUP_INSTRUCTION
 from .inline_citations import InlineCitation, MAX_ANALYSIS_REFERENCES, MAX_KNOWLEDGE_REFERENCES, canonical_analysis_citations, citation_anchor_issues
 from .guidance_quality import GUIDANCE_INSTRUCTION, review_guidance_quality, guidance_requirements, guidance_delivery, guidance_review_error
 from .model_workloads import is_qianfan
 from .citation_repair import citation_repair_messages,apply_citation_repairs
 
-PROMPT_VERSION = "six-section-care-report-v16-quality-advisory"
+PROMPT_VERSION = "six-section-care-report-v17-patient-followups"
 REPORT_READ_TIMEOUT = 180
 REPORT_REQUEST_BUDGET = 240
 CITATION_REPAIR_TIMEOUT = 60
@@ -72,7 +73,7 @@ class DraftAction(BaseModel):
     rationale: str
 
 
-class PatientAnalysis(BaseModel):
+class PatientAnalysis(FollowupPayload):
     model_config = ConfigDict(extra="forbid")
     text: str = Field(min_length=1, max_length=6000)
     evidence_refs: list[str] = Field(max_length=MAX_ANALYSIS_REFERENCES)
@@ -154,7 +155,7 @@ def draft_report(material: str, reviewable_knowledge: list[dict], user_context: 
         "不得要求自行停换药，不评价医生对错。只输出Schema JSON。根对象只含sections、actions、patient_analysis，不返回review_notes或其他内部备注。"
         "citations每项只含quote和source_refs；该句的一般知识ID也放在source_refs，不能在citation内另建knowledge_refs。"
         "reading_requirements.knowledge_groups要求对应主题的实际解释句就近引用one_of中的真实知识ID；"
-        "仅在patient_analysis.knowledge_refs列ID不能代替句子的来源关联，不要为了引用改写费用口径。" + GUIDANCE_INSTRUCTION
+        "仅在patient_analysis.knowledge_refs列ID不能代替句子的来源关联，不要为了引用改写费用口径。" + GUIDANCE_INSTRUCTION + "以下补问与追问字段只放在patient_analysis内，不能放根对象、sections或actions内。\n" + FOLLOWUP_INSTRUCTION
     )}, {"role": "user", "content": json.dumps({"schema": compact_schema(DraftReport.model_json_schema()),
         **({'material': material} if analysis_sources is None else {'authorized_material_pages': analysis_sources}),
         "reviewable_knowledge": reviewable_knowledge,
