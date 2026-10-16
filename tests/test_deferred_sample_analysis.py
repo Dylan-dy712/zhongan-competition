@@ -23,6 +23,7 @@ class DeferredSampleTests(unittest.TestCase):
              patch.object(CareTools,'track_report_memory'):
             self.assertIsNone(tools.reusable_analysis())
         self.assertEqual(tools.deferred_knowledge_refs,['SYN-DIAGNOSIS','SYN-COST'])
+        self.assertTrue(tools.deferred_patient_analysis)
 
     def test_structured_stage_does_not_generate_or_review_a_discarded_patient_body(self):
         sections=[{'section_type':key,'claims':[]} for key in SECTION_TYPES]
