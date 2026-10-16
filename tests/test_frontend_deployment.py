@@ -10,7 +10,7 @@ from pathlib import Path
 
 @unittest.skipUnless(os.name == 'posix' and shutil.which('bash'), 'Linux deployment harness')
 class FrontendDeploymentTests(unittest.TestCase):
-    def run_release(self, *, backend_change=False, catalog_change=False, ranker_change=False, fail_nginx=False, fail_backup=False):
+    def run_release(self, *, backend_change=False, catalog_change=False, ranker_change=False, fail_nginx=False, fail_backup=False, https_enabled=False, fail_https=False):
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory); home=root/'home/ubuntu'
             app=home/'zhongan-app'; release=home/'zhongan-releases/release-fixture'; web=root/'web'; tools=root/'bin'
@@ -34,6 +34,8 @@ class FrontendDeploymentTests(unittest.TestCase):
                 write(root/f'etc/systemd/system/{unit}.service','same unit')
             write(release/'deploy/nginx-zhongan-api.conf','nginx config')
             write(root/'etc/nginx/sites-available/zhongan-api','old nginx config')
+            if https_enabled:
+                write(root/'etc/nginx/zhongan-https-listener.conf','existing host TLS listener')
             write(web/'index.html','old frontend')
             old_mobile=web/'.mobile-demo-releases'/('a'*40);write(old_mobile/'index.html','old demo')
             (web/'mobile-demo').symlink_to('.mobile-demo-releases/'+'a'*40)
@@ -44,7 +46,7 @@ class FrontendDeploymentTests(unittest.TestCase):
             executable(tools/'sudo','if [[ "$1" == chown ]]; then exit 0; fi\nif [[ "$1" == -u ]]; then shift 2; fi\nexec "$@"')
             executable(tools/'systemctl','printf "systemctl %s\\n" "$*" >> "$TEST_LOG"\nif [[ "$1" == is-active ]]; then echo active; fi')
             executable(tools/'nginx','printf "nginx %s\\n" "$*" >> "$TEST_LOG"\nif [[ -f "$FAIL_NGINX" ]]; then rm "$FAIL_NGINX"; exit 1; fi')
-            executable(tools/'curl','echo healthy')
+            executable(tools/'curl','if [[ "$FAIL_HTTPS" == 1 && "$*" == *https://* ]]; then exit 1; fi\necho healthy')
             executable(tools/'pg_dump','if [[ "$FAIL_BACKUP" == 1 ]]; then exit 1; fi\necho synthetic-backup')
             executable(tools/'pg_restore','echo synthetic-manifest')
             executable(app/'.venv/bin/python','printf "python %s\\n" "$*" >> "$TEST_LOG"\nif [[ "$1" == -c ]]; then echo synthetic_database; fi')
@@ -54,10 +56,12 @@ class FrontendDeploymentTests(unittest.TestCase):
             source=source.replace('/home/ubuntu',str(home)).replace('/var/www/zhongan-web',str(web))
             source=source.replace('/etc/systemd/system',str(root/'etc/systemd/system'))
             source=source.replace('/etc/nginx/sites-available',str(root/'etc/nginx/sites-available'))
+            source=source.replace('/etc/nginx/zhongan-https-listener.conf',str(root/'etc/nginx/zhongan-https-listener.conf'))
             source=source.replace('-C /','-C '+shlex.quote(str(root)))
             write(release/'deploy-test.sh',source)
             env={**os.environ,'PATH':str(tools)+':'+os.environ['PATH'],'TEST_LOG':str(log),
-                 'FAIL_NGINX':str(failure),'FAIL_BACKUP':'1' if fail_backup else '0'}
+                 'FAIL_NGINX':str(failure),'FAIL_BACKUP':'1' if fail_backup else '0',
+                 'FAIL_HTTPS':'1' if fail_https else '0'}
             result=subprocess.run(['bash','deploy-test.sh'],cwd=release,env=env,capture_output=True,text=True,timeout=20)
             return result,log.read_text() if log.exists() else '',(web/'index.html').read_text(),(app/'services/api/app/main.py').read_text()
 
@@ -95,3 +99,11 @@ class FrontendDeploymentTests(unittest.TestCase):
         result,log,html,code=self.run_release(backend_change=True,fail_backup=True)
         self.assertNotEqual(result.returncode,0);self.assertIn('systemctl restart',log)
         self.assertEqual(html,'old frontend');self.assertEqual(code,'old')
+
+    def test_https_entry_failure_rolls_back_release_without_api_restart(self):
+        result,log,html,_=self.run_release(https_enabled=True,fail_https=True)
+        self.assertNotEqual(result.returncode,0)
+        self.assertEqual(html,'old frontend')
+        self.assertIn('DEPLOY_FAILED',result.stderr)
+        self.assertIn('--base https://zhongan.xinzhipingtai.cn',log)
+        self.assertNotIn('systemctl restart',log)
