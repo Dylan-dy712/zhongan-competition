@@ -732,6 +732,10 @@ class AutomaticHistoryTests(unittest.TestCase):
     @unittest.skipUnless(os.getenv('ZHONGAN_HISTORY_LIVE_SMOKE')=='1','Explicit synthetic live-model smoke only')
     def test_live_model_recalls_original_material_without_an_unfinished_lookup_promise(self):
         with self.material_fixture() as (conn,material,text):
+            with self.connection() as history:
+                old=chats.begin_turn(history,self.actor,UUID(self.target),uuid4(),'【合成】你记得我上次看什么病吗',[])
+                chats.finish_turn(history,self.actor,UUID(self.target),old,
+                    answer={'text':'我查过之前的记录，没有写明具体看过什么病。','evidence_refs':[],'history_refs':[]})
             response=self.client.post(f'/v1/conversations/{self.target}/messages',headers=self.headers,
                 json={'request_id':str(uuid4()),'message':'你记得我上次看了什么病吗？请根据此前整理过的材料回答。'})
             self.assertEqual(response.status_code,200,response.text)
