@@ -10,6 +10,7 @@
     "test:services": "node scripts/check-medical-services.mjs",
     "test:memory": "node scripts/check-patient-memory.mjs",
     "test:followups": "node scripts/check-chat-followups.mjs",
+    "test:evidence": "node scripts/check-evidence-preview.mjs",
     "test:reminders": "node scripts/check-home-reminders.mjs",
     "test:medical-records": "node scripts/check-medical-records.mjs",
     "build": "tsc --noEmit && vite build",

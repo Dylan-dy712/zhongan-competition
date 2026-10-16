@@ -188,9 +188,16 @@ export const getKnowledgeSource=(token:string,id:string)=>chatRequest<import('./
 export const listQualitySnapshots=(token:string)=>chatRequest<{snapshot_id:string}[]>('/v1/quality/snapshots',token);
 export const getQualitySnapshot=(token:string,id:string)=>chatRequest<import('./types').QualitySnapshot>(`/v1/quality/snapshots/${encodeURIComponent(id)}`,token);
 export async function getEvidenceImage(token:string,evidence:import('./types').Evidence){
-  const response=await apiFetch(`${API_BASE}/v1/cases/${evidence.case_id}/documents/${evidence.document_id}/content?version=${evidence.document_version}`,{headers:{Authorization:`Bearer ${token}`}});
+  const pdf=evidence.media_type==='application/pdf';
+  const path=pdf?`/v1/evidence/${encodeURIComponent(evidence.evidence_id)}/page-image`
+    :`/v1/cases/${encodeURIComponent(evidence.case_id!)}/documents/${encodeURIComponent(evidence.document_id)}/content?version=${evidence.document_version}`;
+  const response=await apiFetch(`${API_BASE}${path}`,{headers:{Authorization:`Bearer ${token}`}});
   if(!response.ok)throw new ApiError('原图暂不可用',response.status);
-  return URL.createObjectURL(await response.blob());
+  const candidates:unknown=pdf?JSON.parse(response.headers.get('X-Evidence-Regions')||'[]'):(evidence.bbox?[evidence.bbox]:[]);
+  const regions:Array<[number,number,number,number]>=Array.isArray(candidates)?candidates.filter((box):box is [number,number,number,number]=>
+    Array.isArray(box)&&box.length===4&&box.every(value=>typeof value==='number'&&Number.isFinite(value)&&value>=0&&value<=1)
+    &&box[0]<box[2]&&box[1]<box[3]):[];
+  return {url:URL.createObjectURL(await response.blob()),regions};
 }
 
 export const getDemoQuality=(token:string)=>chatRequest<import('./types').QualitySnapshot>('/v1/quality/demo',token);
