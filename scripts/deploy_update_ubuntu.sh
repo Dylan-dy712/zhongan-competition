@@ -155,5 +155,10 @@ sudo systemctl reload nginx
 systemctl is-active zhongan-api zhongan-worker nginx
 curl -fsS http://127.0.0.1/health
 "$app_dir/.venv/bin/python" -m scripts.verify_deployed_release --revision "$revision"
+# Once HTTPS is configured, a release must preserve the public TLS entry too.
+if [[ -s /etc/nginx/zhongan-https-listener.conf ]]; then
+    "$app_dir/.venv/bin/python" -m scripts.verify_deployed_release --revision "$revision" --base https://zhongan.xinzhipingtai.cn
+    curl --fail --silent --show-error --max-time 15 https://zhongan.xinzhipingtai.cn/judge/ > /dev/null
+fi
 printf '\nDEPLOYED_REVISION=%s\n' "$(< "$app_dir/REVISION")"
 trap - ERR
