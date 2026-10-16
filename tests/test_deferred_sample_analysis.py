@@ -8,11 +8,22 @@ from services.api.app.report_llm import draft_report,StructuredDraftReport
 from services.api.app.report_builder import SECTION_TYPES
 from services.api.app.analysis_review import AnalysisReview
 from services.api.app.guidance_quality import GuidanceQuality
-from services.api.app.conversation_agent import run_agent
+from services.api.app.conversation_agent import run_agent,CareTools
 from services.api.app.worker import analyze_models
 
 
 class DeferredSampleTests(unittest.TestCase):
+    def test_structured_report_keeps_reference_topics_without_seeding_patient_prose(self):
+        conn=MagicMock()
+        conn.execute.return_value.fetchone.return_value={'draft':None,
+            'usage_metadata':{'patient_analysis_mode':'deferred'},
+            'structured':{'sections':[{'claims':[{'knowledge_refs':['SYN-DIAGNOSIS','SYN-COST','SYN-DIAGNOSIS']}]}]}}
+        tools=CareTools(conn,uuid4(),uuid4())
+        with patch('services.api.app.material_report.get_material_report',return_value={'status':'available','run_id':str(uuid4())}), \
+             patch.object(CareTools,'track_report_memory'):
+            self.assertIsNone(tools.reusable_analysis())
+        self.assertEqual(tools.deferred_knowledge_refs,['SYN-DIAGNOSIS','SYN-COST'])
+
     def test_structured_stage_does_not_generate_or_review_a_discarded_patient_body(self):
         sections=[{'section_type':key,'claims':[]} for key in SECTION_TYPES]
         wire=json.dumps({'sections':sections,'actions':[],'patient_analysis':None})
