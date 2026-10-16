@@ -1,5 +1,6 @@
 """Independent source-fidelity review before delivering a patient explanation."""
 import json
+import time
 import re
 import requests
 from .model_workloads import uses_deepseek_strict
@@ -106,13 +107,30 @@ def review_analysis(config,packed,text,citations=None,user_context=None):
     return verdict,{'request_usages':usages}
 
 
+FIDELITY_READ_TIMEOUT=25
+FIDELITY_REQUEST_BUDGET=45
+
+
 def source_verdict(config,messages):
+    # Retry only transport failures, within one short budget. A failed or invalid
+    # verdict never counts as approval, and factual issues still follow review.
+    deadline=time.monotonic()+FIDELITY_REQUEST_BUDGET
+    for attempt in range(2):
+        remaining=deadline-time.monotonic()
+        if remaining<=10:raise requests.Timeout('FIDELITY_REQUEST_BUDGET_EXHAUSTED')
+        try:
+            return _source_verdict_once(config,messages,(10,min(FIDELITY_READ_TIMEOUT,remaining-10)))
+        except (requests.Timeout,requests.ConnectionError):
+            if attempt:raise
+
+
+def _source_verdict_once(config,messages,timeout):
     if uses_deepseek_strict(config.base_url,config.model_id):
         response=requests.post('https://api.deepseek.com/beta/chat/completions',
             headers={'Authorization':f'Bearer {config.api_key}','Content-Type':'application/json'},
             json={'model':config.model_id,'messages':messages,'temperature':0,'max_tokens':3000,
                   'thinking':{'type':'disabled'},'tools':[review_tool()],
-                  'tool_choice':{'type':'function','function':{'name':'deliver_review'}}},timeout=(10,90))
+                  'tool_choice':{'type':'function','function':{'name':'deliver_review'}}},timeout=timeout)
         response.raise_for_status();payload=response.json()
         calls=payload['choices'][0]['message'].get('tool_calls') or []
         if len(calls)!=1 or calls[0]['function']['name']!='deliver_review':raise ValueError('ANALYSIS_REVIEW_FORMAT')
@@ -121,7 +139,7 @@ def source_verdict(config,messages):
         content=json.dumps({'accepted':data['accepted'],
             'issues':[data[f'issue_{i}'] for i in range(1,4) if data[f'issue_{i}']['category']!='none']})
     else:
-        payload,content=config._call(messages,timeout=(10,90),workload='fidelity')
+        payload,content=config._call(messages,timeout=timeout,workload='fidelity')
     verdict=AnalysisReview.model_validate_json(content)
     if len(verdict.issues)>3:raise ValueError('ANALYSIS_REVIEW_FORMAT')
     return verdict,payload

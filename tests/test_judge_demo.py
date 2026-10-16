@@ -257,5 +257,41 @@ class NativeJudgeLibraryTests(unittest.TestCase):
         with patch.object(judge.psycopg,'connect',side_effect=lambda *args,**kwargs:self.connection()),TestClient(judge.app) as library:
             self.assertEqual(library.get('/judge/sample/files/synthetic-0',headers=first).status_code,403)
 
+    def test_z_prepared_recognition_is_limited_to_the_reviewed_library_and_judge_owners(self):
+        from services.api.app.judge_sample_cache import write_sample_pages,reviewed_document_pages
+        from services.api.app.repository import create_case,register_document
+        from services.api.app.contracts.core import DataOrigin
+        from services.api.app.worker import evidence_for_page
+        _,manifest=judge.sample_manifest();item=manifest['documents'][0]
+        source=self.assets/item['file'];fingerprint='b'*64;versions={'test-ocr'}
+        page={'page_index':0,'page_kind':'scanned','text':'合成材料，需门诊复诊。','content_hash':'a'*64,
+            'status':'parsed','requires_ocr':False,'requires_vision':False,'parser_version':'test-ocr',
+            'blocks':[{'type':'paragraph','order':0,'text':'合成材料，需门诊复诊。','bbox':[0,0,1,1],'metadata':{}}],
+            'metadata':{'ocr_method':'synthetic','photo_quality':{'needs_reupload':False}}}
+        context={'judge_demo':True,'sample_id':manifest['sample_id'],'sample_version':manifest['version'],'notice':manifest['notice']}
+        with patch.dict(os.environ,{'ZHONGAN_JUDGE_RECOGNITION_ROOT':str(self.directory/'recognition')}),self.connection() as conn:
+            self.assertEqual(write_sample_pages(manifest,item,fingerprint,[page],versions),1)
+            owners=[row['actor_id'] for row in conn.execute('SELECT actor_id FROM judge_demo_slots ORDER BY slot OFFSET 1 LIMIT 2').fetchall()]
+            ordinary=actor_for_token(conn,self.ordinary)
+            evidence=[]
+            for index,actor in enumerate([*owners,ordinary]):
+                consent=accounts.care_consent(conn,actor)
+                case,_=create_case(conn,actor_id=actor,subject_id=consent['subject_id'],consent_id=consent['consent_id'],
+                    source_ref='judge-upload-sample:'+manifest['sample_id'],external_case_ref=None,user_context=context,
+                    data_origin=DataOrigin.official_deidentified,idempotency_key='synthetic-recognition-'+str(index))
+                temporary=self.directory/('upload-'+str(index)+'.pdf');shutil.copyfile(source,temporary)
+                document,_=register_document(conn,actor_id=actor,case_id=case.case_id,document_type='出院记录',media_type='application/pdf',
+                    byte_size=temporary.stat().st_size,page_count=1,source_hash=item['sha256'],source_ref='synthetic.pdf',
+                    policy_version='synthetic',temp_path=temporary,storage_root=self.storage)
+                data=document.model_dump()
+                cached=reviewed_document_pages(conn,data,fingerprint,versions)
+                if actor==ordinary:
+                    self.assertEqual(cached,{},'Even a forged official case cannot share the sample cache for an ordinary owner')
+                else:
+                    self.assertEqual(cached,{0:page})
+                    evidence.append(evidence_for_page(data,cached[0]))
+            self.assertNotEqual(evidence[0][0]['evidence_id'],evidence[1][0]['evidence_id'])
+            self.assertNotEqual(evidence[0][0]['document_id'],evidence[1][0]['document_id'])
+
 
 if __name__ == '__main__':unittest.main()

@@ -391,6 +391,15 @@ def analyze_models(material, knowledge_entries, user_context, source_refs, fact_
     return fields, insights, report, provider, model_id, performance
 
 
+def recognition_profile(pipeline_version):
+    provider=os.environ.get('ZHONGAN_OCR_PROVIDER','tencent').strip().lower()
+    ocr_version=VolcengineOcr.version if provider=='volcengine' else OCR_VERSION
+    fingerprint=payload_digest({'cache':'parsed-pages-v1','pipeline':pipeline_version,
+        'text':TEXT_PARSER_VERSION,'pdf':PDF_PARSER_VERSION,'router':ROUTING_VERSION,
+        'ocr_provider':provider,'ocr_version':ocr_version})
+    return fingerprint,{TEXT_PARSER_VERSION,PDF_PARSER_VERSION,ocr_version}
+
+
 def process_run(conn, run: dict, storage_root: Path) -> None:
     run_started = time.monotonic()
     parsed_documents = []
@@ -403,12 +412,7 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
     try:
         advance('parse')
         source_refs=context_sources(conn,run)
-        provider=os.environ.get('ZHONGAN_OCR_PROVIDER','tencent').strip().lower()
-        ocr_version=VolcengineOcr.version if provider=='volcengine' else OCR_VERSION
-        accepted_versions={TEXT_PARSER_VERSION,PDF_PARSER_VERSION,ocr_version}
-        fingerprint=payload_digest({'cache':'parsed-pages-v1','pipeline':run['pipeline_version'],
-            'text':TEXT_PARSER_VERSION,'pdf':PDF_PARSER_VERSION,'router':ROUTING_VERSION,
-            'ocr_provider':provider,'ocr_version':ocr_version})
+        fingerprint,accepted_versions=recognition_profile(run['pipeline_version'])
         reused_pages=recognized_pages=0
         for reference in run["document_versions"]:
             document = conn.execute(
@@ -428,6 +432,10 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
             with conn.transaction():
                 require_parse_scope(conn,run)
                 cached=cached_pages(conn,document,fingerprint,accepted_versions,ROUTING_VERSION,run['pipeline_version'])
+                if run['pipeline_version']=='document-parser-v1':
+                    from .judge_sample_cache import reviewed_document_pages
+                    prepared=reviewed_document_pages(conn,document,fingerprint,accepted_versions)
+                    cached={**prepared,**cached}
             def checkpoint(page):
                 # Commit each successful page before another OCR/model request.
                 with conn.transaction():
