@@ -719,7 +719,8 @@ def run_agent(history, question, attachments, tools, model=None, on_event=None, 
                                   'spans':[[item['entry_id'],item['content']+'\n适用范围：'+item['scope']]]}
                                  for item in found['results']]
             case_text='\n'.join(span[1] for page in packed for span in page['spans'])
-            reference_draft=initial_analysis or ({'knowledge_refs':tools.deferred_knowledge_refs} if tools.deferred_knowledge_refs else None)
+            deferred_refs=getattr(tools,'deferred_knowledge_refs',[])
+            reference_draft=initial_analysis or ({'knowledge_refs':deferred_refs} if deferred_refs else None)
             if reference_draft:
                 resolved=tools.resolve_draft_knowledge(reference_draft,case_text)
                 known={page['document'] for page in knowledge_pages}

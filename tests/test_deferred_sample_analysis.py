@@ -41,6 +41,10 @@ class DeferredSampleTests(unittest.TestCase):
         schema=json.loads(call.call_args.args[0][1]['content'])['schema']
         self.assertEqual(schema['properties']['patient_analysis']['type'],'null')
         self.assertNotIn('PatientAnalysis',schema['$defs'])
+        messages=call.call_args.args[0]
+        self.assertNotIn('同时返回 clarification_questions',messages[0]['content'])
+        self.assertNotIn('patient_analysis是完整报告正文',messages[0]['content'])
+        self.assertNotIn('min_body_chars',json.loads(messages[1]['content'])['reading_requirements'])
         with self.assertRaises(ValueError):StructuredDraftReport.model_validate({'sections':sections[:5],'actions':[]})
 
     def test_worker_passes_deferred_mode_without_bypassing_fields_and_insights(self):
