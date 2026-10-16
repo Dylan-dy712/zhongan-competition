@@ -37,6 +37,11 @@ def main():
         with ThreadPoolExecutor(max_workers=2) as pool:
             fields=pool.submit(client.extract,material);insights=pool.submit(detect_semantic,material,knowledge)
             fields,insights=validate_evidence_quotes(fields.result(),material),insights.result()
+        # Match live reconciliation: unbound model quotes never become facts.
+        fields['personnel']=[item for item in fields.get('personnel',[]) if item['evidence_quote'] in material]
+        allowed={entry.entry_id for entry in entries[:80]}
+        insights['candidates']=[item for item in insights['candidates']
+            if item['evidence_quote'] in material and set(item['knowledge_refs']).issubset(allowed)]
         write_models(documents,entries,profile,fields,insights)
     print(json.dumps({'sample_id':manifest['sample_id'],'version':manifest['version'],'preprocessing_ready':True,
         'reused':reused,'seconds':round(time.monotonic()-started,3),'created_cases':0,'generated_reports':0}))
