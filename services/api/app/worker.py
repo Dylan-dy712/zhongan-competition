@@ -323,7 +323,7 @@ def route_document(document: dict, path: Path, pipeline_version: str, ocr: Ocr |
 
 
 def analyze_models(material, knowledge_entries, user_context, source_refs, fact_inputs,
-                   encounter_dates, advance, knowledge_excluded=False, memory_context=None, defer_patient_analysis=False):
+                   encounter_dates, advance, knowledge_excluded=False, memory_context=None, defer_patient_analysis=False, preloaded_models=None):
     """Overlap independent network calls; SQL and release checks stay on the caller."""
     started = time.monotonic()
     timings = {}
@@ -348,12 +348,18 @@ def analyze_models(material, knowledge_entries, user_context, source_refs, fact_
         if configured:
             extractor = OpenAiCompatibleExtractor()
             provider, model_id = extractor.provider, extractor.model_id
-            fields_future = pool.submit(measured, 'extract_seconds', extractor.extract, material)
+            if preloaded_models:
+                fields=validate_evidence_quotes(preloaded_models[0],material);timings['extract_seconds']=0
+            else:
+                fields_future = pool.submit(measured, 'extract_seconds', extractor.extract, material)
         advance('insights')
         if configured and not knowledge_excluded:
             knowledge = [{"entry_id":e.entry_id,"title":e.title,"content":e.content[:500],
                           "anchoring":e.anchoring} for e in knowledge_entries[:80]]
-            insights_future = pool.submit(measured, 'insight_seconds', detect_semantic, material, knowledge)
+            if preloaded_models:
+                insights=preloaded_models[1];timings['insight_seconds']=0
+            else:
+                insights_future = pool.submit(measured, 'insight_seconds', detect_semantic, material, knowledge)
         if fields_future:
             fields = validate_evidence_quotes(fields_future.result(), material)
         if insights_future:
@@ -387,7 +393,7 @@ def analyze_models(material, knowledge_entries, user_context, source_refs, fact_
                     # Optional chat prose is unusable; retain the structured
                     # report and regenerate prose against live authorized sources.
                     report['draft']['patient_analysis'] = None
-    performance = {'model_schedule':'parallel','model_seconds':timings,
+    performance = {'model_schedule':'parallel','material_preprocessing':'preloaded' if preloaded_models else 'live','model_seconds':timings,
                    'model_wall_seconds':round(time.monotonic()-started,3)}
     return fields, insights, report, provider, model_id, performance
 
@@ -488,6 +494,11 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
                FROM cases c JOIN consents co ON co.consent_id=c.consent_id WHERE c.case_id=%s""",
             (run["case_id"],),
         ).fetchone()
+        fully_prepared=bool(prepared_sample_pages and prepared_sample_pages==sum(len(pages) for _,pages in parsed_documents))
+        preloaded_models=None
+        if fully_prepared and not knowledge_excluded:
+            from .judge_model_cache import read_models
+            preloaded_models=read_models(parsed_documents,knowledge_entries,fingerprint)
         parse_seconds = time.monotonic()-run_started
         model_result, insight_model_result, report_model_result, model_provider, model_id, performance = analyze_models(
             material, knowledge_entries,
@@ -495,7 +506,8 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
             (case_meta["user_context"] if case_meta else None),
             source_refs, fact_inputs, encounter_dates, advance, knowledge_excluded,
             memory_context=(run.get('context_snapshot') or {}).get('memory'),
-            **({'defer_patient_analysis':True} if prepared_sample_pages and prepared_sample_pages==sum(len(pages) for _,pages in parsed_documents) else {}))
+            **({'defer_patient_analysis':True} if fully_prepared else {}),
+            **({'preloaded_models':preloaded_models} if preloaded_models else {}))
         performance['parse_prepare_seconds'] = round(parse_seconds,3)
         performance['recognition_cache']={'reused_pages':reused_pages,'processed_pages':recognized_pages}
         performance['patient_analysis_mode']=report_model_result.get('usage_metadata',{}).get('patient_analysis_mode','shared')
