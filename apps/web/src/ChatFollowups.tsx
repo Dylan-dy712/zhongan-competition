@@ -1,5 +1,6 @@
 import {useRef,useState} from 'react';
 import type {ChatAnswer,PatientField} from './types';
+import {distinctFollowupChoices} from './followupChoices';
 import './chat-followups.css';
 
 const fieldLabels:Record<PatientField,string>={followup_time:'复查时间',followup_location:'复查医院',
@@ -29,7 +30,7 @@ export default function ChatFollowups({answer,disabled,onSend}:{answer:ChatAnswe
       {questions.map(question=><div className="clarification-question" key={question.field}>
         <p>{question.question}</p>
         <div className="clarification-choices">
-          {question.options.map((option,i)=><button type="button" key={i} disabled={disabled} aria-pressed={selections[question.field]===option.message}
+          {distinctFollowupChoices(question.options).map((option,i)=><button type="button" key={i} disabled={disabled} aria-pressed={selections[question.field]===option.message}
             onClick={()=>setSelections(previous=>({...previous,[question.field]:option.message}))}>{option.label}</button>)}
           <button type="button" disabled={disabled} aria-pressed={selections[question.field]==='unknown'}
             onClick={()=>setSelections(previous=>({...previous,[question.field]:'unknown'}))}>暂不确定</button>

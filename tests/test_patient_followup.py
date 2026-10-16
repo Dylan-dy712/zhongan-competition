@@ -11,12 +11,12 @@ from pydantic import ValidationError
 from services.api.app.analysis_format import decode_analysis_tool, strict_analysis_tool
 from services.api.app.conversation_agent import run_agent
 from services.api.app import conversation_repository as chats
-from services.api.app.patient_followup import FollowupPayload, PatientUpdate, source_patient_updates
+from services.api.app.patient_followup import ClarificationQuestion, FollowupPayload, PatientUpdate, source_patient_updates
 from services.api.app.repository import AccessDenied, connect, token_digest
 
 
 QUESTION = {'field': 'followup_time', 'question': '医生有交代什么时候复查吗？',
-            'options': [{'label': '还不确定', 'message': '我还不确定复查时间。'}]}
+            'options': [{'label': '医生还没交代', 'message': '医生还没交代复查时间。'}]}
 SUGGESTIONS = ['复查前需要准备哪些已有材料？', '这次票据上的总费用是什么意思？']
 
 
@@ -26,6 +26,15 @@ def response(**data):
 
 
 class PatientFollowupTests(unittest.TestCase):
+    def test_choice_normalization_matches_legacy_ui_and_preserves_meaning(self):
+        fixtures = json.loads((Path(__file__).parent / 'fixtures/followup_choices.json').read_text(encoding='utf-8'))
+        for fixture in fixtures:
+            with self.subTest(fixture['name']):
+                question = ClarificationQuestion(**{**QUESTION, 'options': fixture['options']})
+                self.assertEqual([option.label for option in question.options], fixture['expected'])
+                for option in question.options:
+                    self.assertIn(option.model_dump(), fixture['options'], 'Never rewrite a clinical answer')
+
     def test_worker_report_reuses_followups_without_an_extra_model_request(self):
         from services.api.app.report_llm import PatientAnalysis
         from tests.test_report_efficiency import ReviewingModel
