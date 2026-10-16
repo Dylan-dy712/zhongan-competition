@@ -4,7 +4,7 @@ import unittest
 from unittest.mock import MagicMock,patch
 from uuid import uuid4
 
-from services.api.app.report_llm import draft_report,StructuredDraftReport
+from services.api.app.report_llm import draft_report,StructuredDraftReport,normalize_report_wire
 from services.api.app.report_builder import SECTION_TYPES
 from services.api.app.analysis_review import AnalysisReview
 from services.api.app.guidance_quality import GuidanceQuality
@@ -13,6 +13,20 @@ from services.api.app.worker import analyze_models
 
 
 class DeferredSampleTests(unittest.TestCase):
+    def test_only_empty_redundant_section_actions_are_normalized(self):
+        action={'action_text':'核对合成记录','source_quote':'合成记录','owner_role':'patient',
+                'due_at':None,'due_source':'unknown','rationale':'核对已有信息'}
+        original={'sections':[{'section_type':key,'claims':[],'actions':[]} for key in SECTION_TYPES],
+                  'actions':[action],'patient_analysis':None}
+        normalized,changes=normalize_report_wire(json.dumps(original),[])
+        parsed=StructuredDraftReport.model_validate(normalized)
+        self.assertEqual(len(parsed.sections),6)
+        self.assertEqual(parsed.actions[0].action_text,action['action_text'])
+        self.assertEqual(changes,['empty_section_actions_removed'])
+        original['sections'][0]['actions']=[action]
+        normalized,_=normalize_report_wire(json.dumps(original),[])
+        with self.assertRaises(ValueError):StructuredDraftReport.model_validate(normalized)
+
     def test_structured_report_keeps_reference_topics_without_seeding_patient_prose(self):
         conn=MagicMock()
         conn.execute.return_value.fetchone.return_value={'draft':None,
