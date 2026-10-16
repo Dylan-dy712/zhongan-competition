@@ -7,6 +7,7 @@ from .parse_cache import payload_digest
 
 FORMAT='reviewed-sample-patient-draft-v1'
 QUESTIONS={'请分析本次上传材料，整理就医经过、费用与待补充信息。',
+           '请重新分析本次材料，并为每条结论标明准确来源。',
            '请结合本次实际提交的材料，解释主要诊断、治疗经过、费用含义和康复复诊安排。'}
 
 
@@ -14,7 +15,7 @@ def generic_context(context,questions,recall,memory,patient_context):
     allowed={'judge_demo','sample_id','sample_version','notice','verification'}
     return (isinstance(context,dict) and context.get('judge_demo') is True and not set(context)-allowed
         and context.get('verification','latency-benchmark')=='latency-benchmark'
-        and len(questions)==1 and questions[0] in QUESTIONS and not memory and not patient_context)
+        and 1<=len(questions)<=20 and all(question in QUESTIONS for question in questions) and not memory and not patient_context)
 
 
 def source_key(row):
@@ -30,7 +31,7 @@ def scope(conn,actor_id,conversation_id,run_id):
     case=conn.execute('SELECT user_context FROM cases WHERE case_id=%s',(current['case_id'],)).fetchone()
     run=conn.execute('SELECT context_snapshot FROM analysis_runs WHERE case_id=%s AND run_id=%s',
                      (current['case_id'],run_id)).fetchone()
-    turns=conn.execute("SELECT question,attachments FROM conversation_turns WHERE conversation_id=%s AND input_kind='user' ORDER BY created_at LIMIT 2",(conversation_id,)).fetchall()
+    turns=conn.execute("SELECT question,attachments FROM conversation_turns WHERE conversation_id=%s AND input_kind='user' ORDER BY created_at LIMIT 21",(conversation_id,)).fetchall()
     if not run or not generic_context(case['user_context'],[t['question'] for t in turns],current['recall_enabled'],
         (run['context_snapshot'] or {}).get('memory'),get_patient_context(conn,actor_id,conversation_id)):return None
     if any(a.get('kind')=='chat_attachment' for turn in turns for a in (turn['attachments'] or [])):return None

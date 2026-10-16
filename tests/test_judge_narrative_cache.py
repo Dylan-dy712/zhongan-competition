@@ -48,7 +48,9 @@ class PreparedNarrativeTests(unittest.TestCase):
         self.assertTrue(generic_context(context,[question],True,None,[]))
         self.assertFalse(generic_context({**context,'concern':'个人问题'},[question],False,None,[]))
         self.assertFalse(generic_context(context,['我现在很疼'],False,None,[]))
-        self.assertFalse(generic_context(context,[question,question],False,None,[]))
+        self.assertTrue(generic_context(context,[question,question],False,None,[]))
+        self.assertFalse(generic_context(context,[question,'个人补充'],False,None,[]))
+        self.assertFalse(generic_context(context,[question]*21,False,None,[]))
         self.assertFalse(generic_context(context,[question],False,{'items':['memory']},[]))
         self.assertFalse(generic_context(context,[question],False,None,[{'statement':'个人补充'}]))
 
