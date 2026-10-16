@@ -26,3 +26,4 @@
 .medical-service-online .medical-card-action{background:linear-gradient(105deg,#267b75,#1e6862);border-color:#267b75}
 @media(hover:hover){.medical-card-action:hover:not(:disabled){filter:brightness(1.06)}.medical-service-card:has(.medical-card-action:focus-visible){outline:2px solid #8fbfa5;outline-offset:3px}}
 @media(max-width:620px){.medical-card-visual{margin:-17px -17px 15px;max-height:152px}}
+.analysis-narrative .medical-guide-note,.care-report-content .medical-guide-note{margin:20px 0 0;font-size:14px;line-height:1.8;color:#4c695b}

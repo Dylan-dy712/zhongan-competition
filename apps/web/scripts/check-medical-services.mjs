@@ -16,7 +16,8 @@ dom.window.HTMLDialogElement.prototype.close=function(){this.open=false;};
 globalThis.requestAnimationFrame=callback=>setTimeout(callback,0);globalThis.cancelAnimationFrame=id=>clearTimeout(id);
 const {default:React,act}=await import('react');const {createRoot}=await import('react-dom/client');
 const conversation={conversation_id:'synthetic-service-conversation',subject_id:'synthetic-subject',case_id:'synthetic-case',title:'合成服务验证',recall_enabled:false,created_at:'2026-10-16',updated_at:'2026-10-16'};
-const base={text:'合成材料已整理，复查时可以带上已有报告。',evidence_refs:[],history_refs:[],analysis_run_id:'synthetic-run'};
+const base={text:'合成材料已整理，复查时可以带上已有报告。',evidence_refs:[],history_refs:[],analysis_run_id:'synthetic-run',
+ suggested_questions:['我想了解中高端保单里有哪些医疗增值权益适合我。']};
 const initial={turn_id:'synthetic-report',request_id:'synthetic-analysis',question:'解读材料',input_kind:'analysis_ready',status:'completed',attachments:[],tool_events:[],answer:base,created_at:'2026-10-16',error_code:null};
 const snapshot={conversation,turns:[initial],analysis:{status:'completed',run_id:'synthetic-run'},report:{status:'not_released'}};
 const sent=[];let response=values.available,fail=false,release,hold=null;
@@ -41,12 +42,14 @@ const click=async(selector)=>{const node=document.querySelector(selector);assert
 const type=async(node,value)=>act(async()=>{const proto=node.tagName==='INPUT'?dom.window.HTMLInputElement.prototype:dom.window.HTMLTextAreaElement.prototype;Object.getOwnPropertyDescriptor(proto,'value').set.call(node,value);node.dispatchEvent(new dom.window.Event('input',{bubbles:true}));});
 try{
  root=createRoot(document.getElementById('root'));await act(async()=>root.render(React.createElement(modules.App)));await flush();
- assert.match(document.querySelector('.analysis-narrative').textContent,/医疗增值服务/);
- assert.equal(document.querySelectorAll('.medical-guide-actions button').length,3);
+ assert.equal(document.querySelector('.medical-guide-note').textContent,'需要下一步的就医帮助，也可以问我');
+ assert.equal(document.querySelector('.medical-guide'),null,'Report invitation is plain text without a card');
+ assert.equal(document.querySelectorAll('.medical-guide-actions button').length,0);
+ assert.ok(document.querySelector('.clarification-section'),'Report keeps an optional supplement box without model questions');
  await type(document.querySelector('.composer textarea'),'保留的草稿');
- hold=new Promise(resolve=>{release=resolve;});await click('.medical-guide-actions button');
+ hold=new Promise(resolve=>{release=resolve;});await click('.suggested-questions button');
  assert.equal(sent.length,1);assert.match(sent[0].message,/中高端保单/);assert.deepEqual(sent[0].document_ids,[]);
- assert.ok([...document.querySelectorAll('.medical-guide-actions button')].every(x=>x.disabled));
+ assert.ok([...document.querySelectorAll('.chat-followups button')].every(x=>x.disabled));
  await act(async()=>release());hold=null;await flush();
  assert.equal(document.querySelector('.composer textarea').value,'保留的草稿');
  assert.ok(document.querySelector('.medical-service-benefit'));assert.ok(document.querySelector('.medical-service-hospital'));assert.ok(document.querySelector('.medical-service-online'));
@@ -58,7 +61,7 @@ try{
   await click('.medical-close');assert.equal(document.querySelector('.medical-preview'),null);
  }
  assert.equal(sent.length,1,'Preview clicks never submit appointments or chat messages');
- response=values.missing;await click('.medical-guide-actions button:nth-child(2)');
+ response=values.missing;await type(document.querySelector('.composer textarea'),'我想找附近适合复查的医院');await click('[aria-label="发送消息"]');
  assert.equal(document.querySelectorAll('.medical-location').length,1);
  await type(document.querySelector('.medical-location input'),'上海市浦东新区');
  fail=true;await act(async()=>document.querySelector('.medical-location').dispatchEvent(new dom.window.Event('submit',{bubbles:true,cancelable:true})));await flush();

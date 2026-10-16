@@ -667,7 +667,7 @@ export default function App() {
 
                 {t.answer.medical_services&&<MedicalServiceCards services={t.answer.medical_services} onAsk={message=>send(undefined,message)} disabled={working} canAskForLocation={t.turn_id===latestAnswered}/>}
                 {!!t.answer.patient_updates?.length&&<small className="patient-update-notice">已记录你的补充 · 作为用户自述供后续交流参考</small>}
-                {t.status==='completed'&&t.turn_id===latestAnswered&&<ChatFollowups answer={t.answer} disabled={working} onSend={message=>send(undefined,message)}/>}</>
+                {t.status==='completed'&&t.turn_id===latestAnswered&&<ChatFollowups answer={t.answer} report={t.input_kind==='analysis_ready'} disabled={working} onSend={message=>send(undefined,message)}/>}</>
                 : t.status==='failed' ? <><p>{t.turn_id.startsWith('local:')?'这次消息没有发送成功，可以重试。':'这次回答没有完成，你的消息已保存。'}</p><button disabled={working} onClick={()=>void send(t)}>重试这条消息</button></>
                 : <p role="status">{t.input_kind==='analysis_ready'?'材料已经整理好，暖暖正在结合你的资料写解读…':'暖暖正在认真看你说的话…'}</p>}
             </div></div></div>)}
