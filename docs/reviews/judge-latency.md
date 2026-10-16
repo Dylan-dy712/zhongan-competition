@@ -92,3 +92,28 @@ runs retain the existing fragment fallback. Low-confidence exclusions, OCR warni
 source authorization, original-file linkage and independent review remain intact.
 This retains all readable text while removing thousands of short source aliases
 that made correct narrative source links fragile.
+
+## Prepared source-reviewed patient draft
+
+For the exact fixed library and a generic analysis request with no added personal
+context, a private prepared patient draft can avoid stochastic prose rewrites.
+Preparation requires complete source reading, accepted independent factual review,
+passed reading-quality review and no partial delivery. Account/case/evidence IDs
+are not stored; source links bind to immutable page hashes and are reassigned to
+the current case's real evidence. Active ownership, consent, judge role, original
+bytes, current source text, model/prompts and knowledge versions are checked again.
+
+The delivered answer still requires a new independent review of the submitted
+case's original sources. A rejected review falls back to the existing repair path;
+it never approves the prepared draft. Personal preferences, extra user turns,
+memory, patient updates, changed sources or corrupt artifacts fall back to fresh
+generation. The page explicitly identifies prepared sample-draft reuse.
+
+An operator may prepare from an existing authorized generic demo conversation:
+
+```bash
+.venv/bin/python -m scripts.warm_judge_narrative --from-worker-environment --conversation-id CONVERSATION_UUID
+```
+
+The preparation connection is read-only and publishes no case report. The only
+write is a private checksummed draft artifact after both reviews pass.

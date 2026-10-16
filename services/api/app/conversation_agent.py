@@ -316,6 +316,14 @@ class CareTools:
                 for claim in section.get('claims',[]) for ref in claim.get('knowledge_refs',[])))[:12]
         if row and (row.get('usage_metadata') or {}).get('patient_analysis_rejected'):
             return None
+        if row and getattr(self,'deferred_patient_analysis',False):
+            from .judge_narrative_cache import read_prepared
+            prepared=read_prepared(self.conn,self.actor_id,self.conversation_id,report['run_id'])
+            if prepared:
+                self.prepared_sample_draft=True
+                self.draft_guidance_delivery=prepared['guidance_delivery']
+                self.shared_analysis_run=report['run_id']
+                return prepared['draft']
         self.shared_analysis_run=report['run_id'] if row and row['draft'] else None
         return row['draft'] if row else None
 
@@ -363,6 +371,7 @@ class CareTools:
         self.knowledge_sources = {}
         self.deferred_knowledge_refs = []
         self.deferred_patient_analysis = False
+        self.prepared_sample_draft = False
         self.force_analysis = force_analysis
         self.memory_snapshot = None
         self.history_versions = {}
@@ -1055,6 +1064,7 @@ def run_agent(history, question, attachments, tools, model=None, on_event=None, 
         if analysis_mode:
             result['service_guide']={'text':SERVICE_INVITATION,'policy_status':'demo_assumed_midhigh'}
             result['guidance_delivery']=delivery
+            if reused_draft and getattr(tools,'prepared_sample_draft',False) is True:result['sample_preload']=True
             result['performance'] = {'source_fragments':len(aliases), 'source_characters':size,
                 'source_read_complete':offset is None and not truncated,
                 'model_input_characters':sum(len(m.get('content') or '') for m in messages),

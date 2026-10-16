@@ -29,7 +29,7 @@ export function analysisView(snapshot:ChatSnapshot|null,upload?:UploadProgress,s
   // A new submission must not inherit the previous run's completed/failed stage.
   if(submitting)return {kind:'processing',title:'正在提交分析任务',detail:'材料已收到，准备开始分析',percent:0,index:-1};
   const material=snapshot?.material_report;
-  if(material?.status==='available')return {kind:'processing',title:'暖暖正在把情况讲清楚',detail:'正在写好解读并核对内容，准备好后会直接显示在对话里',percent:Math.round((steps.length-1)/steps.length*100),index:4};
+  if(material?.status==='available')return {kind:'processing',title:'暖暖正在把情况讲清楚',detail:'正在整理完整解读并核对本次材料，准备好后会直接显示在对话里',percent:Math.round((steps.length-1)/steps.length*100),index:4};
   if((snapshot?.analysis.error as {code?:string}|undefined)?.code==='REPORT_MODEL_BALANCE_EXHAUSTED')return {kind:'failed',title:'分析服务暂不可用',detail:'材料已保存，无需重新上传。服务恢复后可以重新分析。',percent:null,index:-1};
   if(material?.status==='failed' || snapshot?.analysis.status==='failed')return {kind:'failed',title:'报告生成没有完成',detail:'材料已保存，可以重新分析。',percent:null,index:-1};
   if(snapshot?.analysis.status==='cancelled')return {kind:'failed',title:'这次分析已取消',detail:'材料已保存，可以重新分析。',percent:null,index:-1};

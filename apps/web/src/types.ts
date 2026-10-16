@@ -75,6 +75,7 @@ export interface ChatAnswer {text: string; evidence_refs: string[]; history_refs
   memory_refs?:{memory_id:string;version:number;epoch:number}[];memory_status?:string;memory_unavailable?:boolean;
   clarification_questions?:ClarificationQuestion[];suggested_questions?:string[];patient_updates?:PatientUpdate[];
   service_guide?:{text:string;policy_status:'demo_assumed_midhigh'};medical_services?:MedicalServices;
+  sample_preload?:boolean;
   guidance_delivery?:{status:'passed'|'needs_improvement'|'unchecked';notice?:string};
   prompt_version?:string; analysis_run_id?:string; knowledge_refs?:string[]; knowledge_sources?:KnowledgeSource[]; citations?:InlineCitation[]}
 export interface MedicalServiceCard {
