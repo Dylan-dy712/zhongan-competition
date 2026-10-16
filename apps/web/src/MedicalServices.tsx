@@ -1,6 +1,5 @@
 import {useEffect,useId,useRef,useState} from 'react';
 import type {MedicalServiceCard,MedicalServices} from './types';
-import reading from '../../../output_dir/product-design/assets/nuan-reading-v1.webp';
 import benefitSmall from './assets/medical-services/benefit-v1-384.webp';
 import benefitLarge from './assets/medical-services/benefit-v1-768.webp';
 import hospitalSmall from './assets/medical-services/hospital-v1-384.webp';
@@ -10,10 +9,6 @@ import onlineLarge from './assets/medical-services/online-v1-768.webp';
 import './medical-services.css';
 
 type Ask=(message:string)=>Promise<boolean>;
-const invitation='如果你想了解保单里的医疗增值服务，或想找适合复查的医院、在线咨询的医生，也可以继续问我，我陪你一起看看。';
-const guideActions=[['看看我的医疗权益','我想了解中高端保单里有哪些医疗增值权益适合我，请结合刚才的情况推荐。'],
-  ['找复查医院','我想找适合这次复查的公立或私立医院，请结合已提供的就医地区看看附近的选择，缺少地区时再问我。'],
-  ['了解在线咨询','请结合我的情况，介绍众安互联网医院有哪些适合的在线咨询服务。']];
 const serviceArtwork={benefit:[benefitSmall,benefitLarge],hospital:[hospitalSmall,hospitalLarge],online:[onlineSmall,onlineLarge]};
 
 function ServiceArtwork({kind}:{kind:MedicalServiceCard['kind']}) {
@@ -32,14 +27,8 @@ function ServiceIcon({kind}:{kind:MedicalServiceCard['kind']}) {
   </svg>;
 }
 
-export function ReportServiceGuide({text=invitation,onAsk,disabled=false}:{text?:string;onAsk?:Ask;disabled?:boolean}) {
-  return <aside className="medical-guide" aria-label="解读后的医疗服务引导">
-    <img src={reading} alt=""/>
-    <div className="medical-guide-copy"><span className="medical-eyebrow">关怀，还可以多走一步</span>
-      <h3>需要下一步的就医帮助，也可以问我</h3><p>{text}</p>
-      <div className="medical-guide-actions">{guideActions.map(([label,message])=><button type="button" key={label} disabled={disabled||!onAsk} onClick={()=>void onAsk?.(message)}>{label}<span aria-hidden="true">↗</span></button>)}</div>
-    </div>
-  </aside>;
+export function ReportServiceGuide(_props:{text?:string;onAsk?:Ask;disabled?:boolean}) {
+  return <p className="medical-guide-note">需要下一步的就医帮助，也可以问我</p>;
 }
 
 function ServicePreview({card,onClose,onAsk,disabled}:{card:MedicalServiceCard;onClose:()=>void;onAsk:Ask;disabled:boolean}) {

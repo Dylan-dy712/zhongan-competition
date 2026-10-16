@@ -1,13 +1,15 @@
 import {useRef,useState} from 'react';
 import type {ChatAnswer,PatientField} from './types';
+import {distinctFollowupChoices} from './followupChoices';
 import './chat-followups.css';
 
 const fieldLabels:Record<PatientField,string>={followup_time:'复查时间',followup_location:'复查医院',
   medication:'用药情况',allergy:'过敏情况',recovery_status:'恢复情况'};
 
-export default function ChatFollowups({answer,disabled,onSend}:{answer:ChatAnswer;disabled:boolean;onSend:(message:string)=>Promise<boolean>}) {
+export default function ChatFollowups({answer,disabled,onSend,report=false}:{answer:ChatAnswer;disabled:boolean;onSend:(message:string)=>Promise<boolean>;report?:boolean}) {
   const [selections,setSelections]=useState<Partial<Record<PatientField,string>>>({});
   const [drafts,setDrafts]=useState<Partial<Record<PatientField,string>>>({});
+  const [generalDraft,setGeneralDraft]=useState('');
   const submitting=useRef(false);
   const questions=answer.clarification_questions||[];
   const suggestions=[...new Set(answer.suggested_questions||[])].slice(0,3);
@@ -16,8 +18,23 @@ export default function ChatFollowups({answer,disabled,onSend}:{answer:ChatAnswe
   const completed=responses.filter(response=>response.value).length;
   const message='我补充一下这次的就医信息：\n'+responses.map(response=>`${fieldLabels[response.field]}：${response.value||''}`).join('\n');
   const ready=completed===questions.length&&message.length<=4000;
-  if(!questions.length&&!suggestions.length)return null;
+  if(!report&&!questions.length&&!suggestions.length)return null;
   return <div className="chat-followups">
+    {report&&!questions.length&&<section className="clarification-section" aria-label="补充就医信息">
+      <h3><span aria-hidden="true">✦</span> 再了解一点，更好地陪你</h3>
+      <p>这次就医还有哪些情况想补充或更正？比如目前的感受，或医生口头交代的事。</p>
+      <form className="clarification-form" onSubmit={async event=>{
+        event.preventDefault();if(disabled||submitting.current||!generalDraft.trim())return;
+        submitting.current=true;
+        try{if(await onSend('我想补充或更正这次就医的信息：\n'+generalDraft.trim()))setGeneralDraft('');}
+        finally{submitting.current=false;}
+      }}>
+        <label>补充或更正就医信息<textarea rows={2} maxLength={3800} value={generalDraft} disabled={disabled}
+          placeholder="按你知道的情况填写，不清楚的可以先留着" onChange={event=>setGeneralDraft(event.target.value)}/></label>
+        <button type="submit" disabled={disabled||!generalDraft.trim()}>{disabled?'正在回复…':'提交补充'}</button>
+        <small>自愿补充，不确定的内容可以先不填。</small>
+      </form>
+    </section>}
     {questions.length>0&&<section className="clarification-section" aria-label="补充就医信息">
       <h3><span aria-hidden="true">✦</span> 再了解一点，更好地陪你</h3>
       <form onSubmit={async event=>{
@@ -29,7 +46,7 @@ export default function ChatFollowups({answer,disabled,onSend}:{answer:ChatAnswe
       {questions.map(question=><div className="clarification-question" key={question.field}>
         <p>{question.question}</p>
         <div className="clarification-choices">
-          {question.options.map((option,i)=><button type="button" key={i} disabled={disabled} aria-pressed={selections[question.field]===option.message}
+          {distinctFollowupChoices(question.options).map((option,i)=><button type="button" key={i} disabled={disabled} aria-pressed={selections[question.field]===option.message}
             onClick={()=>setSelections(previous=>({...previous,[question.field]:option.message}))}>{option.label}</button>)}
           <button type="button" disabled={disabled} aria-pressed={selections[question.field]==='unknown'}
             onClick={()=>setSelections(previous=>({...previous,[question.field]:'unknown'}))}>暂不确定</button>

@@ -11,16 +11,25 @@ export {brand,reading};
 
 export function EvidencePanel({evidence,onClose,token=''}:{evidence:Evidence;onClose:()=>void;token?:string}) {
   const dialog=useRef<HTMLDialogElement>(null),[image,setImage]=useState(''),[imageError,setImageError]=useState('');
+  const [regions,setRegions]=useState<Array<[number,number,number,number]>>([]),[loading,setLoading]=useState(false);
+  const pdf=evidence.media_type==='application/pdf';
   useEffect(()=>{let active=true,url='';const previous=document.activeElement as HTMLElement;dialog.current?.showModal();setImage('');setImageError('');
-    if(token&&evidence.media_type?.startsWith('image/')&&evidence.case_id)void getEvidenceImage(token,evidence).then(value=>{url=value;if(active)setImage(value);else URL.revokeObjectURL(value);}).catch(()=>{if(active)setImageError('原图暂不可用，下面保留已识别的原文摘录。');});
+    setRegions([]);
+    const previewable=Boolean(token&&evidence.case_id&&(pdf||evidence.media_type?.startsWith('image/')));
+    setLoading(previewable);
+    if(previewable)void getEvidenceImage(token,evidence).then(value=>{url=value.url;if(active){setImage(value.url);setRegions(value.regions);}else URL.revokeObjectURL(value.url);})
+      .catch(()=>{if(active)setImageError('页面预览暂不可用，已保留原文摘录，可以稍后重试。');})
+      .finally(()=>{if(active)setLoading(false);});
     return()=>{active=false;if(url)URL.revokeObjectURL(url);dialog.current?.close();previous?.focus?.();};
   },[evidence.evidence_id,token]);
-  const box=evidence.bbox;
   return <dialog ref={dialog} className="source-sheet" aria-labelledby="care-evidence-title" onCancel={e=>{e.preventDefault();onClose();}}>
     <header><div><small>用户上传的材料</small><h2 id="care-evidence-title">{evidence.source_name||'原始材料依据'}</h2></div><button onClick={onClose} aria-label="关闭原始依据">×</button></header>
     <p>{evidence.document_type||'就医材料'} · {evidence.page_index===null?'页码待核对':`第 ${evidence.page_index+1} 页`} · 材料版本 {evidence.document_version}</p>
-    <blockquote>{evidence.text_span?.text || '此证据暂无文字片段。'}</blockquote>
-    {image&&<div className="source-image"><img src={image} alt="来源材料原图"/>{box&&<span aria-label="原文所在区域" style={{left:`${box[0]*100}%`,top:`${box[1]*100}%`,width:`${(box[2]-box[0])*100}%`,height:`${(box[3]-box[1])*100}%`}}/>}</div>}
+    <blockquote className="source-excerpt" tabIndex={0} aria-label="引用原文摘录">{evidence.text_span?.text || '此证据暂无文字片段。'}</blockquote>
+    {loading&&<p role="status">正在加载{pdf?' PDF 对应页':'原图'}…</p>}
+    {image&&<><p className="source-image-hint">{regions.length?'橙色框标出这条引用的原文区域。':'该页暂未定位到准确区域，请结合原文摘录核对。'}</p>
+      <div className="source-image"><img src={image} alt={pdf?`PDF 第 ${(evidence.page_index??0)+1} 页原文预览`:'来源材料原图'}
+        onError={()=>{setImage('');setImageError('页面预览暂不可用，已保留原文摘录，可以稍后重试。');}}/>{regions.map((box,index)=><span key={index} aria-label="原文所在区域" style={{left:`${box[0]*100}%`,top:`${box[1]*100}%`,width:`${(box[2]-box[0])*100}%`,height:`${(box[3]-box[1])*100}%`}}/>)}</div></>}
     {imageError&&<p role="status">{imageError}</p>}
   </dialog>;
 }

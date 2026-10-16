@@ -1,0 +1,12 @@
+[
+  {"name":"medical signs remain distinct","options":[{"label":"检验标记为阳性","message":"检验标记为（+）。"},{"label":"检验标记为阴性","message":"检验标记为（-）。"},{"label":"检验标记为可疑","message":"检验标记为（±）。"}],"expected":["检验标记为阳性","检验标记为阴性","检验标记为可疑"]},
+  {"name":"other generic uncertainty","options":[{"label":"不太确定","message":"我不太确定。"},{"label":"还没确定","message":"我还没确定。"},{"label":"暂时无法确定","message":"我暂时无法确定。"}],"expected":[]},
+  {"name":"uncertainty synonyms","options":[{"label":"还不确定","message":"我还不确定复查时间。"},{"label":"暂不确定","message":"我暂不确定。"},{"label":"暂时不清楚","message":"我不清楚。"}],"expected":[]},
+  {"name":"punctuation and whitespace","options":[{"label":"  我还不知道。 ","message":"我不知道。"},{"label":"目前还不清楚复查时间","message":"我不清楚复查时间。"},{"label":"不知道药名","message":"我不知道药名。"}],"expected":[]},
+  {"name":"custom entry synonyms","options":[{"label":"我来补充","message":"我来补充。"},{"label":"其他","message":"我有其他情况。"},{"label":"自行填写","message":"我自行填写。"}],"expected":[]},
+  {"name":"same label with punctuation","options":[{"label":"医生还没交代","message":"医生还没交代复查时间。"},{"label":"医生还没交代。","message":"医生没有说明具体时间。"}],"expected":["医生还没交代"]},
+  {"name":"same message with different label","options":[{"label":"医生未说明","message":"医生没有交代复查时间。"},{"label":"医生没说时间","message":"医生没有交代复查时间！"}],"expected":["医生未说明"]},
+  {"name":"distinct clinical answers and negation","options":[{"label":"没有已知过敏史","message":"我没有已知过敏史。"},{"label":"曾有药物过敏","message":"我曾有药物过敏。"},{"label":"不确定是否药物过敏","message":"我不确定那次是否是药物过敏。"}],"expected":["没有已知过敏史","曾有药物过敏","不确定是否药物过敏"]},
+  {"name":"specific uncertainty is preserved","options":[{"label":"医生还没交代","message":"医生还没交代复查时间。"},{"label":"检查结果尚不确定","message":"我的检查结果尚不确定。"},{"label":"不清楚是否需要空腹","message":"我不清楚复查是否需要空腹。"}],"expected":["医生还没交代","检查结果尚不确定","不清楚是否需要空腹"]},
+  {"name":"no generated choices","options":[],"expected":[]}
+]
