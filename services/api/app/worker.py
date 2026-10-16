@@ -466,9 +466,18 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
         material = "\n\n".join(
             page["text"] for _document, pages in parsed_documents for page in pages if page["text"]
         )
+        fully_prepared=bool(prepared_sample_pages and prepared_sample_pages==sum(len(pages) for _,pages in parsed_documents))
         prepared_by_page={(document['document_id'],document['document_version'],page['page_index']):evidence_for_page(document,page)
             for document,pages in parsed_documents for page in pages}
         fact_inputs=[row for rows in prepared_by_page.values() for row in rows]
+        narrative_sources={}
+        if fully_prepared:
+            from .page_sources import narrative_page_source
+            for document,pages in parsed_documents:
+                for page in pages:
+                    identity=(document['document_id'],document['document_version'],page['page_index'])
+                    source=narrative_page_source(document,page,prepared_by_page[identity])
+                    if source:narrative_sources[identity]=[source]
         encounter_keys = assign_encounter_keys(parsed_documents)
         for row in fact_inputs:
             row["encounter_key"] = encounter_keys[(row["document_id"], row["document_version"],
@@ -494,7 +503,6 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
                FROM cases c JOIN consents co ON co.consent_id=c.consent_id WHERE c.case_id=%s""",
             (run["case_id"],),
         ).fetchone()
-        fully_prepared=bool(prepared_sample_pages and prepared_sample_pages==sum(len(pages) for _,pages in parsed_documents))
         preloaded_models=None
         if fully_prepared and not knowledge_excluded:
             from .judge_model_cache import read_models
@@ -514,6 +522,8 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
 
         advance('validate')
         evidence_ids = [str(row['evidence_id']) for row in fact_inputs]
+        evidence_ids.extend(str(row['evidence_id']) for rows in narrative_sources.values() for row in rows)
+        performance['narrative_source_spans']=sum(len(rows) for rows in narrative_sources.values())
         routing = []
         waiting_review = any(
             page["requires_ocr"] or page["requires_vision"] or page["status"] == "unreadable"
@@ -592,7 +602,8 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
                              ("pdf_text_layer" if document["media_type"] == "application/pdf" else "controlled_text"),
                              document["source_hash"], page["parser_version"]),
                         )
-                    for row in prepared_by_page[(document['document_id'],document['document_version'],page['page_index'])]:
+                    identity=(document['document_id'],document['document_version'],page['page_index'])
+                    for row in [*prepared_by_page[identity],*narrative_sources.get(identity,[])]:
                         evidence_id,start,end,value,bbox=(row[key] for key in ('evidence_id','start','end','text','bbox'))
                         conn.execute(
                             """INSERT INTO evidence
@@ -603,7 +614,7 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
                             (evidence_id, run["run_id"], run["case_id"], document["document_id"],
                              document["document_version"], page["page_index"], start, end, value,
                              json.dumps(bbox),
-                             page_ocr_method(page) or
+                             row.get('extraction_method') or page_ocr_method(page) or
                              ("pdf_text_layer" if document["media_type"] == "application/pdf" else "controlled_text"),
                              document["source_hash"], page["parser_version"]),
                         )
