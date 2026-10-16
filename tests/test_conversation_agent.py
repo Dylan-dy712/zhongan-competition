@@ -17,6 +17,34 @@ def answer(text='你好', refs=None):
 
 
 class AgentTests(unittest.TestCase):
+    def test_history_lookup_promise_executes_search_and_finishes_in_same_turn(self):
+        for promise in ['我帮你翻翻之前的记录，稍等。','我查一下。','我先找一下之前的记录。']:
+            with self.subTest(promise=promise):
+                model,tools=MagicMock(),MagicMock()
+                model.complete.side_effect=[answer(promise),answer('此前材料记录是合成的历史情况，具体以原文和当前就诊为准。')]
+                tools.execute.return_value={'status':'found','messages':[{'question':'合成原话','material_context':{'sections':[]}}]}
+                result,events=run_agent([],'你记得我上次看了什么病吗',[],tools,model=model)
+                self.assertIn('此前材料记录',result['text'])
+                self.assertEqual(tools.execute.call_args.args[0],'search_history')
+                self.assertEqual(events,[{'tool':'search_history','status':'found'}])
+                self.assertEqual(model.complete.call_count,2)
+
+    def test_repeated_history_promise_is_not_saved_as_completed_answer(self):
+        model,tools=MagicMock(),MagicMock()
+        model.complete.return_value=answer('我帮你翻翻之前的记录，稍等。')
+        tools.execute.return_value={'status':'empty','messages':[]}
+        with self.assertRaisesRegex(ValueError,'AGENT_INCOMPLETE_REPLY'):
+            run_agent([],'你记得我上次看了什么病吗',[],tools,model=model)
+        tools.execute.assert_called_once()
+        self.assertEqual(model.complete.call_count,2)
+
+    def test_completed_history_answer_and_explicit_failure_do_not_trigger_a_new_lookup(self):
+        for text in ['我翻看了之前的记录，原文保留了“疑似”的限定。','没有找到可访问的记录，请补充原始材料。']:
+            model,tools=MagicMock(),MagicMock();model.complete.return_value=answer(text)
+            result,_=run_agent([],'你记得上次的病吗',[],tools,model=model)
+            self.assertEqual(result['text'],text)
+            tools.execute.assert_not_called()
+
     def test_chat_repairs_a_citation_quote_that_does_not_match_the_final_text(self):
         model, tools = MagicMock(), MagicMock()
         data = {'text': '合成知识说明。', 'knowledge_refs': ['synthetic-knowledge'],

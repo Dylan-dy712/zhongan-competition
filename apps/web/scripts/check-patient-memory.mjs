@@ -29,6 +29,7 @@ try{
   assert.ok(!calls.some(path=>/memor/.test(path)),'Opening/switching account page must not request manual memory settings');
   const chat=await readFile(new URL('../src/App.tsx',import.meta.url),'utf8');
   assert.ok(!/PatientMemory|memoryPanel|选择这条消息作为记忆来源|本对话的关怀记忆/.test(chat));
+  assert.ok(!/history-reference|条当前就诊人的历史对话/.test(chat),'Do not display internal history retrieval counts');
   console.log('Automatic memory UI: no manual confirmation or memory board; member switching makes no memory-editor requests.');
 }finally{
   await act(async()=>root.unmount());await modules.close();
