@@ -111,6 +111,13 @@ def normalize_report_wire(content, knowledge_ids):
     if 'review_notes' in data:
         data.pop('review_notes')
         changes.append('review_notes_removed')
+    # Some providers repeat the root actions key as an empty per-section array.
+    # Empty arrays carry no action or clinical content; nonempty extras remain
+    # strict schema errors and must never be silently deleted or reassigned.
+    for section in data.get('sections',[]) if isinstance(data.get('sections'),list) else []:
+        if isinstance(section,dict) and section.get('actions')==[]:
+            section.pop('actions')
+            changes.append('empty_section_actions_removed')
     analysis = data.get('patient_analysis')
     allowed = set(knowledge_ids)
     if isinstance(analysis, dict) and isinstance(analysis.get('citations'), list):
@@ -198,6 +205,7 @@ def draft_report(material: str, reviewable_knowledge: list[dict], user_context: 
     if defer_patient_analysis:
         messages[0]['content'] += (
             '本轮只输出完整六节结构化分析和有来源的行动，patient_analysis必须为null。'
+            'sections每项只含section_type和claims；行动只放根对象actions，不在章节内重复actions。'
             '不要提前生成对话页的患者正文、段落引用或补问。下一阶段将根据本次已授权原文生成完整患者正文，'
             '并独立核对原文和阅读质量；本轮仍必须保留六节分析的事实、知识来源、限定及待核实项。')
     first_payload = None
@@ -303,7 +311,9 @@ def draft_report(material: str, reviewable_knowledge: list[dict], user_context: 
                     repairing=True
                     continue
                 messages += [{"role": "assistant", "content": content},
-                             {"role": "user", "content": "按最初Schema修复具体错误，保留六段、完整patient_analysis正文和原有真实知识引用，不增加新事实。"
+                             {"role": "user", "content": (
+                              "按最初Schema修复具体错误，保留完整六节、原有事实、行动和真实知识引用；patient_analysis仍为null。sections每项只含section_type和claims，不含actions；行动只放根对象actions。不添加正文、追问或新事实。"
+                              if defer_patient_analysis else "按最初Schema修复具体错误，保留六段、完整patient_analysis正文和原有真实知识引用，不增加新事实。")+
                               "根对象只含sections、actions、patient_analysis；citation只含quote和source_refs，一般知识ID也放在source_refs。"
                               "引用quote必须逐字来自正文，不能跨行且只出现一次，source_refs只使用提供的来源。定位错误项："+
                               json.dumps({'validation_code':diagnostics[-1]['validation_code'],'schema_errors':schema_errors,
