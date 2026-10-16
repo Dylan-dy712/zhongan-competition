@@ -323,7 +323,7 @@ def route_document(document: dict, path: Path, pipeline_version: str, ocr: Ocr |
 
 
 def analyze_models(material, knowledge_entries, user_context, source_refs, fact_inputs,
-                   encounter_dates, advance, knowledge_excluded=False, memory_context=None):
+                   encounter_dates, advance, knowledge_excluded=False, memory_context=None, defer_patient_analysis=False):
     """Overlap independent network calls; SQL and release checks stay on the caller."""
     started = time.monotonic()
     timings = {}
@@ -370,7 +370,8 @@ def analyze_models(material, knowledge_entries, user_context, source_refs, fact_
             report = measured('guidance_seconds', draft_report, material, reviewable, user_context,
                 user_sources=source_refs, memory_context=memory_context, structured_costs=report_cost_context(fact_inputs,fields['candidates'].get('cost_lines',[])),
                 personnel=fields.get('personnel',[]), normalized_dates=encounter_dates, analysis_sources=packed,
-                care_priorities=priorities, structured_fields=fields.get('candidates',{}))
+                care_priorities=priorities, structured_fields=fields.get('candidates',{}),
+                **({'defer_patient_analysis':True} if defer_patient_analysis else {}))
             report.setdefault('usage_metadata',{})['web_search']=web_search
             report['reference_knowledge']=reviewable
             shared = report['draft'].get('patient_analysis')
@@ -413,7 +414,7 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
         advance('parse')
         source_refs=context_sources(conn,run)
         fingerprint,accepted_versions=recognition_profile(run['pipeline_version'])
-        reused_pages=recognized_pages=0
+        reused_pages=recognized_pages=prepared_sample_pages=0
         for reference in run["document_versions"]:
             document = conn.execute(
                 """SELECT * FROM documents WHERE case_id=%s AND document_id=%s
@@ -436,6 +437,7 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
                     from .judge_sample_cache import reviewed_document_pages
                     prepared=reviewed_document_pages(conn,document,fingerprint,accepted_versions)
                     cached={**prepared,**cached}
+                    prepared_sample_pages+=len(prepared)
             def checkpoint(page):
                 # Commit each successful page before another OCR/model request.
                 with conn.transaction():
@@ -492,9 +494,11 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
             run['context_snapshot']['case_user_context'] if run.get('context_snapshot') else
             (case_meta["user_context"] if case_meta else None),
             source_refs, fact_inputs, encounter_dates, advance, knowledge_excluded,
-            memory_context=(run.get('context_snapshot') or {}).get('memory'))
+            memory_context=(run.get('context_snapshot') or {}).get('memory'),
+            **({'defer_patient_analysis':True} if prepared_sample_pages and prepared_sample_pages==sum(len(pages) for _,pages in parsed_documents) else {}))
         performance['parse_prepare_seconds'] = round(parse_seconds,3)
         performance['recognition_cache']={'reused_pages':reused_pages,'processed_pages':recognized_pages}
+        performance['patient_analysis_mode']=report_model_result.get('usage_metadata',{}).get('patient_analysis_mode','shared')
 
         advance('validate')
         evidence_ids = [str(row['evidence_id']) for row in fact_inputs]

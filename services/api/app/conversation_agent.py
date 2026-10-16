@@ -303,12 +303,16 @@ class CareTools:
         if report.get('status') != 'available':
             return None
         self.track_report_memory(report['run_id'])
-        row = self.conn.execute('''SELECT candidates->'patient_analysis' AS draft,usage_metadata
+        row = self.conn.execute('''SELECT candidates->'patient_analysis' AS draft,candidates AS structured,usage_metadata
             FROM model_extractions WHERE run_id=%s AND prompt_version=%s
             AND model_id=%s AND provider=%s AND status='completed' ORDER BY created_at DESC LIMIT 1''',
             (report['run_id'],report_prompt,os.environ.get('LLM_MODEL_ID',''),
              os.environ.get('LLM_PROVIDER','openai_compatible'))).fetchone()
         self.draft_guidance_delivery=(row.get('usage_metadata') or {}).get('guidance_delivery') if row else None
+        if row and (row.get('usage_metadata') or {}).get('patient_analysis_mode')=='deferred':
+            self.deferred_knowledge_refs=list(dict.fromkeys(ref
+                for section in (row.get('structured') or {}).get('sections',[])
+                for claim in section.get('claims',[]) for ref in claim.get('knowledge_refs',[])))[:12]
         if row and (row.get('usage_metadata') or {}).get('patient_analysis_rejected'):
             return None
         self.shared_analysis_run=report['run_id'] if row and row['draft'] else None
@@ -356,6 +360,7 @@ class CareTools:
         self.evidence_ids, self.history_ids, self.history_cases = set(), set(), set()
         self.turn_id=turn_id
         self.knowledge_sources = {}
+        self.deferred_knowledge_refs = []
         self.force_analysis = force_analysis
         self.memory_snapshot = None
         self.history_versions = {}
@@ -714,8 +719,10 @@ def run_agent(history, question, attachments, tools, model=None, on_event=None, 
                                   'spans':[[item['entry_id'],item['content']+'\n适用范围：'+item['scope']]]}
                                  for item in found['results']]
             case_text='\n'.join(span[1] for page in packed for span in page['spans'])
-            if initial_analysis:
-                resolved=tools.resolve_draft_knowledge(initial_analysis,case_text)
+            deferred_refs=getattr(tools,'deferred_knowledge_refs',[])
+            reference_draft=initial_analysis or ({'knowledge_refs':deferred_refs} if deferred_refs else None)
+            if reference_draft:
+                resolved=tools.resolve_draft_knowledge(reference_draft,case_text)
                 known={page['document'] for page in knowledge_pages}
                 knowledge_pages.extend({'document':item['entry_id'],'page':0,'source_kind':'general_knowledge',
                     'spans':[[item['entry_id'],item['content']+'\n适用范围：'+item['scope']]]}

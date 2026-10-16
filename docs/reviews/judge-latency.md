@@ -38,3 +38,17 @@ warnings and excluded blocks, and bounded review transport failure handling.
 End-to-end timing must include report generation and final patient explanation;
 OCR prewarming is reported separately and does not guarantee an external model's
 latency under all load conditions.
+
+## Generate patient prose once
+
+The first real post-deployment trial reused all 13 OCR pages in 0.43 seconds,
+but total wait remained 165.8 seconds: report drafting took 104.3 seconds and
+the patient explanation took another 61.5 seconds because its initial body was
+source-rejected and regenerated. This did not meet the two-minute target.
+
+Fully prepared reviewed-sample runs now generate the six-section structured
+report first, with `patient_analysis=null`. The final conversation step generates
+the complete patient body and follow-up questions once, retaining independent
+source review, all citation checks and the existing reading-quality check.
+The structured report retains all six sections and its source/safety validation.
+Ordinary cases and unprepared inputs keep the existing shared-body path.
