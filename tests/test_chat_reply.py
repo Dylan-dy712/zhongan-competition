@@ -7,6 +7,13 @@ from services.api.app.conversation_agent import AgentReply, CareTools, run_agent
 from services.api.app.inline_citations import bind_citations
 
 class ChatReplyTests(unittest.TestCase):
+    def test_known_turn_reference_is_history_and_unknown_uuid_remains_subject_to_checks(self):
+        history,unknown=str(uuid4()),str(uuid4())
+        wire={'paragraphs':[{'text':'合成历史回答。','source_refs':[history,unknown]}]}
+        reply=decode_chat_reply(json.dumps(wire),{history})
+        self.assertEqual(reply['history_refs'],[history])
+        self.assertEqual(reply['evidence_refs'],[unknown])
+        self.assertEqual(reply['citations'][0]['source_refs'],[unknown])
     def test_delivered_paragraph_itself_is_the_citation_anchor(self):
         ref=str(uuid4())
         wire={'paragraphs':[{'text':'1. **合成材料原文**','source_refs':[ref]},

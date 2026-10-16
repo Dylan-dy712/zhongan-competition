@@ -964,9 +964,10 @@ def process_chat_message(conversation_id, body, actor_id, conn, input_kind='user
             memory_snapshot, history = memory_service.prepare_context(conn, actor_id, conversation_id, question, history)
             tools.memory_snapshot = memory_snapshot
             for item in memory_snapshot['items']:
-                if item.get('source_kind') == 'historical_user_message':
+                if item.get('source_kind') in {'historical_user_message','historical_material_report'}:
                     tools.history_ids.add(item['source_turn_id'])
                     tools.history_cases.add(item['source_case_id'])
+                    tools.evidence_ids.update(item.get('evidence_refs',[]))
         elif analysis_run_id is not None:
             from .report_memory import check_report_refs, references
             frozen=conn.execute('SELECT case_id,context_snapshot FROM analysis_runs WHERE run_id=%s AND case_id=%s',

@@ -611,6 +611,143 @@ class AutomaticHistoryTests(unittest.TestCase):
             conn.execute("INSERT INTO consent_purposes(consent_id,purpose,status,granted_at) VALUES (%s,'case_guidance','active',now())",(consent,))
             conn.execute('UPDATE cases SET consent_id=%s WHERE case_id=(SELECT case_id FROM conversations WHERE conversation_id=%s)',(consent,self.source))
 
+    @contextmanager
+    def material_fixture(self):
+        from services.api.app import worker
+        from services.api.app.report_builder import SECTION_TYPES
+        from services.api.app.material_report import get_material_report
+        text='【合成测试材料】诊断：不能排除合成性肩关节损伤，需结合临床。'
+        with tempfile.TemporaryDirectory(prefix='synthetic-history-material-') as directory:
+            api.app.dependency_overrides[api.document_storage_root]=lambda:Path(directory)
+            uploaded=self.client.post(f'/v1/conversations/{self.source}/documents',headers=self.headers,
+                files={'file':('synthetic-history.txt',text.encode(),'text/plain')})
+            self.assertEqual(uploaded.status_code,201,uploaded.text)
+            submitted=self.client.post(f'/v1/conversations/{self.source}/analyses',headers=self.headers,
+                json={'request_id':str(uuid4()),'message':'【合成】请分析上传材料','document_ids':[uploaded.json()['document_id']]})
+            self.assertEqual(submitted.status_code,200,submitted.text)
+            run_id=UUID(submitted.json()['tool_events'][0]['run_id'])
+            def model(material,knowledge,context,sources,facts,*args,**kwargs):
+                fields={'status':'not_configured','raw_output':None,'repaired_output':None,
+                    'candidates':{'candidates':[]},'personnel':[],'usage_metadata':{},'error_code':'SYNTHETIC_ONLY'}
+                insights={'status':'not_configured','candidates':[],'raw_output':None,'usage_metadata':{},'error_code':'SYNTHETIC_ONLY'}
+                draft={'sections':[{'section_type':kind,'claims':[{'text':text,'claim_type':'case_fact',
+                    'evidence_refs':[str(facts[0]['evidence_id'])],'evidence_quote':text}]} for kind in SECTION_TYPES], 'actions':[]}
+                report={'status':'completed','draft':draft,'raw_output':draft,'repaired_output':None,'usage_metadata':{},'error_code':None}
+                return fields,insights,report,'synthetic','history-material-test',{}
+            with self.connection() as conn:
+                conn.autocommit=True
+                claimed=worker.claim_run(conn)
+                self.assertEqual(claimed['run_id'],run_id)
+                with patch.object(worker,'analyze_models',side_effect=model):worker.process_run(conn,claimed,Path(directory))
+                material=get_material_report(conn,self.actor,UUID(self.source))
+                self.assertEqual(material['status'],'available',material)
+                self.assertTrue(any(section['items'] for section in material['sections']))
+                yield conn,material,text
+
+    def test_historical_material_diagnosis_is_available_without_a_user_restating_it(self):
+        with self.material_fixture() as (conn,material,text):
+            def reply(messages,**kwargs):
+                items=[item for message in messages if message['role']=='user' and message['content'].startswith('{')
+                    for item in json.loads(message['content']).get('care_memory',[])]
+                packet=next(item for item in items if item['source_kind']=='historical_material_report')
+                self.assertIn(text,packet['content'])
+                self.assertIn('不能排除',packet['content'])
+                return answer(text=text,evidence_refs=packet['evidence_refs'][:1],history_refs=[packet['source_turn_id']])
+            model=MagicMock();model.complete.side_effect=reply
+            response,_=self.send('你记得我上次看了什么病吗',model=model)
+            self.assertEqual(response.status_code,200,response.text)
+            self.assertTrue(any(ref.get('material') for ref in response.json()['answer']['history_source_refs']))
+            family_response,family_model=self.send('我上次看什么病',conversation=self.conversation(self.family))
+            self.assertEqual(family_response.status_code,200,family_response.text)
+            self.assertNotIn(text,json.dumps(family_model.complete.call_args.args[0],ensure_ascii=False))
+
+    def test_material_invalidation_masks_old_derived_answer_even_when_user_turn_is_valid(self):
+        with self.material_fixture() as (conn,material,text):
+            response,_=self.send('我上次看什么病')
+            self.assertEqual(response.status_code,200,response.text)
+            conn.execute("UPDATE reports SET status='invalidated' WHERE run_id=%s",(material['run_id'],))
+            saved=self.client.get(f'/v1/conversations/{self.target}',headers=self.headers)
+            old=next(row for row in saved.json()['turns'] if row['turn_id']==response.json()['turn_id'])
+            self.assertTrue(old['answer']['memory_unavailable'])
+            response,model=self.send('还记得上次吗')
+            self.assertEqual(response.status_code,200,response.text)
+            self.assertNotIn(text,json.dumps(model.complete.call_args.args[0],ensure_ascii=False))
+
+    def test_material_change_during_generation_discards_the_answer(self):
+        with self.material_fixture() as (conn,material,text):
+            def change(messages,**kwargs):
+                conn.execute("UPDATE reports SET status='invalidated' WHERE run_id=%s",(material['run_id'],))
+                return answer()
+            model=MagicMock();model.complete.side_effect=change
+            response,_=self.send('你记得上次看了什么病吗',model=model)
+            self.assertEqual(response.status_code,409,response.text)
+            self.assertEqual(response.json()['code'],'MEMORY_CONTEXT_CHANGED')
+
+    def test_unknown_historical_material_citation_gets_one_authorized_metadata_repair(self):
+        with self.material_fixture() as (conn,material,text):
+            count=0
+            def model_response(messages,**kwargs):
+                nonlocal count
+                count+=1
+                if count==1:
+                    return {'content':json.dumps({'paragraphs':[{'text':text,'source_refs':[str(uuid4())]}]})}
+                self.assertIn('本轮引用标识未通过校验',messages[-1]['content'])
+                allowed=json.loads(messages[-1]['content'][messages[-1]['content'].index('{'):])
+                self.assertTrue(allowed['evidence_refs'])
+                return {'content':json.dumps({'paragraphs':[{'text':text,'source_refs':allowed['evidence_refs'][:1]}]})}
+            model=MagicMock();model.complete.side_effect=model_response
+            response,_=self.send('你记得我上次看了什么病吗',model=model)
+            self.assertEqual(response.status_code,200,response.text)
+            self.assertEqual(model.complete.call_count,2)
+            self.assertTrue(response.json()['answer']['evidence_refs'])
+
+    def test_a_plain_history_tool_lookup_cannot_erase_a_material_dependency(self):
+        with self.material_fixture() as (conn,material,text):
+            def model_response(messages,**kwargs):
+                if not any(message['role']=='tool' for message in messages):
+                    return {'content':None,'tool_calls':[{'id':'plain-history','type':'function',
+                        'function':{'name':'search_history','arguments':'{"query":"分析"}'}}]}
+                conn.execute("UPDATE reports SET status='invalidated' WHERE run_id=%s",(material['run_id'],))
+                return answer()
+            model=MagicMock();model.complete.side_effect=model_response
+            response,_=self.send('你记得我上次看了什么病吗',model=model)
+            self.assertEqual(response.status_code,409,response.text)
+
+    def test_history_lookup_promise_runs_tool_and_includes_source_material(self):
+        with self.material_fixture() as (conn,material,text):
+            def final(messages,**kwargs):
+                results=[json.loads(message['content']) for message in messages if message['role']=='tool']
+                self.assertTrue(any(row.get('material_context') for row in results[-1]['messages']))
+                return answer(text=text)
+            def model_response(messages,**kwargs):
+                if not any(message['role']=='tool' for message in messages):
+                    return answer(text='我帮你翻翻之前的记录，稍等。')
+                return final(messages,**kwargs)
+            model=MagicMock();model.complete.side_effect=model_response
+            response,_=self.send('你记得我上次看了什么病吗',model=model)
+            self.assertEqual(response.status_code,200,response.text)
+            self.assertIn('不能排除',response.json()['answer']['text'])
+            self.assertTrue(any(event['tool']=='search_history' for event in response.json()['tool_events']))
+
+    @unittest.skipUnless(os.getenv('ZHONGAN_HISTORY_LIVE_SMOKE')=='1','Explicit synthetic live-model smoke only')
+    def test_live_model_recalls_original_material_without_an_unfinished_lookup_promise(self):
+        with self.material_fixture() as (conn,material,text):
+            response=self.client.post(f'/v1/conversations/{self.target}/messages',headers=self.headers,
+                json={'request_id':str(uuid4()),'message':'你记得我上次看了什么病吗？请根据此前整理过的材料回答。'})
+            self.assertEqual(response.status_code,200,response.text)
+            body=response.json()['answer']
+            self.assertIn('肩关节',body['text'])
+            self.assertIn('不能排除',body['text'])
+            self.assertTrue(any(ref.get('material') for ref in body['history_source_refs']))
+            from services.api.app.conversation_agent import pending_history_reply
+            self.assertFalse(pending_history_reply(body['text'],'你记得上次吗'))
+            followup=self.client.post(f'/v1/conversations/{self.target}/messages',headers=self.headers,
+                json={'request_id':str(uuid4()),'message':'找到了吗？直接告诉我此前材料里写的诊断。'})
+            self.assertEqual(followup.status_code,200,followup.text)
+            self.assertIn('肩关节',followup.json()['answer']['text'])
+            self.assertIn('不能排除',followup.json()['answer']['text'])
+            self.assertFalse(pending_history_reply(followup.json()['answer']['text'],'找到了吗'))
+
     def context(self,model):
         return [item for message in model.complete.call_args.args[0]
                 if message['role']=='user' and message['content'].startswith('{')
@@ -677,7 +814,7 @@ class AutomaticHistoryTests(unittest.TestCase):
         self.assertEqual(response.status_code,200,response.text)
         contents=[item['content'] for item in self.context(model)]
         self.assertEqual(contents,[text,corrected])
-        self.assertIn('不能把提问或他人情况当作',json.dumps(model.complete.call_args.args[0],ensure_ascii=False))
+        self.assertTrue(all(item['medical_verification'] is False for item in self.context(model)))
 
     def test_older_topic_remains_searchable_beyond_recent_window(self):
         needle='【合成】我给费用核对起的代号是青竹742。'

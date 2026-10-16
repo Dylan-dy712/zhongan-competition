@@ -666,7 +666,6 @@ export default function App() {
               {t.answer ? <>{t.input_kind==='analysis_ready'?<AnalysisNarrative turn={t} onEvidence={id=>void showEvidence(id)} onServiceAsk={message=>send(undefined,message)} disabled={working}/>:<><p><CitedText text={t.answer.text} citations={t.answer.citations} sources={t.answer.knowledge_sources} onEvidence={id=>void showEvidence(id)}/></p></>}
 
                 {t.answer.medical_services&&<MedicalServiceCards services={t.answer.medical_services} onAsk={message=>send(undefined,message)} disabled={working} canAskForLocation={t.turn_id===latestAnswered}/>}
-                {t.answer.history_refs.length>0 && <small className="history-reference">参考了 {t.answer.history_refs.length} 条当前就诊人的历史对话</small>}
                 {!!t.answer.patient_updates?.length&&<small className="patient-update-notice">已记录你的补充 · 作为用户自述供后续交流参考</small>}
                 {t.status==='completed'&&t.turn_id===latestAnswered&&<ChatFollowups answer={t.answer} disabled={working} onSend={message=>send(undefined,message)}/>}</>
                 : t.status==='failed' ? <><p>{t.turn_id.startsWith('local:')?'这次消息没有发送成功，可以重试。':'这次回答没有完成，你的消息已保存。'}</p><button disabled={working} onClick={()=>void send(t)}>重试这条消息</button></>

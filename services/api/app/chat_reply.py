@@ -23,16 +23,22 @@ class ParagraphReply(BaseModel):
     paragraphs: list[ChatParagraph] = Field(min_length=1, max_length=30)
     history_refs: list[UUID] = Field(default_factory=list, max_length=12)
 
-def decode_chat_reply(content):
+def decode_chat_reply(content, history_ids=()):
     data=json.loads(content)
     if not isinstance(data,dict):
         raise ValueError('CHAT_REPLY_OBJECT_REQUIRED')
     if 'paragraphs' not in data:
         return data  # Existing persisted/scripted replies retain strict validation.
     wire=ParagraphReply.model_validate(data)
+    known_history={str(value) for value in history_ids}
+    history=list(dict.fromkeys(str(ref) for ref in wire.history_refs))
     lines=[]
     for paragraph in wire.paragraphs:
         refs=list(dict.fromkeys(paragraph.source_refs))
+        # A known chat-turn UUID is a history citation, never medical evidence.
+        # Unknown UUIDs are left intact for the authorization boundary to reject.
+        history.extend(ref for ref in refs if ref in known_history and ref not in history)
+        refs=[ref for ref in refs if ref not in known_history]
         # Model line breaks do not become multiline citation quotes.
         lines.extend((line.strip(),refs) for line in paragraph.text.splitlines() if line.strip())
     text='\n\n'.join(line for line,_ in lines)
@@ -60,4 +66,4 @@ def decode_chat_reply(content):
     optional=FollowupPayload.model_validate(optional).model_dump()
     return {'text':text,'citations':citations,'evidence_refs':list(dict.fromkeys(evidence)),
             'knowledge_refs':list(dict.fromkeys(knowledge)),
-            'history_refs':[str(ref) for ref in wire.history_refs],**optional}
+            'history_refs':history,**optional}
