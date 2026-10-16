@@ -23,13 +23,13 @@ class ParagraphReply(BaseModel):
     paragraphs: list[ChatParagraph] = Field(min_length=1, max_length=30)
     history_refs: list[UUID] = Field(default_factory=list, max_length=12)
 
-def decode_chat_reply(content, history_ids=()):
+def decode_chat_reply(content, history_ids=(), *, paragraph_model=ParagraphReply):
     data=json.loads(content)
     if not isinstance(data,dict):
         raise ValueError('CHAT_REPLY_OBJECT_REQUIRED')
     if 'paragraphs' not in data:
         return data  # Existing persisted/scripted replies retain strict validation.
-    wire=ParagraphReply.model_validate(data)
+    wire=paragraph_model.model_validate(data)
     known_history={str(value) for value in history_ids}
     history=list(dict.fromkeys(str(ref) for ref in wire.history_refs))
     lines=[]

@@ -52,3 +52,28 @@ the complete patient body and follow-up questions once, retaining independent
 source review, all citation checks and the existing reading-quality check.
 The structured report retains all six sections and its source/safety validation.
 Ordinary cases and unprepared inputs keep the existing shared-body path.
+
+## Preload material-only extraction
+
+The same private reviewed-library boundary can now reuse field extraction and
+semantic candidate identification. Only these material-only results are prepared;
+report drafting, patient narrative, current evidence binding, source review and
+reading-quality review still run for each new submission. Stored artifacts contain
+no account, case or evidence IDs and no old provider response or billed token usage.
+
+After OCR preparation, run:
+
+```bash
+.venv/bin/python -m scripts.warm_judge_models --from-worker-environment
+```
+
+The key binds all original document hashes, parsed page contents, parser profile,
+field/insight prompt and schema versions, model endpoint/ID and the actual reference
+knowledge. Changed, missing or corrupt inputs fall back to live model calls.
+Only cases whose every page passed the private judge recognition check can read
+this cache. Quotes and candidates are still reconciled with the new case's sources.
+
+Paragraph citations can retain up to 16 explicit source links because a complete
+sentence may span more than six OCR fragments. Ordinary chat paragraphs retain
+their existing six-link limit; every source still requires authorization and
+independent factual review, and report-wide evidence/knowledge limits remain.

@@ -12,6 +12,13 @@ from services.api.app.guidance_quality import GuidanceQuality
 
 
 class AnalysisParagraphTests(unittest.TestCase):
+    def test_real_paragraph_can_keep_more_than_six_ocr_fragment_links(self):
+        aliases={f'S{i}':str(uuid4()) for i in range(1,10)}
+        content=json.dumps({'paragraphs':[{'text':'一句完整的合成事实需要多处OCR碎片。','source_refs':list(aliases)}]})
+        data=decode_analysis_paragraphs(content,aliases)
+        result=canonical_analysis_citations(data,aliases,[])
+        self.assertEqual(result['citations'][0]['source_refs'],list(aliases.values()))
+
     def test_paragraph_is_its_exact_anchor_with_authorized_material_and_knowledge(self):
         ref=str(uuid4())
         wire={'paragraphs':[{'text':'1. **合成诊断**','source_refs':[]},
