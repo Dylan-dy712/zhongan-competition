@@ -116,7 +116,26 @@ try{
       [...fixture.expected,'暂不确定','我来补充'],fixture.name);
   }
   await act(async()=>root.unmount());root=createRoot(document.getElementById('root'));
-  snapshot.turns=[{...turn,answer:{text:'兼容历史回答',evidence_refs:[],history_refs:[]}}];
+  snapshot.turns=[{...turn,answer:{text:'没有具体补问的报告',evidence_refs:[],history_refs:[]}}];
+  await act(async()=>root.render(React.createElement(modules.App)));await flush();
+  assert.match(document.querySelector('.clarification-section').textContent,/再了解一点，更好地陪你/);
+  assert.equal(document.querySelector('.clarification-choices'),null,'No invented medical options when the model returns no questions');
+  const general=document.querySelector('[aria-label="补充就医信息"] textarea');
+  const generalSubmit=()=>document.querySelector('.clarification-section form').dispatchEvent(new dom.window.Event('submit',{bubbles:true,cancelable:true}));
+  const beforeGeneral=sent.length;
+  await act(async()=>generalSubmit());assert.equal(sent.length,beforeGeneral,'Empty optional supplements cannot send');
+  await type(general,'医生只说有变化再联系，我还没确认时间。');
+  fail=true;await act(async()=>generalSubmit());await flush();
+  const failedGeneral=sent.at(-1);
+  assert.equal(failedGeneral.message,'我想补充或更正这次就医的信息：\n医生只说有变化再联系，我还没确认时间。');
+  assert.equal(general.value,'医生只说有变化再联系，我还没确认时间。','Optional report supplement survives a failed send');
+  fail=false;let finishGeneral;pending={promise:new Promise(resolve=>{finishGeneral=resolve;})};
+  await act(async()=>{generalSubmit();generalSubmit();});await flush();
+  assert.equal(sent.length,beforeGeneral+2,'Optional report form also prevents double submit');
+  await act(async()=>finishGeneral());pending=null;await flush();
+  assert.equal(sent.at(-1).request_id,failedGeneral.request_id,'Optional report retry reuses its request ID');
+  await act(async()=>root.unmount());root=createRoot(document.getElementById('root'));
+  snapshot.turns=[{...turn,input_kind:'user',answer:{text:'兼容历史回答',evidence_refs:[],history_refs:[]}}];
   await act(async()=>root.render(React.createElement(modules.App)));await flush();
   assert.equal(document.querySelector('.chat-followups'),null);
   assert.match(document.body.textContent,/兼容历史回答/);
