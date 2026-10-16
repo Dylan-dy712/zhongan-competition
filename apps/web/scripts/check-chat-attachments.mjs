@@ -59,7 +59,7 @@ try{
  assert.equal(writes().length,0,'Picking local images must not upload, inspect, or submit analysis');
  assert.equal(document.querySelector('dialog.photo-review'),null,'Chat images do not start the report precheck');
  await click('移除附件 移除图片.png');assert.equal(document.querySelectorAll('.chat-draft-attachments article').length,2);
- const textarea=document.querySelector('textarea');
+ const textarea=document.querySelector('.composer textarea');
  await act(async()=>{Object.getOwnPropertyDescriptor(dom.window.HTMLTextAreaElement.prototype,'value').set.call(textarea,'请解释图片里的两项内容');textarea.dispatchEvent(new dom.window.Event('input',{bubbles:true}));textarea.dispatchEvent(new dom.window.Event('change',{bubbles:true}));});
  await click('发送消息');
  assert.equal(uploads,1,'Upload is still awaiting the network');
@@ -68,7 +68,7 @@ try{
  assert.equal(document.querySelectorAll('.chat-sent-attachments img').length,2,'Sent images move to the transcript');
  assert.equal([...document.querySelectorAll('.messages .message-row.user')].filter(n=>n.textContent.includes('请解释图片里的两项内容')).length,1);
  await act(async()=>releaseUpload());await flush();assert.equal(uploads,2);
- assert.equal(document.querySelector('textarea').value,'','Question stays cleared while model response is pending');
+ assert.equal(document.querySelector('.composer textarea').value,'','Question stays cleared while model response is pending');
  await act(async()=>releaseMessage());await flush();
  assert.equal(document.querySelectorAll('.chat-sent-attachments img').length,2,'Failed submission retains transcript previews for retry');
  await click('重试这条消息');
