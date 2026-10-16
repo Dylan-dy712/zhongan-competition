@@ -103,6 +103,7 @@ fi
 changed=1
 install -d -m 755 "$app_dir/scripts" "$app_dir/contracts" "$app_dir/docs/medical"
 sudo install -d -m 700 -o "$(id -u)" -g "$(id -g)" /home/ubuntu/zhongan-data/web-search
+sudo install -d -m 700 -o "$(id -u)" -g "$(id -g)" /home/ubuntu/zhongan-data/judge-recognition
 cp -a "$release_dir/scripts/." "$app_dir/scripts/"
 if [[ "$backend_changed" == 1 ]]; then
     cp -a "$release_dir/services" "$app_dir/"
