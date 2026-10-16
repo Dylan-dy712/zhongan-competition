@@ -549,12 +549,8 @@ class CareTools:
         if run.status in ('queued', 'running', 'failed', 'cancelled'):
             return {'status': run.status, 'notice': '尚无本次可读分析结果。'}
         pattern = '%' + args.query.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_') + '%'
-        order = 'source_index,document_id' if args.balanced else 'document_id,page_index,text_start,evidence_id'
-        rows = self.conn.execute('''SELECT evidence_id,document_id,page_index,text_value AS text FROM (
-            SELECT *,row_number() OVER(PARTITION BY document_id ORDER BY page_index,text_start,evidence_id) AS source_index
-            FROM evidence WHERE case_id=%s AND run_id=%s AND text_value ILIKE %s) AS sources
-            ORDER BY ''' + order + ' LIMIT %s OFFSET %s',
-            (case_id, run.run_id, pattern, args.page_size + 1, args.offset)).fetchall()
+        from .page_sources import readable_materials
+        rows=readable_materials(self.conn,case_id,run.run_id,pattern,args.page_size,args.offset,args.balanced)
         self.evidence_ids.update(str(x['evidence_id']) for x in rows[:args.page_size])
         quality = self.conn.execute('''SELECT d.source_ref AS name,p.page_index,
             p.structure_metadata->'photo_quality' AS quality

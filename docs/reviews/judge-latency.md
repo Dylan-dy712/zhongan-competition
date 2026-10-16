@@ -77,3 +77,18 @@ Paragraph citations can retain up to 16 explicit source links because a complete
 sentence may span more than six OCR fragments. Ordinary chat paragraphs retain
 their existing six-link limit; every source still requires authorization and
 independent factual review, and report-wide evidence/knowledge limits remain.
+
+## Preserve page context during narrative review
+
+The 13-page sample produced 1,091 tiny OCR evidence fragments. Even after material
+preloading, one real complete run took 148.3 seconds, including 109.1 seconds of
+patient prose generation and factual correction. It did not meet the target.
+
+For fully authorized prepared samples, the Worker additionally stores a fresh,
+real evidence row per readable page using only the existing readable fragments.
+Fine-grained fact inputs and evidence remain unchanged. Conversation source reads
+prefer these complete page sources within that exact case/run; ordinary and older
+runs retain the existing fragment fallback. Low-confidence exclusions, OCR warnings,
+source authorization, original-file linkage and independent review remain intact.
+This retains all readable text while removing thousands of short source aliases
+that made correct narrative source links fragile.
