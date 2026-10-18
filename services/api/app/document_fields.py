@@ -16,8 +16,8 @@ from .fee_evidence import bind_fee_evidence
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
-PROMPT_VERSION = 'document-fields-evidence-v41-source-row-binding'
-SCHEMA_VERSION = 'document-fields-v4-source-row-binding'
+PROMPT_VERSION = 'document-fields-evidence-v42-per-row-evidence'
+SCHEMA_VERSION = 'document-fields-v5-per-row-evidence'
 FEE_TAXONOMY = {
     'inspectionFee': '检查费', 'westernMedicineFee': '西药费', 'materialFee': '材料费',
     'treatmentFee': '治疗费', 'chineseHerbalMedicineFee': '中草药费',
@@ -691,6 +691,8 @@ surgery只转录明确手术名称或术式标签的原文数组，完整保留�
             '若仅有药费、检查费等收费分类汇总而无逐项明细，输出row_kind=category_summary；不含全页合计。有逐项明细时不重复收同类别小计。医保支付、现金支付等支付方式不是收费项目。'
             '每行给名称与金额各自置信度和原文名称金额引用。只输出如下结构，不解释：'
             '{"rows":[{"detailName":"原项目名","feeAmount":12.34,"confidence":{"detailName":0.9,"feeAmount":0.9},"evidence_quote":"原项目名 12.34"}]}。')
+        fee_system += ('若输入是OCR文字，evidence_quote逐字复制完整项目行，保留|列分隔符与中间的数量、单价；'
+                       '不要把不相邻的名称和金额拼成不存在的原文。')
         fee_content = text if not views else [image_content(data) for _, data in views]
         if image_bytes is not None and not structured_tables:
             located = ocr_fee_region(image_bytes, ocr_lines, image_rotation_degrees)

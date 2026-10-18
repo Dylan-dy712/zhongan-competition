@@ -1,0 +1,12 @@
+# P0：逐行费用证据，避免整块误删
+
+依赖表格行绑定PR。旧实现用第一条费用的拼接引句校验整个blocks，文字模式下一处不连续即可清空全部费用。本PR将普通临床字段保留原有严格校验，费用改为逐行处理：
+
+- 表格路径重新验证原始单元格，只有名称/行总金额在同一行才能标literal_source_cells_same_row；不信任模型自填verified标志。
+- 文字路径要求名称和金额出现在同一条实际OCR行中，证据替换为该完整原行，标literal_ocr_row_requires_column_review。它不证明列绑定或医疗合理性。
+- 有原图但文字无法证明的转录保留visual_transcription_requires_independent_review，不伪装成文字证据。
+- 无支持的行单独移入fee_evidence.rejected_rows，保留候选及原因，文档标partial；其他独立支持行保留。相同源行或名称单元格不能被重复消费为相同重复项目。
+
+检查点与最终结果使用同一校验，blocks顶层标per_fee_row。字段置信度仍未校准、release_eligible仍为false。非有限费用金额拒绝进入费用Schema。
+
+验证：24项既有检查通过；用真实Paddle OCR与既有38行预测回放，并把引句恢复成旧式名称金额拼接，检查逐行支持不会因拼接引用整体清空。该回放不是新模型运行、不是KR1提升证明；没有新增或修改测试文件。
