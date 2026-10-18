@@ -12,11 +12,12 @@ from typing import Any, Literal
 from PIL import Image
 from .material_routing import route_material, PROFILE_INSTRUCTIONS
 from .fee_binding import validate_fee_binding
+from .fee_evidence import bind_fee_evidence
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
-PROMPT_VERSION = 'document-fields-evidence-v41-source-row-binding'
-SCHEMA_VERSION = 'document-fields-v4-source-row-binding'
+PROMPT_VERSION = 'document-fields-evidence-v42-per-row-evidence'
+SCHEMA_VERSION = 'document-fields-v5-per-row-evidence'
 FEE_TAXONOMY = {
     'inspectionFee': '检查费', 'westernMedicineFee': '西药费', 'materialFee': '材料费',
     'treatmentFee': '治疗费', 'chineseHerbalMedicineFee': '中草药费',
@@ -109,7 +110,7 @@ class DocumentPrediction(BaseModel):
 class FeeItem(BaseModel):
     model_config = ConfigDict(extra='forbid')
     detailName: str = Field(min_length=1)
-    feeAmount: float
+    feeAmount: float = Field(allow_inf_nan=False)
     quantity: float | None = None
     unit: str | None = None
     amount_source: Literal['explicit_total', 'unit_price_quantity_one'] = 'explicit_total'
@@ -505,11 +506,23 @@ def extract_table_cells(call_stage, system, tables, attempts, image_bytes=None, 
         'unresolved': unresolved, 'coverage_method': 'ocr_name_cells_and_model_field_confidence_not_gold'}
 
 
-def bind_document_evidence(result, text, has_image):
+def bind_document_evidence(result, text, has_image, tables=None):
     """Apply the same evidence gate to checkpoints and final fields."""
     unsupported, vision_only = [], []
+    fee_audit = {'accepted_rows': 0, 'rejected_rows': [], 'visual_only_rows': 0}
+    if 'blocks' in result.fields:
+        blocks, fee_audit = bind_fee_evidence(result.fields['blocks'], text, has_image, tables)
+        if blocks:
+            result.fields['blocks'] = blocks
+            rows = [row for block in blocks for row in block['costDetailList']]
+            result.evidence['blocks'] = rows[0]['evidence_quote']
+            result.confidence['blocks'] = min(min(row['confidence'].values()) for row in rows)
+            if fee_audit['visual_only_rows']:
+                vision_only.append('blocks')
+        else:
+            unsupported.append('blocks')
     for key, quote in result.evidence.items():
-        if key not in result.fields:
+        if key not in result.fields or key == 'blocks':
             continue
         actual = original_quote(text, quote)
         if actual is None:
@@ -520,7 +533,7 @@ def bind_document_evidence(result, text, has_image):
         result.fields.pop(key)
         result.confidence.pop(key, None)
         result.evidence.pop(key, None)
-    return unsupported, vision_only
+    return unsupported, vision_only, fee_audit
 
 
 def derive_stay_days(result):
@@ -655,11 +668,12 @@ surgery只转录明确手术名称或术式标签的原文数组，完整保留�
                 row.model_dump(mode='json', exclude_none=True) for row in rows]}]
             snapshot.confidence['blocks'] = min(min(row.confidence.values()) for row in rows)
             snapshot.evidence['blocks'] = rows[0].evidence_quote
-        rejected, visual = bind_document_evidence(snapshot, text, image_bytes is not None)
+        rejected, visual, fee_audit = bind_document_evidence(snapshot, text, image_bytes is not None, table_context)
         on_progress({**snapshot.model_dump(mode='json'), 'release_eligible': False, 'requires_review': True,
             'confidence_method': 'model_self_report_uncalibrated', 'rejected_evidence_fields': rejected,
             'vision_only_evidence_fields': visual,
-            'evidence_verification': {key: ('visual_transcription_requires_independent_review'
+            'fee_evidence': fee_audit,
+            'evidence_verification': {key: ('per_fee_row' if key == 'blocks' else 'visual_transcription_requires_independent_review'
                 if key in visual else 'literal_ocr_span') for key in snapshot.fields},
             'diagnosis_scope': 'source_document_assertions_not_patient_confirmed_diagnoses',
             'surgery_scope': 'document_procedure_labels_not_confirmed_patient_events',
@@ -677,6 +691,8 @@ surgery只转录明确手术名称或术式标签的原文数组，完整保留�
             '若仅有药费、检查费等收费分类汇总而无逐项明细，输出row_kind=category_summary；不含全页合计。有逐项明细时不重复收同类别小计。医保支付、现金支付等支付方式不是收费项目。'
             '每行给名称与金额各自置信度和原文名称金额引用。只输出如下结构，不解释：'
             '{"rows":[{"detailName":"原项目名","feeAmount":12.34,"confidence":{"detailName":0.9,"feeAmount":0.9},"evidence_quote":"原项目名 12.34"}]}。')
+        fee_system += ('若输入是OCR文字，evidence_quote逐字复制完整项目行，保留|列分隔符与中间的数量、单价；'
+                       '不要把不相邻的名称和金额拼成不存在的原文。')
         fee_content = text if not views else [image_content(data) for _, data in views]
         if image_bytes is not None and not structured_tables:
             located = ocr_fee_region(image_bytes, ocr_lines, image_rotation_degrees)
@@ -737,7 +753,10 @@ surgery只转录明确手术名称或术式标签的原文数组，完整保留�
             result.confidence['blocks'] = min(min(row.confidence.values()) for row in table.rows)
             result.evidence['blocks'] = table.rows[0].evidence_quote
         publish_progress('fee_transcription', table.rows, fee_extraction.get('unresolved'))
-    unsupported, vision_only = bind_document_evidence(result, text, image_bytes is not None)
+    unsupported, vision_only, fee_audit = bind_document_evidence(result, text, image_bytes is not None, table_context)
+    if fee_audit['rejected_rows']:
+        fee_extraction = {**fee_extraction, 'status': 'partial',
+            'unresolved': [*fee_extraction.get('unresolved', []), {'reason': 'rejected_fee_row_evidence'}]}
     derivations = derive_stay_days(result)
     try:
         fee_classification = classify_fees(provider, result.fields, text)
@@ -754,6 +773,7 @@ surgery只转录明确手术名称或术式标签的原文数组，完整保留�
             'fee_classification': fee_classification,
             'repair_usage': repair_usage, 'table_usage': table_usage, 'table_attempts': table_attempts,
             'fee_extraction': fee_extraction,
+            'fee_evidence': fee_audit,
             'fee_input_method': 'tencent_table_v3_cells' if structured_tables else 'image_or_plain_ocr',
             'fee_image_source_box': fee_source_box,
             'fee_image_deskew_degrees': fee_deskew_degrees,
@@ -764,7 +784,7 @@ surgery只转录明确手术名称或术式标签的原文数组，完整保留�
             'vision_views': [name for name, _ in views],
             'image_rotation_degrees': image_rotation_degrees,
             'vision_only_evidence_fields': vision_only,
-            'evidence_verification': {key: ('deterministic_derivation_from_source_fields' if key in derivations else
+            'evidence_verification': {key: ('per_fee_row' if key == 'blocks' else 'deterministic_derivation_from_source_fields' if key in derivations else
                 'visual_transcription_requires_independent_review'
                 if key in vision_only else 'literal_ocr_span') for key in result.fields},
             'release_eligible': False,
