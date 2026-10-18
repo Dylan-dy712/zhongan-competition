@@ -14,6 +14,7 @@ from tencentcloud.ocr.v20181119 import models, ocr_client
 OCR_METHOD = "tencent_general_accurate_ocr"
 OCR_VERSION = "tencent-ocr-2018-11-19-general-accurate-v1"
 TABLE_OCR_VERSION = "tencent-ocr-2018-11-19-table-accurate-v3-default"
+TABLE_OCR_METHOD = "tencent_table_accurate_v3"
 RETRYABLE_CODES = {
     "FailedOperation.EngineRecognizeTimeout",
     "FailedOperation.OcrFailed",
@@ -114,3 +115,12 @@ class TencentOcr:
             "request_id": response.RequestId,
             "angle": response.Angle,
         }
+
+
+class TencentTableOcr(TencentOcr):
+    """Explicit primary table API selection; never an automatic provider switch."""
+    method = TABLE_OCR_METHOD
+    version = TABLE_OCR_VERSION
+
+    def recognize(self, image_bytes, width, height):
+        return self.recognize_table(image_bytes, width, height)
