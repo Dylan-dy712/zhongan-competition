@@ -62,25 +62,45 @@ export interface AssistantAnswer {
 export interface Conversation {
   subject_id: string;
   conversation_id: string; case_id: string; title: string; recall_enabled: boolean;
+  title_pending?:boolean;
+  has_interpretation_report?:boolean;
+  memory_export_enabled?:boolean; memory_settings_version?:number;
   report_context_enabled?:boolean; report_context_version?:number;
   created_at: string; updated_at: string;
 }
+export type PatientField='followup_time'|'followup_location'|'medication'|'allergy'|'recovery_status';
+export interface ClarificationQuestion {field:PatientField;question:string;options:{label:string;message:string}[]}
+export interface PatientUpdate {field:PatientField;statement:string}
 export interface ChatAnswer {text: string; evidence_refs: string[]; history_refs: string[];
+  memory_refs?:{memory_id:string;version:number;epoch:number}[];memory_status?:string;memory_unavailable?:boolean;
+  clarification_questions?:ClarificationQuestion[];suggested_questions?:string[];patient_updates?:PatientUpdate[];
+  service_guide?:{text:string;policy_status:'demo_assumed_midhigh'};medical_services?:MedicalServices;
+  sample_preload?:boolean;
   guidance_delivery?:{status:'passed'|'needs_improvement'|'unchecked';notice?:string};
   prompt_version?:string; analysis_run_id?:string; knowledge_refs?:string[]; knowledge_sources?:KnowledgeSource[]; citations?:InlineCitation[]}
+export interface MedicalServiceCard {
+  id:string;kind:'benefit'|'hospital'|'online';title:string;subtitle:string;description:string;tags:string[];
+  reasons:string[];details:{label:string;value:string}[];notice:string;
+  source:{title:string;url:string;pages:string;address_url?:string};
+  action:{kind:'benefit'|'hospital'|'online';label:string;target_id:string};
+}
+export interface MedicalServices {
+  version:string;status:'available'|'needs_location'|'no_local_matches'|'urgent';policy_label:string;policy_notice:string;
+  location_query:string;location_prompt:string;notice?:string;cards:MedicalServiceCard[];
+}
 export interface InlineCitation {quote:string;source_refs:string[]}
 export interface KnowledgeSource {entry_id:string;title:string;source:string;source_path?:string;scope:string;version:string;reference_policy?:string;content?:string;retrieval_provider?:string;retrieved_at?:string;published_at?:string}
 export interface ToolEvent {tool: string; status: string; run_id?: string}
 export interface ChatTurn {
   turn_id: string; request_id: string; question: string;
   input_kind: 'user'|'analysis_ready';
-  attachments: {document_id:string; name:string}[];
+  attachments: {document_id:string; name:string;kind?:'chat_attachment'}[];
   status: 'running'|'completed'|'failed'; answer: ChatAnswer|null;
   tool_events: ToolEvent[]; created_at: string; error_code: string|null;
 }
 export interface ChatSnapshot {
   conversation: Conversation; turns: ChatTurn[];
-  analysis: {status:string; run_id?:string; stage?:string; error?:unknown};
+  analysis: {status:string; run_id?:string; stage?:string; error?:unknown;stage_results?:{parse?:{reused_pages?:number;processed_pages?:number}}};
   report: {status:string; report_id?:string; report_version?:number; sections?:ReportSection[]; actions?:CareAction[]};
   material_report?: MaterialReport;
 }

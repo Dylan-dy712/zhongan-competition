@@ -16,3 +16,5 @@ dist-mobile-demo/
 /output_dir/judge-demo/
 /output_dir/judge-demo-release/
 /output_dir/judge-sample/
+
+/output_dir/memory-ranker/

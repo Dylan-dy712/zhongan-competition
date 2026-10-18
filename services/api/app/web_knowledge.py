@@ -37,6 +37,27 @@ ALIASES={'胆囊结石':('gallstones',),'胆囊切除术':('gallbladder removal'
          '甲状腺结节':('thyroid nodules',),'乳腺癌':('breast cancer',),
          '骨质疏松症':('osteoporosis',),'靶向治疗':('targeted therapy',),
          '化疗':('chemotherapy',),'放射治疗':('radiation therapy',)}
+COST_TOPICS={
+ '医保目录分类':('甲类 乙类 目录外 医保药品目录 含义',('甲类','乙类','医保药品目录','医保目录')),
+ '医保个人负担':('医保 个人自费 个人自付 区别',('个人自费','个人自付','医保')),
+ '医保起付线':('医保 起付线 含义',('起付线','起付标准')),
+ '医保封顶线':('医保 封顶线 最高支付限额 含义',('封顶线','最高支付限额')),
+ '医保异地就医':('医保 异地就医 备案 结算',('异地就医','异地结算')),
+}
+
+def chat_concepts(question):
+    """Extract fixed public topics only; no raw message leaves the application."""
+    topics=[]
+    if re.search(r'甲类|乙类|丙类|甲乙丙|医保目录|药品目录',question):topics.append('医保目录分类')
+    if re.search(r'个人自费|个人自付',question):topics.append('医保个人负担')
+    if '起付线' in question:topics.append('医保起付线')
+    if re.search(r'封顶线|最高支付限额',question):topics.append('医保封顶线')
+    if '异地' in question and re.search(r'医保|就医|结算',question):topics.append('医保异地就医')
+    result=[{'term':topic,'slot':'COST'} for topic in topics]
+    for term in CONCEPTS:
+        if term in question and not any(term in item['term'] for item in result):
+            result.append({'term':term,'slot':'S11' if term in TREATMENT_TERMS or '术' in term or term.endswith('置换') else 'S1'})
+    return result[:2]
 
 
 def approved_url(url):
@@ -144,11 +165,12 @@ class WebKnowledge:
         if not self.enabled:return {'status':'not_configured','results':[],'calls':0}
         # Public interface still enforces the concept contract even for internal callers.
         term=concept['term'];slot=concept['slot']
-        if safe_concepts({'candidates':[{'fact_type':'diagnosis' if slot=='S1' else 'surgery',
+        cost=term in COST_TOPICS and slot=='COST'
+        if not cost and safe_concepts({'candidates':[{'fact_type':'diagnosis' if slot=='S1' else 'surgery',
             'raw_value':term,'evidence_quote':term,'assertion':'present'}]},term)!=[concept]:
             return {'status':'unsafe_query','results':[],'calls':0}
-        query=term+' '+(ALIASES.get(term) or ('',))[0]+(' 医学解释' if slot=='S1' else ' 治疗含义' if term in TREATMENT_TERMS else ' 手术目的')
-        query_hash=hashlib.sha256((POLICY+'|'+query).encode()).hexdigest()
+        query=COST_TOPICS[term][0] if cost else term+' '+(ALIASES.get(term) or ('',))[0]+(' 医学解释' if slot=='S1' else ' 治疗含义' if term in TREATMENT_TERMS else ' 手术目的')
+        query_hash=hashlib.sha256((POLICY+('|cost-v2|' if cost else '|')+query).encode()).hexdigest()
         now=self.clock();day=datetime.fromtimestamp(now,timezone(timedelta(hours=8))).date().isoformat()
         try:
             with self.db() as conn:
@@ -162,7 +184,7 @@ class WebKnowledge:
                 conn.execute('INSERT INTO daily_usage VALUES (?,1) ON CONFLICT(day) DO UPDATE SET calls=calls+1',(day,))
                 conn.commit()
             payload={'Query':query.strip(),'SearchType':'web','Count':12,'ContentFormats':'text',
-                'Filter':{'NeedContent':True,'NeedUrl':True,'Sites':'|'.join(HOSTS)}}
+                'Filter':{'NeedContent':True,'NeedUrl':True,'Sites':'nhsa.gov.cn' if cost else '|'.join(HOSTS)}}
             kwargs={'headers':{'Authorization':'Bearer '+self.key,'Content-Type':'application/json'},
                     'json':payload,'timeout':(5,15),'allow_redirects':False}
             if self.post:response=self.post(ENDPOINT,**kwargs)
@@ -178,7 +200,7 @@ class WebKnowledge:
             result=data.get('Result') or {}
             if not isinstance(result,dict):raise ValueError('INVALID_SEARCH_RESPONSE')
             docs=self.references(result.get('WebResults',[]),concept,now)
-            expiry=now+(30*86400 if docs else 3600)
+            expiry=now+((7 if cost else 30)*86400 if docs else 3600)
             with self.db() as conn:
                 for doc in docs:
                     conn.execute('INSERT OR REPLACE INTO references_cache VALUES (?,?,?)',(doc['entry_id'],json.dumps(doc,ensure_ascii=False),expiry))
@@ -189,22 +211,33 @@ class WebKnowledge:
 
     def references(self,rows,concept,now):
         if not isinstance(rows,list):return []
-        docs=[];seen=set();term=concept['term'];slot=concept['slot'];terms=[term,*ALIASES.get(term,())]
+        docs=[];seen=set();term=concept['term'];slot=concept['slot'];terms=list(COST_TOPICS[term][1]) if slot=='COST' and term in COST_TOPICS else [term,*ALIASES.get(term,())]
+        if slot=='COST':
+            def published_order(item):
+                match=re.search(r'/art/(\d{4})/(\d{1,2})/(\d{1,2})/',str(item.get('Url',''))) if isinstance(item,dict) else None
+                return tuple(map(int,match.groups())) if match else (0,0,0)
+            rows=sorted(rows,key=published_order,reverse=True)
         for item in rows:
             if not isinstance(item,dict):continue
             url=item.get('Url');title=item.get('Title') or ''
             if not appropriate_title(title):continue
-            if not approved_url(url) or url in seen or not any(t.lower() in title.lower() for t in terms):continue
-            content=select_excerpt(item.get('Content'),terms)
+            title_match=any(t.lower() in title.lower() for t in terms) or slot=='COST' and bool(re.search(r'医保|药品',title))
+            if slot=='COST' and re.search(r'征求意见|草案',title):continue
+            if not approved_url(url) or url in seen or not title_match:continue
+            content=select_excerpt(item.get('Content'),['甲类','乙类'] if term=='医保目录分类' else terms)
             if not content:continue
+            if term=='医保目录分类' and not all(word in content for word in ('甲类','乙类')):continue
             digest=hashlib.sha256((url+'\n'+content).encode()).hexdigest()
             seen.add(url)
+            date_match=re.search(r'/art/(\d{4})/(\d{1,2})/(\d{1,2})/',url)
+            published=str(item.get('PublishTime') or '')[:40]
+            if not published and date_match:published='-'.join(f'{int(value):0{4 if index==0 else 2}d}' for index,value in enumerate(date_match.groups()))
             docs.append({'entry_id':'WEB-VOLC-'+digest[:24],'title':title[:160],'content':content,
-                'source':url,'source_path':url,'scope':'仅用于该医学术语的一般解释；网络资料未获人工医学审核，不是本人的诊断或医嘱。',
+                'source':url,'source_path':url,'scope':('仅用于医保费用术语的一般解释，具体待遇须核对适用年份、地区和个人参保情况，不能直接推算报销或赔付。' if slot=='COST' else '仅用于该医学术语的一般解释；网络资料未获人工医学审核，不是本人的诊断或医嘱。'),
                 'slot':slot,'disease_code':'TY','status':'unreviewed_web_reference',
                 'version':POLICY+':'+digest,'reference_policy':POLICY,'use':'general_reference',
                 'retrieval_provider':'volcengine','retrieved_at':datetime.fromtimestamp(now,timezone.utc).isoformat(),
-                'published_at':str(item.get('PublishTime') or '')[:40],'concept':concept})
+                'published_at':published,'concept':concept})
             if len(docs)>=2:break
         return docs
 

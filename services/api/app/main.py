@@ -45,6 +45,7 @@ from . import accounts
 from .document_quality import inspect_photo
 from .ocr import create_ocr
 from . import medical_records
+from .document_preview import render_evidence_page
 
 app = FastAPI(title="众安·暖愈智护", version="0.1.0")
 
@@ -131,17 +132,25 @@ class NewConversation(Contract):
     conversation_id: UUID
     case_id: UUID | None = None
     subject_id: UUID | None = None
-    recall_enabled: bool = True
+    recall_enabled: bool = False
 
 
 class ChatMessage(Contract):
     request_id: UUID
     message: str = Field(min_length=1, max_length=4000)
     document_ids: list[UUID] = Field(default_factory=list)
+    attachment_ids: list[UUID] = Field(default_factory=list)
 
 
 class AnalysisRequest(ChatMessage):
     force_new: bool = False
+
+
+class ChatAttachment(Contract):
+    attachment_id: UUID
+    name: str
+    media_type: str
+    byte_size: int
 
 
 class RecallSetting(Contract):
@@ -475,6 +484,36 @@ def read_evidence(evidence_id: UUID, actor_id: UUID = Depends(current_actor),
     return item
 
 
+@app.get('/v1/evidence/{evidence_id}/page-image', response_class=Response)
+def read_evidence_page_image(evidence_id: UUID, actor_id: UUID = Depends(current_actor),
+                             conn=Depends(database), storage_root: Path = Depends(document_storage_root)):
+    item = get_evidence(conn, actor_id=actor_id, evidence_id=evidence_id)
+    if item is None or item.media_type != 'application/pdf' or item.page_index is None:
+        raise HTTPException(status_code=404, detail='Evidence page not found')
+    found = get_document(conn, actor_id=actor_id, case_id=item.case_id,
+                         document_id=item.document_id, version=item.document_version)
+    if found is None:
+        raise HTTPException(status_code=404, detail='Document not found')
+    document, storage_ref = found
+    if document.media_type != 'application/pdf':
+        raise HTTPException(status_code=404, detail='PDF page not found')
+    path = Path(storage_ref).resolve()
+    if not path.is_relative_to(storage_root.resolve()) or not path.is_file():
+        raise HTTPException(status_code=503, detail='Document content is unavailable')
+    try:
+        image, regions = render_evidence_page(path, item.page_index,
+            quote=item.text_span.text if item.text_span else '', bbox=item.bbox)
+    except IndexError:
+        raise HTTPException(status_code=404, detail='PDF page not found') from None
+    except Exception:
+        # Do not return PDF contents or server storage paths in rendering errors.
+        raise HTTPException(status_code=503, detail='PDF page preview is unavailable') from None
+    return Response(image, media_type='image/png', headers={
+        'X-Evidence-Regions': json.dumps(regions, separators=(',', ':')),
+        'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff',
+    })
+
+
 @app.get('/v1/cases/{case_id}/material-quality')
 def read_material_quality(case_id: UUID, run_id: UUID = Query(), actor_id: UUID = Depends(current_actor), conn=Depends(database)):
     run = get_analysis_run(conn, actor_id=actor_id, run_id=run_id)
@@ -754,7 +793,8 @@ def chat_subjects(actor_id: UUID = Depends(current_actor), conn=Depends(database
 
 @app.get('/v1/conversations')
 def conversations(subject_id: UUID | None = None, actor_id: UUID = Depends(current_actor), conn=Depends(database)):
-    return chats.list_conversations(conn, actor_id, subject_id)
+    from .conversation_titles import prepare_list
+    return prepare_list(conn, chats.list_conversations(conn, actor_id, subject_id))
 
 
 @app.get('/v1/medical-records')
@@ -802,8 +842,11 @@ def conversation_history(conversation_id: UUID, before: UUID | None = None,
 @app.patch('/v1/conversations/{conversation_id}/recall')
 def conversation_recall(conversation_id: UUID, body: RecallSetting,
                         actor_id: UUID = Depends(current_actor), conn=Depends(database)):
-    chats.require_conversation(conn, actor_id, conversation_id)
-    conn.execute('UPDATE conversations SET recall_enabled=%s WHERE conversation_id=%s', (body.enabled, conversation_id))
+    from .contracts.memory import ConversationMemoryChange
+    current = memory_repository.conversation_settings(conn, actor_id, conversation_id)
+    memory_repository.change_conversation_settings(conn, actor_id, conversation_id,
+        ConversationMemoryChange(read_enabled=body.enabled, export_enabled=current['export_enabled'],
+            report_enabled=current['report_enabled'] and body.enabled, expected_version=current['version']))
     return {'recall_enabled': body.enabled}
 
 
@@ -840,6 +883,44 @@ async def replace_chat_document(conversation_id: UUID, document_id: UUID, respon
         conn=conn,storage_root=storage_root)
 
 
+@app.post('/v1/conversations/{conversation_id}/attachments', response_model=ChatAttachment, status_code=201)
+async def chat_attachment_upload(conversation_id: UUID, response: Response, file: Annotated[UploadFile, File()],
+                                 actor_id: UUID = Depends(current_actor), conn=Depends(database),
+                                 storage_root: Path = Depends(document_storage_root)):
+    from .chat_attachments import register_attachment
+    chats.require_conversation(conn, actor_id, conversation_id)
+    media_type = (file.content_type or '').lower()
+    if media_type not in ALLOWED_MEDIA_TYPES:
+        raise HTTPException(415, '请选择 JPG、PNG、PDF 或 UTF-8 文本。')
+    temp_root = storage_root / '.tmp'
+    temp_root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    descriptor, name = tempfile.mkstemp(prefix='chat-', dir=temp_root)
+    os.close(descriptor)
+    path, digest, size = Path(name), hashlib.sha256(), 0
+    limit = document_size_limit()
+    try:
+        with path.open('wb') as output:
+            while chunk := await file.read(1024 * 1024):
+                size += len(chunk)
+                if size > limit:
+                    raise HTTPException(413, '附件超过允许大小，请拆分后发送。')
+                output.write(chunk)
+                digest.update(chunk)
+        if not size:
+            raise HTTPException(422, '附件为空，请重新选择。')
+        validate_file_signature(path, media_type)
+        result, created = register_attachment(conn, actor_id, conversation_id,
+            name=(file.filename or '聊天附件').replace('\\', '/').rsplit('/', 1)[-1][:200],
+            media_type=media_type, byte_size=size, source_hash=digest.hexdigest(),
+            temp_path=path, storage_root=storage_root)
+        if not created:
+            response.status_code = 200
+        return result
+    finally:
+        await file.close()
+        path.unlink(missing_ok=True)
+
+
 @app.post('/v1/conversations/{conversation_id}/messages')
 def chat_message(conversation_id: UUID, body: ChatMessage,
                  actor_id: UUID = Depends(current_actor), conn=Depends(database)):
@@ -852,6 +933,8 @@ def submit_chat_analysis(conversation_id: UUID, body: AnalysisRequest,
     """Persist the user's request and queue material processing without a model round."""
     if not body.message.strip():
         raise HTTPException(422, '分析请求不能为空')
+    if body.attachment_ids:
+        raise HTTPException(422, '请通过解读报告入口上传报告材料。')
     turn = chats.begin_turn(conn, actor_id, conversation_id, body.request_id,
                             body.message.strip() + ('\n（重新分析当前材料）' if body.force_new else ''), body.document_ids, 'user')
     conn.commit()
@@ -878,7 +961,8 @@ def process_chat_message(conversation_id, body, actor_id, conn, input_kind='user
     question = body.message.strip()
     if not question:
         raise HTTPException(422, '消息不能为空')
-    turn = chats.begin_turn(conn, actor_id, conversation_id, body.request_id, question, body.document_ids, input_kind)
+    turn = chats.begin_turn(conn, actor_id, conversation_id, body.request_id, question, body.document_ids, input_kind,
+                            attachment_ids=body.attachment_ids)
     # Persist the input before a slow provider call; interrupted turns can be retried with the same ID.
     conn.commit()
     if turn['status'] == 'completed':
@@ -888,7 +972,12 @@ def process_chat_message(conversation_id, body, actor_id, conn, input_kind='user
                      (turn['turn_id'], turn['lease_token']))
         conn.commit()
     history = [t for t in chats.get_turns(conn, actor_id, conversation_id) if t['turn_id'] != turn['turn_id']]
+    if input_kind == 'analysis_ready':
+        history = [t for t in history if not (t.get('answer') or {}).get('memory_refs')
+                   and not (t.get('answer') or {}).get('history_source_refs')
+                   and not (t.get('answer') or {}).get('memory_unavailable')]
     tools = CareTools(conn, actor_id, conversation_id,turn['turn_id'])
+    tools.allow_analysis = input_kind == 'analysis_ready'
     events = []
 
     def progress(current_events):
@@ -901,9 +990,39 @@ def process_chat_message(conversation_id, body, actor_id, conn, input_kind='user
         conn.commit()
 
     try:
+        memory_snapshot = None
+        if input_kind == 'user':
+            memory_snapshot, history = memory_service.prepare_context(conn, actor_id, conversation_id, question, history)
+            tools.memory_snapshot = memory_snapshot
+            for item in memory_snapshot['items']:
+                if item.get('source_kind') in {'historical_user_message','historical_material_report'}:
+                    tools.history_ids.add(item['source_turn_id'])
+                    tools.history_cases.add(item['source_case_id'])
+                    tools.evidence_ids.update(item.get('evidence_refs',[]))
+        elif analysis_run_id is not None:
+            from .report_memory import check_report_refs, references
+            frozen=conn.execute('SELECT case_id,context_snapshot FROM analysis_runs WHERE run_id=%s AND case_id=%s',
+                (analysis_run_id,chats.require_conversation(conn,actor_id,conversation_id)['case_id'])).fetchone()
+            if frozen and references(frozen['context_snapshot']):
+                check_report_refs(conn,frozen,references(frozen['context_snapshot']))
+                memory=frozen['context_snapshot']['memory']
+                state=memory_repository.settings(conn,actor_id,UUID(memory['subject_id']))
+                memory_snapshot={'refs':[{'memory_id':item['memory_id'],'version':item['version'],'epoch':state['epoch']}
+                    for item in memory['items']], 'items':[], 'history_refs':[], 'status':'available', 'allow_suggestions':False}
+                tools.memory_snapshot=memory_snapshot
+                conn.commit()
+        attachment_ids = [item['document_id'] for item in turn['attachments'] if item.get('kind') == 'chat_attachment']
+        if attachment_ids:
+            from .chat_attachments import read_attachments
+            def attachment_progress():
+                progress([{'tool': 'read_chat_attachments', 'status': 'running'}])
+            tools.message_materials = read_attachments(conn, actor_id, conversation_id, attachment_ids, attachment_progress)
+            progress([{'tool': 'read_chat_attachments', 'status': tools.message_materials['status']}])
         answer, events = run_agent(history, question, turn['attachments'], tools, on_event=progress,
                                   analysis_mode=input_kind == 'analysis_ready',
-                                  initial_analysis=tools.reusable_analysis() if input_kind == 'analysis_ready' else None)
+                                  initial_analysis=tools.reusable_analysis() if input_kind == 'analysis_ready' else None,
+                                  patient_context=chats.get_patient_context(conn, actor_id, conversation_id),
+                                  memory_context=memory_snapshot['items'] if memory_snapshot else None)
         if analysis_run_id is not None:
             # Recheck the actual current case and run after slow model generation.
             current = chats.require_conversation(conn, actor_id, conversation_id)
@@ -924,6 +1043,11 @@ def process_chat_message(conversation_id, body, actor_id, conn, input_kind='user
         conn.commit()
         return {'turn_id': turn['turn_id'], 'answer': answer, 'tool_events': events}
     except (RuntimeError, ValueError, KeyError, TypeError, requests.RequestException) as exc:
+        if isinstance(exc, memory_repository.MemoryChanged):
+            conn.rollback()
+            chats.finish_turn(conn, actor_id, conversation_id, turn, events=events, error='MEMORY_CONTEXT_CHANGED')
+            conn.commit()
+            raise memory_repository.MemoryChanged() from None
         if isinstance(exc, ValueError) and str(exc) in {'ANALYSIS_SUPERSEDED', 'ANALYSIS_MATERIALS_CHANGED'}:
             chats.finish_turn(conn, actor_id, conversation_id, turn, events=events, error='ANALYSIS_SUPERSEDED')
             conn.commit()
@@ -970,3 +1094,8 @@ def continue_analysis(conversation_id: UUID, run_id: UUID,
     return process_chat_message(conversation_id, ChatMessage(request_id=request_id,
         message='请结合本次实际材料和我关注的问题，写一份温和清楚、连贯自然的文字分析，直接在对话里解释；内容重点由材料决定，有不确定的地方就说明。'),
         actor_id=actor_id, conn=conn, input_kind='analysis_ready', analysis_run_id=run_id)
+
+
+from . import memory_repository, memory_service
+from .memory_routes import register_memory_routes
+register_memory_routes(app, current_actor, database)

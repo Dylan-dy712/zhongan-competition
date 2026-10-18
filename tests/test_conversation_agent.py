@@ -17,6 +17,102 @@ def answer(text='你好', refs=None):
 
 
 class AgentTests(unittest.TestCase):
+    def test_history_lookup_promise_executes_search_and_finishes_in_same_turn(self):
+        for promise in ['我帮你翻翻之前的记录，稍等。','我查一下。','我先找一下之前的记录。']:
+            with self.subTest(promise=promise):
+                model,tools=MagicMock(),MagicMock()
+                model.complete.side_effect=[answer(promise),answer('此前材料记录是合成的历史情况，具体以原文和当前就诊为准。')]
+                tools.execute.return_value={'status':'found','messages':[{'question':'合成原话','material_context':{'sections':[]}}]}
+                result,events=run_agent([],'你记得我上次看了什么病吗',[],tools,model=model)
+                self.assertIn('此前材料记录',result['text'])
+                self.assertEqual(tools.execute.call_args.args[0],'search_history')
+                self.assertEqual(events,[{'tool':'search_history','status':'found'}])
+                self.assertEqual(model.complete.call_count,2)
+
+    def test_repeated_history_promise_is_not_saved_as_completed_answer(self):
+        model,tools=MagicMock(),MagicMock()
+        model.complete.return_value=answer('我帮你翻翻之前的记录，稍等。')
+        tools.execute.return_value={'status':'empty','messages':[]}
+        with self.assertRaisesRegex(ValueError,'AGENT_INCOMPLETE_REPLY'):
+            run_agent([],'你记得我上次看了什么病吗',[],tools,model=model)
+        tools.execute.assert_called_once()
+        self.assertEqual(model.complete.call_count,2)
+
+    def test_completed_history_answer_and_explicit_failure_do_not_trigger_a_new_lookup(self):
+        for text in ['我翻看了之前的记录，原文保留了“疑似”的限定。','没有找到可访问的记录，请补充原始材料。']:
+            model,tools=MagicMock(),MagicMock();model.complete.return_value=answer(text)
+            result,_=run_agent([],'你记得上次的病吗',[],tools,model=model)
+            self.assertEqual(result['text'],text)
+            tools.execute.assert_not_called()
+
+    def test_chat_repairs_a_citation_quote_that_does_not_match_the_final_text(self):
+        model, tools = MagicMock(), MagicMock()
+        data = {'text': '合成知识说明。', 'knowledge_refs': ['synthetic-knowledge'],
+                'citations': [{'quote': '与正文不一致的句子。', 'source_refs': ['synthetic-knowledge']}]}
+        fixed = {**data, 'citations': [{'quote': data['text'], 'source_refs': ['synthetic-knowledge']}]}
+        model.complete.side_effect = [{'content': json.dumps(data)}, {'content': json.dumps(fixed)}]
+        reply, _ = run_agent([], '解释一个术语', [], tools, model=model)
+        self.assertEqual(reply['citations'][0]['quote'], data['text'])
+        self.assertEqual(model.complete.call_count, 2)
+        self.assertIn('paragraphs', model.complete.call_args.args[0][-1]['content'])
+        self.assertIn('不要把知识库原文当成引用位置', model.complete.call_args.args[0][-1]['content'])
+        tools.execute.assert_not_called()
+
+    def test_chat_citation_repair_is_bounded(self):
+        model, tools = MagicMock(), MagicMock()
+        model.complete.return_value = {'content': json.dumps({'text': '实际正文。', 'knowledge_refs': ['synthetic'],
+            'citations': [{'quote': '另一个句子。', 'source_refs': ['synthetic']}]})}
+        with self.assertRaisesRegex(ValueError, 'CITATION_ANCHOR_NOT_UNIQUE'):
+            run_agent([], '解释一个术语', [], tools, model=model)
+        self.assertEqual(model.complete.call_count, 2)
+
+    def test_search_promise_runs_real_search_and_continues_to_an_answer(self):
+        model, tools = MagicMock(), MagicMock()
+        question = '费用清单上甲类、乙类、丙类是什么意思？'
+        model.complete.side_effect = [
+            answer('好，这个问题我帮你查一下知识库里的说法，再用你清单上的数字一起讲。'),
+            answer('合成知识说明：分类含义需结合当地政策核对。')]
+        tools.execute.return_value = {'status': 'found', 'results': [{'entry_id': 'synthetic', 'content': '合成知识'}]}
+        progress = MagicMock()
+        reply, events = run_agent([], question, [], tools, model=model, on_event=progress)
+        self.assertEqual(reply['text'], '合成知识说明：分类含义需结合当地政策核对。')
+        self.assertEqual(tools.execute.call_count, 1)
+        self.assertEqual(tools.execute.call_args.args[0], 'search_knowledge')
+        self.assertEqual(json.loads(tools.execute.call_args.args[1])['query'], question)
+        self.assertEqual(events, [{'tool': 'search_knowledge', 'status': 'found'}])
+        progress.assert_called_once_with(events)
+        self.assertTrue(any(m['role'] == 'tool' and '合成知识' in m['content'] for m in model.complete.call_args.args[0]))
+
+    def test_search_promise_after_real_tool_does_not_search_twice(self):
+        model, tools = MagicMock(), MagicMock()
+        model.complete.side_effect = [call('search_knowledge', {'query': '甲类乙类丙类'}),
+            answer('我帮你查一下知识库，稍后解释。'), answer('知识库未找到适用条目，请向结算窗口核对当地分类口径。')]
+        tools.execute.return_value = {'status': 'no_results', 'results': []}
+        reply, events = run_agent([], '费用分类是什么意思？', [], tools, model=model)
+        tools.execute.assert_called_once()
+        self.assertEqual(len(events), 1)
+        self.assertIn('未找到', reply['text'])
+
+    def test_repeated_search_promise_fails_instead_of_persisting_a_completed_answer(self):
+        model, tools = MagicMock(), MagicMock()
+        model.complete.return_value = answer('我查一下知识库，再回复你。')
+        tools.execute.return_value = {'status': 'unavailable', 'results': []}
+        with self.assertRaisesRegex(ValueError, 'AGENT_INCOMPLETE_REPLY'):
+            run_agent([], '甲类乙类是什么？', [], tools, model=model)
+        self.assertEqual(model.complete.call_count, 2)
+        tools.execute.assert_called_once()
+
+    def test_search_failure_or_substantive_explanation_is_a_valid_final_reply(self):
+        for text in ['知识库暂时不可用，请向医院结算窗口核对适用的当地政策。',
+                     '我查了一下知识库，甲类是指合成示例中的一种分类。',
+                     '这个问题可以查一下知识库；甲类、乙类的含义需结合适用政策核对。']:
+            model, tools = MagicMock(), MagicMock()
+            model.complete.return_value = answer(text)
+            reply, _ = run_agent([], '费用分类是什么意思？', [], tools, model=model)
+            self.assertEqual(reply['text'], text)
+            tools.execute.assert_not_called()
+            self.assertEqual(model.complete.call_count, 1)
+
     def test_analysis_reads_all_source_pages_before_writing_free_text(self):
         model, tools = MagicMock(), MagicMock()
         ref1, ref2 = str(uuid4()), str(uuid4())
@@ -30,7 +126,7 @@ class AgentTests(unittest.TestCase):
                         if 'authorized_material_pages' in m['content'])
         self.assertEqual(len(payloads), 1)
         self.assertIn('不能排除肺炎', str(payloads))
-        self.assertEqual(reply['prompt_version'], 'patient-analysis-narrative-v16-quality-advisory')
+        self.assertEqual(reply['prompt_version'], 'patient-analysis-narrative-v19-judge-paragraphs')
         self.assertEqual(reply['text'], '票据记载120元。\n\n检查记录写到不能排除肺炎。')
         self.assertEqual(len(events), 2)
         self.assertEqual(json.loads(tools.execute.call_args_list[1].args[1]),

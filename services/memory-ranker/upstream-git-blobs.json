@@ -1,0 +1,9 @@
+{
+  "kernel/bm25/bm25.go": "2cf3e527c636f52833945eb21a8803a225003bd6",
+  "kernel/bm25/tokenizer.go": "d973e89149e9ac9b7d5ff164f1c86e2629a1e6ce",
+  "kernel/slice/slice.go": "ef23e798c5d9f1e43c22cc6d3afae63f0738cd9a",
+  "kernel/fingerprint/fingerprint.go": "61ab59158cfdeb8845526eb6a8a28fe567bb96ea",
+  "kernel/bm25/bm25_test.go": "097839650cb2a723cce14e9d070f52c99558a04b",
+  "kernel/bm25/tokenizer_test.go": "66a55c3f1bbbf5eb62eb6b40c515441f91c035e7",
+  "LICENSE": "79a4a0a571532dc0adbe9faa9d129c1053e8f884"
+}

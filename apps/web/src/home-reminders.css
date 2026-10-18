@@ -7,3 +7,9 @@
 .demo-pages .home-reminder-context{padding-right:36px;overflow-wrap:anywhere;font-size:12px}
 .demo-pages .home-reminder-empty{position:relative;z-index:1;padding:14px 13px;background:#f4fbf7;border-radius:13px;font-size:14px;line-height:1.8;color:#425e52}
 .demo-pages .home-reminder-empty p{margin-top:6px;font-size:13px}
+.demo-pages .home-reminder-source{flex-wrap:wrap}
+.demo-pages .home-reminder-source .home-reminder-open{display:inline-flex;align-items:center;gap:3px;margin-left:auto;color:#007b5a;font-size:11px;padding:4px 0}
+.demo-pages .home-reminder-open svg{width:13px;height:13px}
+.demo-pages .home-reminder-update{position:relative;z-index:1;color:#58776a;font-size:12px;line-height:1.7;margin:0 0 10px}
+.demo-pages .home-reminder-error{position:relative;z-index:1;margin-top:12px;font-size:12px;line-height:1.7;color:#6f6351}
+.demo-pages .home-reminder-error .home-reminder-retry{color:#007b5a;padding:8px 0;font-size:12px}

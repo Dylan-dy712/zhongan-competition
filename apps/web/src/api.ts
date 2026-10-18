@@ -3,6 +3,7 @@ import type { AssistantAnswer, Evidence, Report, Conversation, ChatSnapshot, Cha
   RecommendationResponse } from "./types";
 import type {SessionResponse,ConsentResponse,MemberInput,MemberResponse} from './api/generated/accounts';
 export type {MemberInput,MemberResponse} from './api/generated/accounts';
+import {conversationTitle} from './claimChatPresentation';
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
 
@@ -117,8 +118,16 @@ async function chatRequest<T>(path: string, token: string, method = 'GET', data?
   }
   return response.json() as Promise<T>;
 }
-export const listConversations = (token: string,subjectId?:string) => chatRequest<Conversation[]>(`/v1/conversations${subjectId?`?subject_id=${encodeURIComponent(subjectId)}`:''}`, token);
-export const listMedicalRecords=(token:string,subjectId:string)=>chatRequest<import('./types').MedicalRecordsResponse>(`/v1/medical-records?subject_id=${encodeURIComponent(subjectId)}`,token);
+const presentConversation=(conversation:Conversation):Conversation=>({...conversation,title:conversationTitle(conversation.title)});
+export const listConversations = async(token: string,subjectId?:string) =>
+  (await chatRequest<Conversation[]>(`/v1/conversations${subjectId?`?subject_id=${encodeURIComponent(subjectId)}`:''}`, token)).map(presentConversation);
+export const listMedicalRecords=async(token:string,subjectId:string)=>{
+  const result=await chatRequest<import('./types').MedicalRecordsResponse>(`/v1/medical-records?subject_id=${encodeURIComponent(subjectId)}`,token);
+  return {...result,records:result.records.map(record=>({...record,title:conversationTitle(record.title),
+    related_records:record.related_records.map(link=>({...link,title:conversationTitle(link.title)})),
+    cases:record.cases.map(batch=>({...batch,proposal_title:batch.proposal_title?conversationTitle(batch.proposal_title):batch.proposal_title,
+      conversations:batch.conversations.map(presentConversation)}))}))};
+};
 export const organizeMedicalRecords=(token:string,subjectId:string)=>chatRequest<{queued_count:number}>('/v1/medical-records/organize',token,'POST',{subject_id:subjectId});
 export const changeMedicalRecord=(token:string,caseId:string,body:{mode:'join'|'separate'|'related';target_record_id?:string;expected_version:number})=>
   chatRequest<{version:number}>(`/v1/medical-records/cases/${encodeURIComponent(caseId)}`,token,'PATCH',body);
@@ -142,11 +151,18 @@ export const getCareConsent=(token:string,subjectId?:string)=>chatRequest<CareCo
 export const changeCareConsent=(token:string,confirmation:boolean,expected_version:number,subjectId?:string)=>
   chatRequest<CareConsent>(`/v1/me/consents${subjectId?`?subject_id=${encodeURIComponent(subjectId)}`:''}`,token,'POST',{confirmation,expected_version},
     Array.from(crypto.getRandomValues(new Uint8Array(16)),b=>b.toString(16).padStart(2,'0')).join(''));
-export const getConversation = (token: string, id: string) => chatRequest<ChatSnapshot>(`/v1/conversations/${id}`, token);
+export const getConversation = async(token: string, id: string) => {
+  const result=await chatRequest<ChatSnapshot>(`/v1/conversations/${id}`, token);
+  return {...result,conversation:presentConversation(result.conversation)};
+};
 export const getOlderTurns = (token: string, id: string, before: string) =>
   chatRequest<ChatTurn[]>(`/v1/conversations/${id}/turns?before=${encodeURIComponent(before)}`, token);
-export const sendChatMessage = (token: string, id: string, requestId: string, message: string, documentIds: string[]) =>
-  chatRequest(`/v1/conversations/${id}/messages`, token, 'POST', {request_id:requestId, message, document_ids:documentIds});
+export const sendChatMessage = (token: string, id: string, requestId: string, message: string, documentIds: string[],attachmentIds:string[]=[]) =>
+  chatRequest(`/v1/conversations/${id}/messages`, token, 'POST', {request_id:requestId, message, document_ids:documentIds,attachment_ids:attachmentIds});
+export const uploadChatAttachment=(token:string,id:string,file:File)=>{
+  const data=new FormData();data.append('file',file);
+  return chatRequest<{attachment_id:string;name:string}>(`/v1/conversations/${id}/attachments`,token,'POST',data);
+};
 export const continueAnalysis = (token: string, id: string, runId: string) =>
   chatRequest(`/v1/conversations/${id}/analyses/${runId}/continue`, token, 'POST',undefined,undefined,450000);
 export const setRecall = (token: string, id: string, enabled: boolean) =>
@@ -172,9 +188,16 @@ export const getKnowledgeSource=(token:string,id:string)=>chatRequest<import('./
 export const listQualitySnapshots=(token:string)=>chatRequest<{snapshot_id:string}[]>('/v1/quality/snapshots',token);
 export const getQualitySnapshot=(token:string,id:string)=>chatRequest<import('./types').QualitySnapshot>(`/v1/quality/snapshots/${encodeURIComponent(id)}`,token);
 export async function getEvidenceImage(token:string,evidence:import('./types').Evidence){
-  const response=await apiFetch(`${API_BASE}/v1/cases/${evidence.case_id}/documents/${evidence.document_id}/content?version=${evidence.document_version}`,{headers:{Authorization:`Bearer ${token}`}});
+  const pdf=evidence.media_type==='application/pdf';
+  const path=pdf?`/v1/evidence/${encodeURIComponent(evidence.evidence_id)}/page-image`
+    :`/v1/cases/${encodeURIComponent(evidence.case_id!)}/documents/${encodeURIComponent(evidence.document_id)}/content?version=${evidence.document_version}`;
+  const response=await apiFetch(`${API_BASE}${path}`,{headers:{Authorization:`Bearer ${token}`}});
   if(!response.ok)throw new ApiError('原图暂不可用',response.status);
-  return URL.createObjectURL(await response.blob());
+  const candidates:unknown=pdf?JSON.parse(response.headers.get('X-Evidence-Regions')||'[]'):(evidence.bbox?[evidence.bbox]:[]);
+  const regions:Array<[number,number,number,number]>=Array.isArray(candidates)?candidates.filter((box):box is [number,number,number,number]=>
+    Array.isArray(box)&&box.length===4&&box.every(value=>typeof value==='number'&&Number.isFinite(value)&&value>=0&&value<=1)
+    &&box[0]<box[2]&&box[1]<box[3]):[];
+  return {url:URL.createObjectURL(await response.blob()),regions};
 }
 
 export const getDemoQuality=(token:string)=>chatRequest<import('./types').QualitySnapshot>('/v1/quality/demo',token);

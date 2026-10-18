@@ -2,7 +2,7 @@ const documentTypes: Record<string,string> = {
   pdf:'application/pdf',txt:'text/plain',jpg:'image/jpeg',jpeg:'image/jpeg',png:'image/png',
 };
 
-export function prepareChatFiles(files:FileList, attached:number):File[] {
+export function prepareChatFiles(files:FileList|readonly File[], attached=0):File[] {
   return Array.from(files,file=>{
     const extension=file.name.split('.').at(-1)?.toLowerCase() || '';
     const type=documentTypes[extension];

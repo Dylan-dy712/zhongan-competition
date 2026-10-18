@@ -1,6 +1,7 @@
 import type {ChatTurn} from './types';
 import {narrativeBlocks,emphasisParts} from './narrativeFormatting';
 import {CitedText} from './SourceCitations';
+import {ReportServiceGuide} from './MedicalServices';
 
 export function Emphasis({text}:{text:string}) {
   return <>{emphasisParts(text).map((part,i)=>part.strong?<strong key={i}>{part.text}</strong>:part.text)}</>;
@@ -11,12 +12,13 @@ export function currentNarrative(turns:ChatTurn[],runId?:string) {
     && t.status==='completed' && t.answer?.analysis_run_id===runId) : undefined;
 }
 
-export default function AnalysisNarrative({turn,onEvidence}:{turn:ChatTurn;onEvidence:(id:string)=>void}) {
+export default function AnalysisNarrative({turn,onEvidence,onServiceAsk,disabled=false}:{turn:ChatTurn;onEvidence:(id:string)=>void;onServiceAsk?:(message:string)=>Promise<boolean>;disabled?:boolean}) {
   if(!turn.answer)return null;
   const blocks=narrativeBlocks(turn.answer.text);
   const cited=(text:string)=><CitedText text={text} citations={turn.answer!.citations} sources={turn.answer!.knowledge_sources} onEvidence={onEvidence}/>;
   let number=0;
   return <article className="analysis-narrative" aria-label="暖暖的材料解读">
+    {turn.answer.sample_preload && <p className="muted" role="note">本次复用预加载的评委样例草稿，已核对本次提交的材料。</p>}
     <div className="analysis-narrative-copy">
       {blocks.map((block,i)=>block.kind==='point'
         ? <section className="analysis-narrative-point" key={i}>
@@ -34,5 +36,6 @@ export default function AnalysisNarrative({turn,onEvidence}:{turn:ChatTurn;onEvi
     {turn.answer.guidance_delivery?.status!=='passed' && turn.answer.guidance_delivery?.notice &&
       <p className="muted analysis-reading-notice" role="note">{turn.answer.guidance_delivery.notice}</p>}
     {!turn.answer.citations?.length && turn.answer.evidence_refs.length>0 && <small className="muted">此历史解读尚无逐条引用，可重新分析材料以生成带来源角标的解读。</small>}
+    <ReportServiceGuide text={turn.answer.service_guide?.text} onAsk={onServiceAsk} disabled={disabled}/>
   </article>;
 }

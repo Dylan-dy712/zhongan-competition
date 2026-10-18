@@ -6,6 +6,8 @@ import {startChatAnalysis} from './api';
 import {replaceChatDocument} from './api';
 import AnalysisFlow,{analysisView,type UploadProgress} from './AnalysisFlow';
 import AnalysisNarrative,{currentNarrative} from './AnalysisNarrative';
+import ChatFollowups from './ChatFollowups';
+import MedicalServiceCards from './MedicalServices';
 import type {ChatSnapshot, ChatSubject, ChatTurn, Conversation, Evidence, ToolEvent, DeliveryNotice, FeedbackType,ReportSection} from './types';
 import {CareReport,EvidencePanel,brand} from './CarePages';
 import {DemoHome,DemoIcon} from './DemoPages';
@@ -13,17 +15,19 @@ import {publishedCare,type CarePanel} from './carePresentation';
 import {readCarePanel,useCareNavigation} from './careNavigation';
 import {PageBoundary} from './PageBoundary';
 import AuthPage from './AuthPage';
-import ClaimIntake from './ClaimIntake';
+import ClaimIntake,{type JudgeSampleRequest} from './ClaimIntake';
 import AccountPage from './AccountPage';
 import {MemberEditor,MemberPicker,MemberConsentDialog} from './MemberControls';
 import PersonalRecords from './PersonalRecords';
-import type {MemberResponse} from './api';
+import type {MemberResponse,JudgeSample} from './api';
 import {revokeSession} from './api';
-import OriginalChatGuide,{OriginalChatWelcome} from './OriginalChatGuide';
+import OriginalChatWelcome from './OriginalChatWelcome';
 import {prepareChatFiles} from './chatFiles';
+import {isClaimSubmission} from './claimChatPresentation';
+import {uploadChatAttachment} from './api';
+import {ChatDraftAttachments,ChatSentAttachments,ReportUploadDialog,type DraftAttachment} from './ChatUploads';
 import PhotoReview from './PhotoReview';
 import EncounterOverview from './EncounterOverview';
-import {overviewTabs,type OverviewTab} from './encounterPresentation';
 import DemoShowcase from './DemoShowcase';
 import {SourceToken,CitedText} from './SourceCitations';
 import './chat.css';
@@ -38,8 +42,8 @@ function requestId() {
   const hex = Array.from(bytes, x => x.toString(16).padStart(2, '0')).join('');
   return `${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20)}`;
 }
-const toolLabels: Record<string,string> = {list_materials:'查看上传材料',start_analysis:'提交材料分析',
-  search_knowledge:'查阅医护与费用知识',
+const toolLabels: Record<string,string> = {recommend_medical_services:'整理医疗服务',list_materials:'查看上传材料',start_analysis:'提交材料分析',
+  search_knowledge:'查阅医护与费用知识',search_web:'联网查阅权威资料',
   analysis_status:'查询分析进度',read_materials:'查阅原始依据',read_report:'读取分析报告',search_history:'查找以前的对话'};
 const statusLabels: Record<string,string> = {not_started:'尚未分析',queued:'材料已排队',running:'正在分析材料',
   waiting_review:'材料已解析，部分结论待专业复核',completed:'材料分析已完成',failed:'材料分析失败',cancelled:'分析已取消',
@@ -68,10 +72,13 @@ export default function App() {
   const [subject,setSubject] = useState('');
   const [claimSubject,setClaimSubject]=useState('');
   const [claimDirty,setClaimDirty]=useState(false);
+  const [judgeSampleRequest,setJudgeSampleRequest]=useState<(JudgeSampleRequest&{subjectId:string})>();
+  useEffect(()=>setJudgeSampleRequest(undefined),[token]);
   const [members,setMembers]=useState<MemberResponse[]>([]);
   const [viewSubject,setViewSubject]=useState('');
   const [recordCase,setRecordCase]=useState<string>();
-  const [memberPicker,setMemberPicker]=useState<'chat'|'claim'>();
+  const [memberPicker,setMemberPicker]=useState<'chat'|'claim'|'report'>();
+  const pendingReportMember=useRef('');
   const [consentMember,setConsentMember]=useState<string>();
   const memberEpoch=useRef(0);
   const memberCacheKey=useRef('');
@@ -85,12 +92,14 @@ export default function App() {
     if(value.relationship==='self'&&!selfMember?.profile_completed)setPanel('home');};
   const [caseInput,setCaseInput] = useState('');
   const [snapshot,setSnapshot] = useState<ChatSnapshot|null>(null);
-  // Care cards belong to the claim-completion entry, not to ordinary chat visits.
-  const [claimGuideConversation,setClaimGuideConversation] = useState('');
   const [older,setOlder] = useState<ChatTurn[]>([]);
   const [hasOlder,setHasOlder] = useState(false);
   const [input,setInput] = useState('');
   const [attachments,setAttachments] = useState<{document_id:string; name:string}[]>([]);
+  const [draftFiles,setDraftFiles]=useState<DraftAttachment[]>([]);
+  const [sentMessages,setSentMessages]=useState<{turn:ChatTurn;files:DraftAttachment[]}[]>([]);
+  const uploadedDrafts=useRef(new Map<string,string>());
+  const [reportUploadConversation,setReportUploadConversation]=useState('');
   const [busy,setBusy] = useState(false);
   const [uploading,setUploading] = useState(false);
   const [photoReview,setPhotoReview]=useState<{files:File[];conversationId:string;replaceId?:string}|null>(null);
@@ -98,9 +107,9 @@ export default function App() {
   const [uploadProgress,setUploadProgress]=useState<UploadProgress>();
   const [analysisSubmitting,setAnalysisSubmitting]=useState(false);
   const [analysisError,setAnalysisError]=useState('');
-  const [overviewTab,setOverviewTab]=useState<OverviewTab>('facts');
   const observedAnalysis=useRef('');
   const analysisRequest=useRef<{id:string;message:string;docs:string[]}|null>(null);
+  const pendingReportUpload=useRef<{files:File[];replaceId?:string;completed:Map<File,{document_id:string;name:string}>}|null>(null);
   const [error,setError] = useState('');
   const [pollError,setPollError] = useState('');
   const [evidence,setEvidence] = useState<Evidence|null>(null);
@@ -130,7 +139,7 @@ export default function App() {
   const uploadMenu = useRef<HTMLDetailsElement>(null);
   const uploadingRef=useRef(false);
   const bottom = useRef<HTMLDivElement>(null);
-  const pendingSend = useRef<{id:string; text:string; docs:string[]}|null>(null);
+  const pendingSend = useRef<{id:string; text:string; docs:string[];draftKey:string}|null>(null);
   const connecting=useRef(false);
 
   const invalidateAccess = useCallback((e:unknown,id:string,generation:number,auth=token) => {
@@ -138,6 +147,7 @@ export default function App() {
     const fresh=++epoch.current;active.current='';busyRef.current=false;
     setLoadingConversation(false);setPollError('');
     setSnapshot(null);setOlder([]);setEvidence(null);setAttachments([]);setPhotoReview(null);setInput('');setDelivery(null);
+    setDraftFiles([]);setSentMessages([]);uploadedDrafts.current.clear();setReportUploadConversation('');pendingReportUpload.current=null;
     setConversations([]);setSubjects([]);setSubject('');setCaseInput('');setFeedbackNotice('');setBusy(false);setUploading(false);
     localStorage.removeItem('zhongan_last_conversation');
     pendingSend.current=null;careKeys.current.clear();
@@ -168,10 +178,10 @@ export default function App() {
   const openConversation = useCallback(async (id:string, auth=token, destination:CarePanel='home', fromClaim=false) => {
     const generation = ++epoch.current;
     active.current = id;
-    analysisRequest.current=null;uploadingRef.current=false;
-    setClaimGuideConversation(fromClaim ? id : '');
+    analysisRequest.current=null;pendingReportUpload.current=null;uploadingRef.current=false;
     olderExhausted.current = false;
     setSnapshot(null); setOlder([]); setAttachments([]);setPhotoReview(null); setInput(''); setEvidence(null); setError('');setPollError('');
+    setDraftFiles([]);setSentMessages([]);uploadedDrafts.current.clear();setReportUploadConversation('');pendingReportUpload.current=null;
     busyRef.current=false;setBusy(false);setUploading(false);
     setLoadingConversation(true);setHasOlder(false);setDelivery(null);setFeedbackNotice('');
     setPanel(destination);setReportFocus(undefined); setHistoryOpen(false); pendingSend.current = null;
@@ -179,6 +189,7 @@ export default function App() {
       const state=await refresh(id,auth,generation);
       if(epoch.current===generation){setAnalysisOpen(!!fromClaim && !!state.analysis.run_id);setAnalysisError('');setUploadProgress(undefined);}
       if (epoch.current===generation) localStorage.setItem('zhongan_last_conversation',id);
+      if(epoch.current===generation)return state;
     } catch(e) {if(epoch.current===generation) setError(errorText(e));}
     finally {if(epoch.current===generation)setLoadingConversation(false);}
   },[refresh,token,setPanel]);
@@ -216,7 +227,7 @@ export default function App() {
       observedAnalysis.current=key;setAnalysisError('');setAnalysisOpen(true);
     }
   },[snapshot?.analysis.run_id,snapshot?.analysis.status,snapshot?.conversation.conversation_id]);
-  useEffect(()=>{++evidenceRequest.current;setHistoryOpen(false);setEvidence(null);if(panel!=='chat')setClaimGuideConversation('');},[panel]);
+  useEffect(()=>{++evidenceRequest.current;setHistoryOpen(false);setEvidence(null);},[panel]);
   useEffect(()=>{
     if(panel==='report' && snapshot && !publishedCare(snapshot.report))setPanel('chat');
   },[panel,snapshot,setPanel]);
@@ -310,8 +321,8 @@ export default function App() {
     busyRef.current=false;setBusy(false);setUploading(false);setLoadingConversation(false);
     setDelivery(null);setFeedbackNotice('');setHasOlder(false);setReportFocus(undefined);setCaseInput('');
     setSnapshot(null);setOlder([]);setAttachments([]);setPhotoReview(null);setInput('');setEvidence(null);setError('');
+    setDraftFiles([]);setSentMessages([]);uploadedDrafts.current.clear();setReportUploadConversation('');
     setHistoryOpen(false);pendingSend.current=null;
-    setClaimGuideConversation('');
     setPanel('chat');
   };
 
@@ -321,20 +332,56 @@ export default function App() {
     if(destination==='claim'&&panel==='claim')return;
     if(personId){
       if(claimSubject&&claimSubject!==personId&&claimDirty&&!window.confirm('切换就医人员将清除尚未提交的表单和材料，是否继续？'))return;
-      if(claimSubject!==personId)setClaimDirty(false);setClaimSubject(personId);setPanel('claim');
+      if(claimSubject!==personId){setClaimDirty(false);setJudgeSampleRequest(undefined);}setClaimSubject(personId);setPanel('claim');
     }
     else setMemberPicker(destination);
   };
   const chooseBusinessMember=(id:string)=>{
-    const destination=memberPicker;setMemberPicker(undefined);if(destination)requestBusiness(destination,id);
+    const destination=memberPicker;setMemberPicker(undefined);
+    if(destination==='report')void createReportConversation(id);
+    else if(destination)requestBusiness(destination,id);
+  };
+  const createReportConversation=async(personId:string,allowed:ChatSubject[]=subjects)=>{
+    if(busyRef.current||uploadingRef.current||analysisSubmitting)return;
+    if(!allowed.some(item=>item.subject_id===personId)){
+      pendingReportMember.current=personId;setConsentMember(personId);return;
+    }
+    const generation=epoch.current;busyRef.current=true;setBusy(true);setError('');
+    try{
+      const created=await createConversation(token,requestId(),personId);
+      if(epoch.current!==generation)return;
+      setConversations(await listConversations(token));
+      if(epoch.current!==generation)return;
+      const opened=await openConversation(created.conversation_id,token,'chat');
+      if(opened&&active.current===created.conversation_id)setReportUploadConversation(created.conversation_id);
+    }catch(e){if(epoch.current===generation)setError(errorText(e));}
+    finally{if(epoch.current===generation){busyRef.current=false;setBusy(false);}}
+  };
+  const startJudgeExperience=(sample:JudgeSample)=>{
+    if(busyRef.current||uploadingRef.current||analysisSubmitting)return;
+    if(!selfMember)throw new Error('请先完善本人资料，再开始评委体验。');
+    const sameDraft=claimDirty&&claimSubject===selfMember.subject_id&&judgeSampleRequest?.subjectId===claimSubject
+      &&judgeSampleRequest.sample.sample_id===sample.sample_id&&judgeSampleRequest.sample.version===sample.version;
+    if(!sameDraft){
+      if(claimDirty&&!window.confirm('用示例体验替换当前尚未提交的表单和材料？'))return;
+      setJudgeSampleRequest({id:requestId(),subjectId:selfMember.subject_id,sample});
+      setClaimDirty(false);
+    }
+    setClaimSubject(selfMember.subject_id);setMemberPicker(undefined);setPanel('claim');
   };
   const refreshAccess=async(changedSubject:string)=>{
     const generation=++memberEpoch.current;
     const [items,allowed]=await Promise.all([listConversations(token),listSubjects(token)]);
     if(memberEpoch.current!==generation)return;
     setConversations(items);setSubjects(allowed);
+    if(pendingReportMember.current===changedSubject&&allowed.some(item=>item.subject_id===changedSubject)){
+      pendingReportMember.current='';
+      await createReportConversation(changedSubject,allowed);
+      return;
+    }
     if(snapshot?.conversation.subject_id===changedSubject&&active.current===snapshot.conversation.conversation_id&&!items.some(item=>item.conversation_id===snapshot.conversation.conversation_id)){
       ++epoch.current;active.current='';setSnapshot(null);setEvidence(null);setOlder([]);setAttachments([]);setPhotoReview(null);setInput('');setDelivery(null);
+      setDraftFiles([]);setSentMessages([]);uploadedDrafts.current.clear();setReportUploadConversation('');
       pendingSend.current=null;careKeys.current.clear();localStorage.removeItem('zhongan_last_conversation');
     }
   };
@@ -353,7 +400,9 @@ export default function App() {
         }else{setAnalysisError('解读暂时没能完成，你的材料已保存，可以重试。'+errorText(e));}
       }
     }
-    finally{if(epoch.current===generation){busyRef.current=false;setBusy(false);}}
+    finally{if(epoch.current===generation){busyRef.current=false;setBusy(false);
+      void listConversations(token).then(items=>{if(epoch.current===generation)setConversations(items);}).catch(()=>{});
+    }}
   },[token,refresh]);
 
   // Processing labels come from persisted backend events, never timed animations.
@@ -381,30 +430,70 @@ export default function App() {
     return()=>{stopped=true;clearTimeout(timer);};
   },[connected,snapshot?.conversation.conversation_id,token,refresh,completeNarrative]);
 
-  const send = async (retry?:ChatTurn) => {
+  const titlesPending=conversations.some(item=>item.title_pending);
+  useEffect(()=>{
+    if(!connected||panel!=='chat'||!titlesPending)return;
+    const generation=epoch.current;
+    let stopped=false,timer:ReturnType<typeof setTimeout>;
+    const tick=async()=>{
+      try{const items=await listConversations(token);if(!stopped&&epoch.current===generation)setConversations(items);}
+      catch{/* Keep readable titles during a transient title refresh failure. */}
+      if(!stopped&&epoch.current===generation)timer=setTimeout(tick,5000);
+    };
+    timer=setTimeout(tick,5000);
+    return()=>{stopped=true;clearTimeout(timer);};
+  },[connected,panel,titlesPending,token,snapshot?.conversation.conversation_id]);
+
+  const send = async (retry?:ChatTurn,quickMessage?:string):Promise<boolean> => {
     const id=active.current, generation=epoch.current;
-    if(!id || busyRef.current || busy || uploading) return;
-    const text=retry?.question || input.trim() || (attachments.length ? '请帮我分析这些材料。' : '');
-    if(!text)return;
-    const docs=retry ? retry.attachments.map(x=>x.document_id) : attachments.map(x=>x.document_id);
+    if(!id || busyRef.current || busy || uploading || loadingConversation || snapshot?.turns.some(t=>t.status==='running')) return false;
+    const quick=quickMessage!==undefined;
+    const localRetry=retry?.turn_id.startsWith('local:');
+    const selected=retry ? sentMessages.find(item=>item.turn.request_id===retry.request_id)?.files || [] : quick ? [] : [...draftFiles];
+    const text=quick ? quickMessage.trim() : retry?.question || input.trim() || (selected.length ? '请看看这些附件，帮我解释一下。' : '');
+    if(!text)return false;
+    const docs=retry ? retry.attachments.filter(x=>x.kind!=='chat_attachment').map(x=>x.document_id) : [];
+    const attachmentIds=retry ? retry.attachments.filter(x=>x.kind==='chat_attachment').map(x=>x.document_id) : [];
+    const draftKey=quick?'quick':retry?retry.turn_id:selected.map(file=>file.id).join(':');
     const previous=pendingSend.current;
-    const req=retry?.request_id || (previous && previous.text===text && JSON.stringify(previous.docs)===JSON.stringify(docs) ? previous.id : requestId());
-    pendingSend.current={id:req,text,docs};busyRef.current=true;setBusy(true);setError('');
-    if(docs.length){setAnalysisOpen(true);setAnalysisError('');setAnalysisSubmitting(true);}
+    const req=retry?.request_id || (quick&&previous?.draftKey==='quick'&&previous.text===text?previous.id:requestId());
+    pendingSend.current={id:req,text,docs,draftKey};busyRef.current=true;setBusy(true);setError('');
+    // Capture the submission before any upload/model await. The composer is only a draft.
+    if(!retry && !(quick&&sentMessages.some(item=>item.turn.request_id===req))){
+      const turn:ChatTurn={turn_id:`local:${req}`,request_id:req,question:text,input_kind:'user',attachments:[],status:'running',answer:null,tool_events:[],created_at:new Date().toISOString(),error_code:null};
+      setSentMessages(items=>[...items.slice(-19),{turn,files:selected}]);
+      if(!quick){setInput('');setDraftFiles([]);}
+    }else setSentMessages(items=>items.map(item=>item.turn.request_id===req?{...item,turn:{...item.turn,status:'running'}}:item));
+    let sent=false;
     try {
       if(retry?.input_kind==='analysis_ready' && snapshot?.analysis.run_id) {
         await continueAnalysis(token,id,snapshot.analysis.run_id);
       } else {
-        if(docs.length)await startChatAnalysis(token,id,req,text,docs);
-        else await sendChatMessage(token,id,req,text,docs);
+        if((!retry||localRetry)&&selected.length){
+          uploadingRef.current=true;setUploading(true);
+          for(const item of selected){
+            let attachmentId=uploadedDrafts.current.get(item.id);
+            if(!attachmentId){const uploaded=await uploadChatAttachment(token,id,item.file);
+              if(epoch.current!==generation)return false;
+              attachmentId=uploaded.attachment_id;uploadedDrafts.current.set(item.id,attachmentId);}
+            attachmentIds.push(attachmentId);
+          }
+          uploadingRef.current=false;setUploading(false);
+        }
+        await sendChatMessage(token,id,req,text,docs,attachmentIds);
       }
-      if(epoch.current===generation){setInput('');setAttachments([]);setPhotoReview(null);pendingSend.current=null;}
-    } catch(e){if(!invalidateAccess(e,id,generation) && epoch.current===generation)setError(errorText(e));}
+      sent=true;
+      if(epoch.current===generation)pendingSend.current=null;
+    } catch(e){if(!invalidateAccess(e,id,generation) && epoch.current===generation){
+      setSentMessages(items=>items.map(item=>item.turn.request_id===req?{...item,turn:{...item.turn,status:'failed'}}:item));
+      setError(errorText(e));
+    }}
     finally {
-      try {await refresh(id,token,generation);if(epoch.current===generation)setConversations(await listConversations(token));}
+      try {await refresh(id,token,generation);const items=await listConversations(token);if(epoch.current===generation)setConversations(items);}
       catch(e){if(epoch.current===generation)setError(errorText(e));}
-      if(epoch.current===generation){busyRef.current=false;setBusy(false);setAnalysisSubmitting(false);}
+      if(epoch.current===generation){busyRef.current=false;uploadingRef.current=false;setUploading(false);setBusy(false);}
     }
+    return sent;
   };
 
   const startMaterialAnalysis=async(docs=attachments.map(a=>a.document_id),message=input.trim() || '请分析本次上传材料，整理就医经过、费用与待补充信息。',forceNew=false)=>{
@@ -419,14 +508,14 @@ export default function App() {
     finally{
       try{await refresh(id,token,generation);}catch(e){if(epoch.current===generation)setAnalysisError(errorText(e));}
       if(epoch.current===generation){busyRef.current=false;setBusy(false);setAnalysisSubmitting(false);}
+      if(epoch.current===generation)void listConversations(token).then(items=>{if(epoch.current===generation)setConversations(items);}).catch(()=>{});
     }
   };
 
   const upload = async(files:FileList|null) => {
     if(!files || !active.current || busyRef.current || busy || uploading)return;
-    try{const selected=prepareChatFiles(files,attachments.length);
-      if(selected.some(file=>file.type.startsWith('image/')))setPhotoReview({files:selected,conversationId:active.current});
-      else await uploadAccepted(selected);
+    try{const selected=prepareChatFiles(files);
+      setDraftFiles(current=>[...current,...selected.map(file=>({id:requestId(),file}))]);setError('');
     }catch(e){setError(errorText(e));}
     if(uploadInput.current)uploadInput.current.value='';if(photoInput.current)photoInput.current.value='';
   };
@@ -434,16 +523,20 @@ export default function App() {
     if(!active.current || busyRef.current || uploading)return;
     const id=active.current,generation=epoch.current;
     if(!selected.length)return;
+    const previous=pendingReportUpload.current;
+    const attempt=previous?.files===selected&&previous.replaceId===replaceId?previous:{files:selected,replaceId,completed:new Map<File,{document_id:string;name:string}>()};
+    pendingReportUpload.current=attempt;
     uploadingRef.current=true;
     const uploaded=attachments.filter(item=>item.document_id!==replaceId);setUploading(true);setError('');setAnalysisError('');setAnalysisOpen(true);setUploadProgress({done:0,total:selected.length});
     try {
       for(const file of selected) {
-        const doc=replaceId?await replaceChatDocument(token,id,replaceId,file):await uploadChatDocument(token,id,file);
+        const doc=attempt.completed.get(file) || (replaceId?await replaceChatDocument(token,id,replaceId,file):await uploadChatDocument(token,id,file));
         if(epoch.current!==generation)return;
+        attempt.completed.set(file,{document_id:doc.document_id,name:file.name});
         if(!uploaded.some(x=>x.document_id===doc.document_id))uploaded.push({document_id:doc.document_id,name:file.name});
         setAttachments([...uploaded]);setUploadProgress({done:selected.indexOf(file)+1,total:selected.length});
       }
-      if(epoch.current===generation){setUploadProgress(undefined);await startMaterialAnalysis(uploaded.map(a=>a.document_id));}
+      if(epoch.current===generation){pendingReportUpload.current=null;setUploadProgress(undefined);await startMaterialAnalysis(uploaded.map(a=>a.document_id));}
     } catch(e){if(!invalidateAccess(e,id,generation) && epoch.current===generation){setError(errorText(e));setAnalysisError(errorText(e));}}
     finally {if(epoch.current===generation){uploadingRef.current=false;setUploading(false);setUploadProgress(undefined);if(uploadInput.current)uploadInput.current.value='';if(photoInput.current)photoInput.current.value='';}}
   };
@@ -475,6 +568,7 @@ export default function App() {
     sessionStorage.removeItem('zhongan_account_name');
     setToken('');setConnected(false);setConversations([]);setSnapshot(null);
     setOlder([]);setAttachments([]);setPhotoReview(null);setEvidence(null);setError('');setPollError('');setHistoryOpen(false);pendingSend.current=null;
+    setDraftFiles([]);setSentMessages([]);uploadedDrafts.current.clear();setReportUploadConversation('');pendingReportMember.current='';pendingReportUpload.current=null;
     setSubjects([]);setSubject('');setCaseInput('');setInput('');localStorage.removeItem('zhongan_last_conversation');
     ++memberEpoch.current;setClaimSubject('');setClaimDirty(false);setMembers([]);setViewSubject('');setMemberPicker(undefined);setRecordCase(undefined);
     if(memberCacheKey.current)localStorage.removeItem(memberCacheKey.current);memberCacheKey.current='';
@@ -486,9 +580,10 @@ export default function App() {
     try {await revokeSession(token);logout();}
     catch(e){setError(errorText(e));}
   };
-  const turns=[...older,...(snapshot?.turns || [])].filter((t,i,all)=>all.findIndex(x=>x.turn_id===t.turn_id)===i);
+  const savedTurns=[...older,...(snapshot?.turns || [])].filter((t,i,all)=>all.findIndex(x=>x.turn_id===t.turn_id)===i);
+  const turns=[...savedTurns,...sentMessages.filter(item=>!savedTurns.some(t=>t.request_id===item.turn.request_id)).map(item=>item.turn)];
+  const latestAnswered=[...turns].reverse().find(t=>t.status==='completed'&&t.answer)?.turn_id;
   const narrative=currentNarrative(turns,snapshot?.analysis.run_id);
-  const showClaimGuide=!!snapshot && claimGuideConversation===snapshot.conversation.conversation_id;
   const working=busy || uploading || loadingConversation || !!snapshot?.turns.some(t=>t.status==='running');
   const submit=(e:FormEvent)=>{e.preventDefault();void send();};
   const openNarrative=()=>{setAnalysisOpen(false);setPanel('chat');requestAnimationFrame(()=>{
@@ -497,15 +592,15 @@ export default function App() {
   const openReport=(section?:ReportSection['section_type'])=>{
     if(!snapshot || !publishedCare(snapshot.report)){openNarrative();return;}
     setAnalysisOpen(false);setReportFocus(section);setPanel('report');};
-  const openOverview=(tab:OverviewTab='facts')=>{setOverviewTab(tab);setPanel('overview');};
   const material=snapshot?.material_report;
   const progressView=analysisView(snapshot,uploadProgress,analysisSubmitting,analysisError);
   const historyPanel=<aside className="chat-sidebar" aria-label="历史对话列表">
       <div className="history-panel-head"><div className="brand"><img src={brand} alt="暖愈智护"/></div><button className="history-close" autoFocus={mobileHistory} aria-label="关闭历史对话" onClick={()=>setHistoryOpen(false)}>×</button></div>
-      <button className="new-chat" disabled={working} onClick={()=>requestBusiness('chat')}>＋ 新的关怀对话</button>
+      <button className="new-chat new-report" disabled={working} onClick={()=>{setHistoryOpen(false);setMemberPicker('report');}}>＋ 新建解读报告</button>
+      <button className="new-chat" disabled={working} onClick={()=>requestBusiness('chat')}>＋ 新建对话</button>
       <div className="history-list"><p>以前的对话</p>{conversations.length===0 && <p>还没有历史对话</p>}{conversations.map(c=><button disabled={working} key={c.conversation_id}
         className={active.current===c.conversation_id?'selected':''} onClick={()=>void openConversation(c.conversation_id,token,'chat')}>
-        <strong>{c.title}</strong><small>{new Date(c.updated_at).toLocaleDateString('zh-CN')}</small></button>)}</div>
+        <strong title={c.title}>{c.title}</strong><span className="history-item-meta">{c.has_interpretation_report&&<span className="history-report-badge">解读报告</span>}<small>{new Date(c.updated_at).toLocaleDateString('zh-CN')}</small></span></button>)}</div>
       <button className="quiet-button" disabled={working} onClick={()=>void signOut()}>退出登录</button>
     </aside>;
 
@@ -524,7 +619,7 @@ export default function App() {
         {delivery.receipt_state==='read' ? <span>已查看</span> : <button onClick={()=>openReport()}>查看指引</button>}</div>}
       {(error || pollError) && <div role="alert" className="chat-error persistent-error">{error || pollError}<button aria-label="关闭提示" onClick={()=>{setError('');setPollError('');}}>×</button></div>}
       <PageBoundary resetKey={`${panel}:${snapshot?.conversation.conversation_id || ''}`}>
-      {connected && !needsProfile && claimSubject && <div className="claim-panel" hidden={panel!=='claim'}><ClaimIntake key={`${token}:${claimSubject}`} token={token} onDirty={setClaimDirty} subject={subjects.some(item=>item.subject_id===claimSubject)?claimSubject:''} visible={panel==='claim'} onExit={()=>setPanel('home')} onAuthorize={()=>setConsentMember(claimSubject)} onOpen={async (id,report=false)=>{
+      {connected && !needsProfile && claimSubject && <div className="claim-panel" hidden={panel!=='claim'}><ClaimIntake key={`${token}:${claimSubject}`} token={token} sampleRequest={judgeSampleRequest?.subjectId===claimSubject?judgeSampleRequest:undefined} onDirty={setClaimDirty} subject={subjects.some(item=>item.subject_id===claimSubject)?claimSubject:''} visible={panel==='claim'} onExit={()=>setPanel('home')} onAuthorize={()=>setConsentMember(claimSubject)} onOpen={async (id,report=false)=>{
           const generation=epoch.current;const items=await listConversations(token);
           if(epoch.current!==generation)return;setConversations(items);await openConversation(id,token,'chat',true);if(report)openReport();}}/></div>}
       {!connected ? token ? <main className="start-screen" role="status"><h1>{busy?'正在连接服务…':'服务暂时不可用'}</h1><p>登录状态已保留，恢复连接后可继续。</p><button className="care-primary" disabled={busy} onClick={()=>void connect(token)}>{busy?'正在连接…':'重新连接'}</button></main> : <AuthPage onAuthenticated={auth=>connect(auth,true)}/>
@@ -540,17 +635,17 @@ export default function App() {
       : panel==='demo' ? <DemoShowcase token={token} busy={working} canRun={subjects.some(s=>s.subject_id===viewMember?.subject_id)} onRun={file=>void runDemo(file)} onBack={()=>setPanel('home')}/>
       : panel==='home' ? <DemoHome token={token} member={viewMember} onOpen={(id,destination,section)=>{
           void openConversation(id,token,destination).then(()=>{if(active.current===id)setReportFocus(section);});
-        }} onClaim={()=>requestBusiness('claim')}/>
+        }} onClaim={()=>requestBusiness('claim')} onJudgeExperience={startJudgeExperience} disabled={working}/>
       : !snapshot ? <main className="original-chat-start"><OriginalChatWelcome/><div className="nuan-message"><span className="nuan-avatar" aria-hidden="true">✦</span><div className="nuan-message-body"><p>你好，我是暖暖。你现在有什么想说的，我愿意听。想聊聊身体上的不舒服、心里的牵挂，或一起看看材料，都可以按你的节奏来。</p></div></div>
         <button className="claim-entry-link" onClick={()=>requestBusiness('claim')}>整理理赔资料，开启专属关怀</button>
         <div className="connect-form member-start-card"><label>咨询对象<select value={subject} onChange={e=>setSubject(e.target.value)}><option value="">请选择人员</option>
           {members.map(member=><option key={member.subject_id} value={member.subject_id}>{member.name}{subjects.some(item=>item.subject_id===member.subject_id)?'':'（待授权）'}</option>)}</select></label>
           <button disabled={busy || !subjects.some(item=>item.subject_id===subject)} onClick={()=>void newChat()}>{busy?'正在打开…':'开始新的对话'}</button>
           {subject&&!subjects.some(item=>item.subject_id===subject)&&<><small>请先确认该人员的关怀资料授权。</small><button onClick={()=>setConsentMember(subject)}>确认资料用途</button></>}</div></main>
-      : panel==='overview' ? <EncounterOverview key={`${snapshot.conversation.case_id}:${snapshot.analysis.run_id}:${overviewTab}`} initialTab={overviewTab} onBack={openNarrative} token={token} snapshot={snapshot} person={members.find(m=>m.subject_id===snapshot.conversation.subject_id)?.name||'当前人员'} onEvidence={id=>void showEvidence(id)} onAsk={text=>{setInput(text);setPanel('chat');}} onUpload={()=>{setPanel('chat');setInput('我需要补充本次就医材料。');}} onReplace={(documentId,file)=>setPhotoReview({files:[file],conversationId:snapshot.conversation.conversation_id,replaceId:documentId})} onReport={openReport} onRefresh={()=>{setPanel('chat');void startMaterialAnalysis([], '请重新分析本次材料，并为每条结论标明准确来源。',true);}}/>
+      : panel==='overview' ? <EncounterOverview key={`${snapshot.conversation.case_id}:${snapshot.analysis.run_id}`} onBack={openNarrative} token={token} snapshot={snapshot} person={members.find(m=>m.subject_id===snapshot.conversation.subject_id)?.name||'当前人员'} onEvidence={id=>void showEvidence(id)} onAsk={text=>{setInput(text);setPanel('chat');}} onUpload={()=>{setPanel('chat');setInput('我需要补充本次就医材料。');}} onReplace={(documentId,file)=>setPhotoReview({files:[file],conversationId:snapshot.conversation.conversation_id,replaceId:documentId})} onReport={openReport} onRefresh={()=>{setPanel('chat');void startMaterialAnalysis([], '请重新分析本次材料，并为每条结论标明准确来源。',true);}}/>
       : panel==='report' ? <main className="chat-report"><h1>本次关怀指引</h1>
           {publishedCare(snapshot.report) ? <><p className="care-report-version">第 {snapshot.report.report_version} 版 · 已审核发布</p>
-            <CareReport report={snapshot.report} initialSection={reportFocus} onEvidence={id=>void showEvidence(id)}/>
+            <CareReport report={snapshot.report} initialSection={reportFocus} onEvidence={id=>void showEvidence(id)} disabled={working} onServiceAsk={message=>{setPanel('chat');return send(undefined,message);}}/>
             {snapshot.report.report_id && <div className="report-feedback"><p>这份指引对你有帮助吗？</p>
               <button disabled={feedbackBusy} onClick={()=>void feedback('helpful')}>有帮助</button>
               <button disabled={feedbackBusy} onClick={()=>void feedback('not_helpful')}>还不够清楚</button>
@@ -559,48 +654,55 @@ export default function App() {
               {feedbackNotice && <p role="status">{feedbackNotice}</p>}</div>}</>
           : <div className="empty-report"><p>暖暖会在对话里结合材料为你解释。</p>
             <button onClick={()=>setPanel('chat')}>回到对话</button></div>}</main>
-      : <>{(narrative||material?.status==='available')&&<nav className="chat-analysis-nav" aria-label="本次分析内容"><div><strong>本次分析</strong><small>摘要、提醒与后续安排</small></div><div>{overviewTabs.map(([key,label])=><button key={key} onClick={()=>openOverview(key)}>{label}<DemoIcon name="arrow"/></button>)}</div></nav>}<main className="chat-scroll inline-report-thread">{showClaimGuide ? <OriginalChatGuide snapshot={snapshot} onEvidence={id=>void showEvidence(id)}/> : <OriginalChatWelcome/>}
+      : <><main className="chat-scroll inline-report-thread"><OriginalChatWelcome/>
         {(snapshot.analysis.run_id || analysisSubmitting || uploadProgress || analysisError) && !narrative && <button className="analysis-card" onClick={()=>setAnalysisOpen(true)}><span className="analysis-card-icon" aria-hidden="true">✦</span><span className="analysis-card-copy"><strong>{progressView.title}</strong><small>{`${progressView.detail}${progressView.percent!==null?` · ${progressView.percent}%`:''}`}</small></span><span className="analysis-card-arrow" aria-hidden="true">›</span></button>}
         {hasOlder && turns.length>0 && <button className="load-history" onClick={()=>void loadOlder()}>查看更早的聊天</button>}
         <div className="nuan-chat-heading"><span><DemoIcon name="chat"/>和暖暖聊聊</span><small>有疑问，接着问</small></div>
         <div className="messages">{turns.length===0 && <div className="message-row assistant"><div className="avatar">✦</div><div className="message-bubble"><div className="nuan-reply-label"><DemoIcon name="leaf"/>暖暖</div><p>你好，我是暖暖。你可以从最想说的事情聊起，不用一下子把所有事情讲清楚。如果有看不懂的病历或发票，我也会陪你一点点看。</p></div></div>}
           {turns.map(t=><div className="chat-turn" key={t.turn_id} id={`turn-${t.turn_id}`}>
-            {t.input_kind==='analysis_ready' ? <p className="analysis-continuation">材料已整理 · 暖暖为你解读</p> : <div className="message-row user"><div className="message-bubble"><p>{t.question}</p>
-            {t.attachments.map(a=><span className="attachment" key={a.document_id}>▤ {a.name}</span>)}</div></div>}
+            {t.input_kind==='analysis_ready' ? <p className="analysis-continuation">材料已整理 · 暖暖为你解读</p> : isClaimSubmission(t) ? <p className="analysis-continuation">材料已提交 · 暖暖为你整理</p> : <div className="message-row user"><div className="message-bubble"><p>{t.question}</p>
+            {sentMessages.find(item=>item.turn.request_id===t.request_id)?.files.length ? <ChatSentAttachments files={sentMessages.find(item=>item.turn.request_id===t.request_id)!.files}/> : t.attachments.map(a=><span className="attachment" key={a.document_id}>▤ {a.name}</span>)}</div></div>}
             <div className="message-row assistant"><span className="nuan-avatar" aria-hidden="true">✦</span><div className={`message-bubble ${t.input_kind==='analysis_ready'?'narrative-bubble':''}`}><div className="nuan-reply-label"><DemoIcon name="leaf"/>暖暖{t.input_kind==='analysis_ready' && <span>· 材料解读</span>}</div>{t.input_kind!=='analysis_ready' && <ToolActivity events={t.tool_events}/>}
-              {t.answer ? <>{t.input_kind==='analysis_ready'?<AnalysisNarrative turn={t} onEvidence={id=>void showEvidence(id)}/>:<><p><CitedText text={t.answer.text} citations={t.answer.citations} sources={t.answer.knowledge_sources} onEvidence={id=>void showEvidence(id)}/></p></>}
+              {t.answer ? <>{t.input_kind==='analysis_ready'?<AnalysisNarrative turn={t} onEvidence={id=>void showEvidence(id)} onServiceAsk={message=>send(undefined,message)} disabled={working}/>:<><p><CitedText text={t.answer.text} citations={t.answer.citations} sources={t.answer.knowledge_sources} onEvidence={id=>void showEvidence(id)}/></p></>}
 
-                {t.answer.history_refs.length>0 && <small className="history-reference">参考了 {t.answer.history_refs.length} 条你允许回忆的历史记录</small>}</>
-                : t.status==='failed' ? <><p>这次回答没有完成，你的消息已保存。</p><button disabled={working} onClick={()=>void send(t)}>重试这条消息</button></>
+                {t.answer.medical_services&&<MedicalServiceCards services={t.answer.medical_services} onAsk={message=>send(undefined,message)} disabled={working} canAskForLocation={t.turn_id===latestAnswered}/>}
+                {!!t.answer.patient_updates?.length&&<small className="patient-update-notice">已记录你的补充 · 作为用户自述供后续交流参考</small>}
+                {t.status==='completed'&&t.turn_id===latestAnswered&&<ChatFollowups answer={t.answer} report={t.input_kind==='analysis_ready'} disabled={working} onSend={message=>send(undefined,message)}/>}</>
+                : t.status==='failed' ? <><p>{t.turn_id.startsWith('local:')?'这次消息没有发送成功，可以重试。':'这次回答没有完成，你的消息已保存。'}</p><button disabled={working} onClick={()=>void send(t)}>重试这条消息</button></>
                 : <p role="status">{t.input_kind==='analysis_ready'?'材料已经整理好，暖暖正在结合你的资料写解读…':'暖暖正在认真看你说的话…'}</p>}
             </div></div></div>)}
         </div><div ref={bottom}/></main>
         <footer className="chat-footer">
-          <div className="upload-list">{attachments.map(a=><span className="attachment" key={a.document_id}>▤ {a.name} · 已上传</span>)}</div>
-          {showClaimGuide && <div className="nuan-quick-actions">{[['summary','看病经过'],['cost','费用解读'],['action','下一步安排']].map(([id,label])=><button key={id} onClick={()=>{const target=document.getElementById('chat-topic-'+id);if(target?.tagName==='DETAILS')target.setAttribute('open','');target?.scrollIntoView({behavior:'smooth',block:'start'});}}><DemoIcon name={id==='summary'?'file':id==='cost'?'chat':'leaf'}/>{label}</button>)}</div>}<form className="composer" onSubmit={submit}>
+          <ChatDraftAttachments files={draftFiles} busy={working} onRemove={id=>{setDraftFiles(current=>current.filter(file=>file.id!==id));uploadedDrafts.current.delete(id);}}/>
+          <form className="composer" onSubmit={submit}>
             <input ref={uploadInput} aria-label="选择文档文件" hidden type="file" multiple onChange={e=>void upload(e.target.files)}/>
             <input ref={photoInput} aria-label="选择照片或图片" hidden type="file" multiple accept="image/jpeg,image/png" onChange={e=>void upload(e.target.files)}/>
             <details ref={uploadMenu} className="chat-upload-menu" onBlur={e=>{if(!e.currentTarget.contains(e.relatedTarget))e.currentTarget.open=false;}} onKeyDown={e=>{if(e.key==='Escape'){e.preventDefault();e.currentTarget.open=false;e.currentTarget.querySelector('summary')?.focus();}}}>
               <summary title="上传病历或发票" aria-label="上传病历或发票" aria-disabled={working} onClick={e=>{if(working)e.preventDefault();}}>＋</summary>
-              <div className="chat-upload-options" aria-label="选择上传方式"><div className="upload-panel-heading"><p>上传就医材料</p><small>补充资料，一起看得更清楚</small></div>
+              <div className="chat-upload-options" aria-label="选择上传方式"><div className="upload-panel-heading"><p>添加图片或文件</p><small>选好后可补充问题，一起发送</small></div>
                 <button className="upload-source-photo" type="button" aria-label="照片或图片" aria-describedby="upload-photo-hint" disabled={working} onClick={()=>{if(uploadMenu.current)uploadMenu.current.open=false;photoInput.current?.click();}}><span className="upload-source-icon"><UploadSourceIcon kind="image"/></span><span className="upload-source-copy"><strong>照片或图片</strong><small id="upload-photo-hint">从相册选择 · JPG、PNG</small></span><DemoIcon name="arrow"/></button>
                 <button className="upload-source-document" type="button" aria-label="PDF / TXT 文件" aria-describedby="upload-document-hint" disabled={working} onClick={()=>{if(uploadMenu.current)uploadMenu.current.open=false;uploadInput.current?.click();}}><span className="upload-source-icon"><UploadSourceIcon kind="document"/></span><span className="upload-source-copy"><strong>PDF / TXT 文件</strong><small id="upload-document-hint">从文件中选择病历或票据</small></span><DemoIcon name="arrow"/></button>
                 <small className="upload-panel-note"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" aria-hidden="true"><path d="M8 12v5a4 4 0 0 0 8 0V7a3 3 0 0 0-6 0v10a1 1 0 0 0 2 0V9"/></svg>支持多选 · 每份不超过 10MB</small>
               </div>
             </details>
-            <textarea aria-label="给暖暖的消息" value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.nativeEvent.isComposing){e.preventDefault();void send();}}} rows={1} placeholder="有哪里不清楚？问问暖暖"/>
-            <button className="send-button" aria-label="发送消息" disabled={working || (!input.trim()&&!attachments.length)}>{uploading?'…':busy?'…':<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6"/></svg>}</button>
+            <textarea aria-label="给暖暖的消息" value={input} disabled={working} onChange={e=>setInput(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.nativeEvent.isComposing){e.preventDefault();void send();}}} rows={1} placeholder={draftFiles.length?'补充你想问的问题，和附件一起发送':'有哪里不清楚？问问暖暖'}/>
+            <button className="send-button" aria-label="发送消息" disabled={working || (!input.trim()&&!draftFiles.length)}>{uploading?'…':busy?'…':<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6"/></svg>}</button>
           </form>
         </footer></>}
       </PageBoundary>
-      {connected && snapshot && <AnalysisFlow open={analysisOpen && ['chat','report','overview'].includes(panel)} snapshot={analysisSubmitting || uploadProgress?null:snapshot} upload={uploadProgress} submitting={analysisSubmitting} error={analysisError} onClose={()=>setAnalysisOpen(false)} onReport={openNarrative} onRetry={()=>{if(material?.status==='available' && snapshot.analysis.run_id)void completeNarrative(active.current,epoch.current,snapshot.analysis.run_id);else void startMaterialAnalysis();}}/>}
+      {connected && snapshot && <AnalysisFlow open={analysisOpen && ['chat','report','overview'].includes(panel)} snapshot={analysisSubmitting || uploadProgress?null:snapshot} upload={uploadProgress} submitting={analysisSubmitting} error={analysisError} onClose={()=>setAnalysisOpen(false)} onReport={openNarrative} onRetry={()=>{if(pendingReportUpload.current)void uploadAccepted(pendingReportUpload.current.files,pendingReportUpload.current.replaceId);else if(material?.status==='available' && snapshot.analysis.run_id)void completeNarrative(active.current,epoch.current,snapshot.analysis.run_id);else void startMaterialAnalysis();}}/>}
       {connected && !needsProfile && panel!=='claim' && <nav className="care-navigation" aria-label="关怀页面"><button aria-current={panel==='home'?'page':undefined} onClick={()=>setPanel('home')}><DemoIcon name="leaf"/>首页</button>
         <button aria-current={panel==='chat'?'page':undefined} onClick={()=>snapshot?setPanel('chat'):requestBusiness('chat')}><DemoIcon name="chat"/>问暖暖</button>
         <button aria-current={['account','records'].includes(panel)?'page':undefined} onClick={()=>setPanel('account')}><DemoIcon name="user"/>我的</button>
         </nav>}
     </section>
-    {connected && consentMember && members.find(m=>m.subject_id===consentMember) && <MemberConsentDialog key={consentMember} token={token} member={members.find(m=>m.subject_id===consentMember)!} onClose={()=>setConsentMember(undefined)} onChanged={refreshAccess}/>}
-    {connected && !needsProfile && memberPicker && <MemberPicker members={members} title={memberPicker==='claim'?'选择就医资料所属人员':'选择对话所属人员'} onSelect={chooseBusinessMember} onClose={()=>setMemberPicker(undefined)}/>}
+    {connected && consentMember && members.find(m=>m.subject_id===consentMember) && <MemberConsentDialog key={consentMember} token={token} member={members.find(m=>m.subject_id===consentMember)!} onClose={()=>{setConsentMember(undefined);pendingReportMember.current='';}} onChanged={refreshAccess}/>}
+    {connected && !needsProfile && memberPicker && <MemberPicker members={members} title={memberPicker==='report'?'选择解读报告所属人员':memberPicker==='claim'?'选择就医资料所属人员':'选择对话所属人员'} onSelect={chooseBusinessMember} onClose={()=>setMemberPicker(undefined)}/>}
+    {connected&&snapshot&&reportUploadConversation===snapshot.conversation.conversation_id&&<ReportUploadDialog person={members.find(member=>member.subject_id===snapshot.conversation.subject_id)?.name||'当前人员'} onClose={()=>setReportUploadConversation('')} onSubmit={files=>{
+      setReportUploadConversation('');
+      if(files.some(file=>file.type.startsWith('image/')))setPhotoReview({files,conversationId:snapshot.conversation.conversation_id});
+      else void uploadAccepted(files);
+    }}/>}
     {photoReview&&snapshot&&photoReview.conversationId===snapshot.conversation.conversation_id&&<PhotoReview key={photoReview.conversationId} token={token} subjectId={snapshot.conversation.subject_id} files={photoReview.files} onCancel={()=>setPhotoReview(null)} onContinue={files=>{const replaceId=photoReview.replaceId;setPhotoReview(null);setPanel('chat');void uploadAccepted(files,replaceId);}}/>}
     {evidence && <EvidencePanel token={token} evidence={evidence} onClose={()=>setEvidence(null)}/>}
   </div></SourceToken.Provider>;

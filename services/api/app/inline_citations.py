@@ -15,7 +15,7 @@ def citation_anchor_issues(text,citations):
 class InlineCitation(BaseModel):
     model_config = ConfigDict(extra='forbid')
     quote: str = Field(min_length=2, max_length=800)
-    source_refs: list[str] = Field(min_length=1, max_length=6)
+    source_refs: list[str] = Field(min_length=1, max_length=16)
 
 
 def bind_citations(text, citations, aliases, evidence_refs, knowledge_refs):

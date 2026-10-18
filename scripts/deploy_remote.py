@@ -43,17 +43,25 @@ def verified_ci_run(revision):
     return runs[0]['databaseId']
 
 
-def main():
-    import paramiko
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--host', required=True)
-    parser.add_argument('--key', required=True)
-    args = parser.parse_args()
-    if subprocess.check_output(['git','status','--porcelain']).strip():
-        raise SystemExit('Commit all intended changes before deploying')
-    revision = subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip()
-    ci_run=verified_ci_run(revision)
-    roots = ('services/', 'scripts/', 'deploy/', 'contracts/knowledge/', 'docs/medical/knowledge/')
+def validated_ranker(root, revision):
+    root=Path(root)
+    executable=root/'semantix-ranker'
+    if (root/'CI_REVISION').read_text().strip()!=revision or executable.is_symlink():
+        raise SystemExit('Ranker CI artifact revision mismatch')
+    header=executable.read_bytes()[:20]
+    if len(header)<20 or header[:6]!=b'\x7fELF\x02\x01' or header[18:20]!=b'\x3e\x00':
+        raise SystemExit('Ranker must be a Linux amd64 ELF executable')
+    return executable
+
+
+def download_ci_artifact(ci_run,name,directory):
+    subprocess.check_call(['gh','run','download',str(ci_run),'--repo','Dylan-dy712/zhongan-competition',
+                           '--name',name,'--dir',str(directory)])
+
+
+def build_release(revision,ci_run,download_artifact=download_ci_artifact):
+    """Package committed source and artifacts from one independently verified CI run."""
+    roots = ('services/', 'scripts/', 'deploy/', 'contracts/knowledge/', 'contracts/medical-services/', 'docs/medical/knowledge/')
     committed = subprocess.check_output(['git','archive','--format=tar','HEAD',*roots])
     artifact = io.BytesIO()
     with tarfile.open(fileobj=artifact, mode='w:gz') as archive:
@@ -67,21 +75,33 @@ def main():
                 archive.addfile(member, io.BytesIO(data) if data is not None else None)
         for name, destination in [('web-dist','apps/web/dist/'),('mobile-dist','output_dir/mobile-demo/dist/')]:
             with tempfile.TemporaryDirectory(prefix='zhongan-ci-'+name+'-') as build:
-                subprocess.check_call(['gh','run','download',str(ci_run),'--repo','Dylan-dy712/zhongan-competition',
-                                       '--name',name,'--dir',build])
+                download_artifact(ci_run,name,build)
                 root=Path(build)
                 for path in validated_build(root, revision, mobile=name=='mobile-dist'):
                     archive.add(path,arcname=destination+path.relative_to(root).as_posix())
+        with tempfile.TemporaryDirectory(prefix='zhongan-ci-ranker-') as build:
+            download_artifact(ci_run,'semantix-memory-ranker-linux-amd64',build)
+            executable=validated_ranker(build,revision)
+            info=tarfile.TarInfo('output_dir/memory-ranker/semantix-ranker')
+            data=executable.read_bytes()
+            info.size=len(data)
+            info.mode=0o755
+            archive.addfile(info,io.BytesIO(data))
         info = tarfile.TarInfo('REVISION')
         content = (revision+'\n').encode()
         info.size = len(content)
         info.mode = 0o644
         archive.addfile(info, io.BytesIO(content))
     artifact.seek(0)
+    return artifact
+
+
+def upload_release(artifact,host,key):
+    import paramiko
     client = paramiko.SSHClient()
     client.load_system_host_keys()
     client.set_missing_host_key_policy(paramiko.RejectPolicy())
-    client.connect(args.host, username='ubuntu',key_filename=args.key,
+    client.connect(host, username='ubuntu',key_filename=key,
         timeout=15,allow_agent=False,look_for_keys=False)
     try:
         _,out,err = client.exec_command('install -d -m 700 /home/ubuntu/zhongan-releases && mktemp -d /home/ubuntu/zhongan-releases/release-XXXXXXXX')
@@ -99,9 +119,23 @@ def main():
         threads=[threading.Thread(target=drain,args=(out,sys.stdout)),threading.Thread(target=drain,args=(err,sys.stderr))]
         for thread in threads: thread.start()
         for thread in threads: thread.join()
-        raise SystemExit(out.channel.recv_exit_status())
+        return out.channel.recv_exit_status()
     finally:
         client.close()
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--host', required=True)
+    parser.add_argument('--key', required=True)
+    args = parser.parse_args()
+    if subprocess.check_output(['git','status','--porcelain']).strip():
+        raise SystemExit('Commit all intended changes before deploying')
+    revision = subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip()
+    ci_run=verified_ci_run(revision)
+    artifact=build_release(revision,ci_run)
+    raise SystemExit(upload_release(artifact,args.host,args.key))
+
 
 
 if __name__ == '__main__':

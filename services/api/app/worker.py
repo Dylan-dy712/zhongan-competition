@@ -36,6 +36,8 @@ from .llm_extractor import PROMPT_VERSION, SCHEMA_VERSION as MODEL_SCHEMA_VERSIO
 from .ocr import OCR_METHOD, OCR_VERSION, Ocr, create_ocr, page_ocr_method
 from .document_quality import classify_material
 from . import medical_records
+from .parse_cache import cached_pages,save_page,require_parse_scope,payload_digest
+from .volcengine_ocr import VolcengineOcr
 
 
 TEXT_PARSER_VERSION = "controlled-text-v1"
@@ -246,13 +248,15 @@ def ocr_page(image_bytes: bytes, width: int, height: int, base: dict, ocr: Ocr):
     return base
 
 
-def parse_pdf(path: Path, ocr: Ocr | None = None):
+def parse_pdf(path: Path, ocr: Ocr | None = None, cached=None, checkpoint=None):
     reader = PdfReader(str(path), strict=False)
     if reader.is_encrypted and reader.decrypt("") == 0:
         raise RuntimeError("PDF_ENCRYPTED")
     pages = []
     rendered_pdf = None
     for page_index, page in enumerate(reader.pages):
+        if cached and page_index in cached:
+            pages.append(cached[page_index]);continue
         text = page.extract_text() or ""
         image_count = page_image_count(page)
         text_count = len(text.strip())
@@ -282,21 +286,27 @@ def parse_pdf(path: Path, ocr: Ocr | None = None):
             image.save(output, format="JPEG", quality=92)
             parsed_page = ocr_page(output.getvalue(), image.width, image.height, parsed_page, ocr)
         pages.append(parsed_page)
+        if checkpoint:checkpoint(parsed_page)
     return pages
 
 
-def route_document(document: dict, path: Path, pipeline_version: str, ocr: Ocr | None = None):
+def route_document(document: dict, path: Path, pipeline_version: str, ocr: Ocr | None = None, cached=None, checkpoint=None):
+    def complete(pages):
+        if checkpoint:
+            for page in pages:checkpoint(page)
+        return pages
     if pipeline_version == "text-parser-v1":
         if document["media_type"] != "text/plain":
             raise RuntimeError("PARSER_NOT_IMPLEMENTED")
-        return parse_controlled_text(document, path)
+        return [cached[0]] if cached and 0 in cached else complete(parse_controlled_text(document,path))
     if pipeline_version != "document-parser-v1":
         raise RuntimeError("PARSER_NOT_IMPLEMENTED")
     if document["media_type"] == "text/plain":
-        return parse_controlled_text(document, path)
+        return [cached[0]] if cached and 0 in cached else complete(parse_controlled_text(document,path))
     if document["media_type"] == "application/pdf":
-        return parse_pdf(path, ocr)
+        return parse_pdf(path,ocr,cached,checkpoint)
     if document["media_type"] in {"image/jpeg", "image/png"}:
+        if cached and 0 in cached:return [cached[0]]
         with Image.open(path) as image:
             width, height = image.size
         page = {
@@ -308,12 +318,12 @@ def route_document(document: dict, path: Path, pipeline_version: str, ocr: Ocr |
                         "metadata": {"analysis_status": "ocr_required"}}],
             "metadata": {"media_type": document["media_type"], "image_count": 1},
         }
-        return [ocr_page(path.read_bytes(), width, height, page, ocr or create_ocr())]
+        return complete([ocr_page(path.read_bytes(),width,height,page,ocr or create_ocr())])
     raise RuntimeError("PARSER_NOT_IMPLEMENTED")
 
 
 def analyze_models(material, knowledge_entries, user_context, source_refs, fact_inputs,
-                   encounter_dates, advance, knowledge_excluded=False):
+                   encounter_dates, advance, knowledge_excluded=False, memory_context=None, defer_patient_analysis=False, preloaded_models=None):
     """Overlap independent network calls; SQL and release checks stay on the caller."""
     started = time.monotonic()
     timings = {}
@@ -338,12 +348,18 @@ def analyze_models(material, knowledge_entries, user_context, source_refs, fact_
         if configured:
             extractor = OpenAiCompatibleExtractor()
             provider, model_id = extractor.provider, extractor.model_id
-            fields_future = pool.submit(measured, 'extract_seconds', extractor.extract, material)
+            if preloaded_models:
+                fields=validate_evidence_quotes(preloaded_models[0],material);timings['extract_seconds']=0
+            else:
+                fields_future = pool.submit(measured, 'extract_seconds', extractor.extract, material)
         advance('insights')
         if configured and not knowledge_excluded:
             knowledge = [{"entry_id":e.entry_id,"title":e.title,"content":e.content[:500],
                           "anchoring":e.anchoring} for e in knowledge_entries[:80]]
-            insights_future = pool.submit(measured, 'insight_seconds', detect_semantic, material, knowledge)
+            if preloaded_models:
+                insights=preloaded_models[1];timings['insight_seconds']=0
+            else:
+                insights_future = pool.submit(measured, 'insight_seconds', detect_semantic, material, knowledge)
         if fields_future:
             fields = validate_evidence_quotes(fields_future.result(), material)
         if insights_future:
@@ -358,9 +374,10 @@ def analyze_models(material, knowledge_entries, user_context, source_refs, fact_
             from .analysis_sources import pack_sources
             packed, aliases = pack_sources([{'evidence':fact_inputs}])
             report = measured('guidance_seconds', draft_report, material, reviewable, user_context,
-                user_sources=source_refs, structured_costs=report_cost_context(fact_inputs,fields['candidates'].get('cost_lines',[])),
+                user_sources=source_refs, memory_context=memory_context, structured_costs=report_cost_context(fact_inputs,fields['candidates'].get('cost_lines',[])),
                 personnel=fields.get('personnel',[]), normalized_dates=encounter_dates, analysis_sources=packed,
-                care_priorities=priorities, structured_fields=fields.get('candidates',{}))
+                care_priorities=priorities, structured_fields=fields.get('candidates',{}),
+                **({'defer_patient_analysis':True} if defer_patient_analysis else {}))
             report.setdefault('usage_metadata',{})['web_search']=web_search
             report['reference_knowledge']=reviewable
             shared = report['draft'].get('patient_analysis')
@@ -376,9 +393,18 @@ def analyze_models(material, knowledge_entries, user_context, source_refs, fact_
                     # Optional chat prose is unusable; retain the structured
                     # report and regenerate prose against live authorized sources.
                     report['draft']['patient_analysis'] = None
-    performance = {'model_schedule':'parallel','model_seconds':timings,
+    performance = {'model_schedule':'parallel','material_preprocessing':'preloaded' if preloaded_models else 'live','model_seconds':timings,
                    'model_wall_seconds':round(time.monotonic()-started,3)}
     return fields, insights, report, provider, model_id, performance
+
+
+def recognition_profile(pipeline_version):
+    provider=os.environ.get('ZHONGAN_OCR_PROVIDER','tencent').strip().lower()
+    ocr_version=VolcengineOcr.version if provider=='volcengine' else OCR_VERSION
+    fingerprint=payload_digest({'cache':'parsed-pages-v1','pipeline':pipeline_version,
+        'text':TEXT_PARSER_VERSION,'pdf':PDF_PARSER_VERSION,'router':ROUTING_VERSION,
+        'ocr_provider':provider,'ocr_version':ocr_version})
+    return fingerprint,{TEXT_PARSER_VERSION,PDF_PARSER_VERSION,ocr_version}
 
 
 def process_run(conn, run: dict, storage_root: Path) -> None:
@@ -393,6 +419,8 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
     try:
         advance('parse')
         source_refs=context_sources(conn,run)
+        fingerprint,accepted_versions=recognition_profile(run['pipeline_version'])
+        reused_pages=recognized_pages=prepared_sample_pages=0
         for reference in run["document_versions"]:
             document = conn.execute(
                 """SELECT * FROM documents WHERE case_id=%s AND document_id=%s
@@ -401,21 +429,55 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
             ).fetchone()
             if document is None:
                 raise RuntimeError("DOCUMENT_VERSION_NOT_FOUND")
+            if reference.get('source_hash',document['source_hash'])!=document['source_hash']:
+                raise RuntimeError('SOURCE_HASH_MISMATCH')
             path = Path(document["storage_ref"]).resolve()
             path.relative_to(storage_root)
             raw_hash = hashlib.sha256(path.read_bytes()).hexdigest()
             if raw_hash != document["source_hash"]:
                 raise RuntimeError("SOURCE_HASH_MISMATCH")
-            pages = route_document(document, path, run["pipeline_version"])
+            with conn.transaction():
+                require_parse_scope(conn,run)
+                cached=cached_pages(conn,document,fingerprint,accepted_versions,ROUTING_VERSION,run['pipeline_version'])
+                if run['pipeline_version']=='document-parser-v1':
+                    from .judge_sample_cache import reviewed_document_pages
+                    prepared=reviewed_document_pages(conn,document,fingerprint,accepted_versions)
+                    cached={**prepared,**cached}
+                    prepared_sample_pages+=len(prepared)
+            def checkpoint(page):
+                # Commit each successful page before another OCR/model request.
+                with conn.transaction():
+                    from .report_memory import lock_snapshot
+                    lock_snapshot(conn,run.get('context_snapshot'))
+                    require_parse_scope(conn,run)
+                    context_sources(conn,run,lock=True)
+                    save_page(conn,document,fingerprint,page)
+            pages = route_document(document,path,run['pipeline_version'],cached=cached,checkpoint=checkpoint)
+            reused_pages+=sum(page['page_index'] in cached for page in pages)
+            recognized_pages+=sum(page['page_index'] not in cached for page in pages)
             parsed_documents.append((document, pages))
 
+        row=conn.execute('''UPDATE analysis_runs SET stage_results=jsonb_set(stage_results,'{parse}',%s::jsonb,true)
+            WHERE run_id=%s AND lease_token=%s AND status='running' RETURNING run_id''',
+            (json.dumps({'status':'completed','reused_pages':reused_pages,'processed_pages':recognized_pages}),
+             run['run_id'],run['lease_token'])).fetchone()
+        if not row:raise RuntimeError('ANALYSIS_LEASE_LOST')
         advance('extract')
         material = "\n\n".join(
             page["text"] for _document, pages in parsed_documents for page in pages if page["text"]
         )
+        fully_prepared=bool(prepared_sample_pages and prepared_sample_pages==sum(len(pages) for _,pages in parsed_documents))
         prepared_by_page={(document['document_id'],document['document_version'],page['page_index']):evidence_for_page(document,page)
             for document,pages in parsed_documents for page in pages}
         fact_inputs=[row for rows in prepared_by_page.values() for row in rows]
+        narrative_sources={}
+        if fully_prepared:
+            from .page_sources import narrative_page_source
+            for document,pages in parsed_documents:
+                for page in pages:
+                    identity=(document['document_id'],document['document_version'],page['page_index'])
+                    source=narrative_page_source(document,page,prepared_by_page[identity])
+                    if source:narrative_sources[identity]=[source]
         encounter_keys = assign_encounter_keys(parsed_documents)
         for row in fact_inputs:
             row["encounter_key"] = encounter_keys[(row["document_id"], row["document_version"],
@@ -441,22 +503,35 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
                FROM cases c JOIN consents co ON co.consent_id=c.consent_id WHERE c.case_id=%s""",
             (run["case_id"],),
         ).fetchone()
+        preloaded_models=None
+        if fully_prepared and not knowledge_excluded:
+            from .judge_model_cache import read_models
+            preloaded_models=read_models(parsed_documents,knowledge_entries,fingerprint)
         parse_seconds = time.monotonic()-run_started
         model_result, insight_model_result, report_model_result, model_provider, model_id, performance = analyze_models(
             material, knowledge_entries,
             run['context_snapshot']['case_user_context'] if run.get('context_snapshot') else
             (case_meta["user_context"] if case_meta else None),
-            source_refs, fact_inputs, encounter_dates, advance, knowledge_excluded)
+            source_refs, fact_inputs, encounter_dates, advance, knowledge_excluded,
+            memory_context=(run.get('context_snapshot') or {}).get('memory'),
+            **({'defer_patient_analysis':True} if fully_prepared else {}),
+            **({'preloaded_models':preloaded_models} if preloaded_models else {}))
         performance['parse_prepare_seconds'] = round(parse_seconds,3)
+        performance['recognition_cache']={'reused_pages':reused_pages,'processed_pages':recognized_pages}
+        performance['patient_analysis_mode']=report_model_result.get('usage_metadata',{}).get('patient_analysis_mode','shared')
 
         advance('validate')
         evidence_ids = [str(row['evidence_id']) for row in fact_inputs]
+        evidence_ids.extend(str(row['evidence_id']) for rows in narrative_sources.values() for row in rows)
+        performance['narrative_source_spans']=sum(len(rows) for rows in narrative_sources.values())
         routing = []
         waiting_review = any(
             page["requires_ocr"] or page["requires_vision"] or page["status"] == "unreadable"
             for _document, pages in parsed_documents for page in pages
         )
         with conn.transaction():
+            from .report_memory import lock_snapshot, references
+            lock_snapshot(conn,run.get('context_snapshot'))
             conn.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s,0))",
                          (f"case-report:{run['case_id']}",))
             authorized = conn.execute(
@@ -527,7 +602,8 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
                              ("pdf_text_layer" if document["media_type"] == "application/pdf" else "controlled_text"),
                              document["source_hash"], page["parser_version"]),
                         )
-                    for row in prepared_by_page[(document['document_id'],document['document_version'],page['page_index'])]:
+                    identity=(document['document_id'],document['document_version'],page['page_index'])
+                    for row in [*prepared_by_page[identity],*narrative_sources.get(identity,[])]:
                         evidence_id,start,end,value,bbox=(row[key] for key in ('evidence_id','start','end','text','bbox'))
                         conn.execute(
                             """INSERT INTO evidence
@@ -538,7 +614,7 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
                             (evidence_id, run["run_id"], run["case_id"], document["document_id"],
                              document["document_version"], page["page_index"], start, end, value,
                              json.dumps(bbox),
-                             page_ocr_method(page) or
+                             row.get('extraction_method') or page_ocr_method(page) or
                              ("pdf_text_layer" if document["media_type"] == "application/pdf" else "controlled_text"),
                              document["source_hash"], page["parser_version"]),
                         )
@@ -609,7 +685,8 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
                 except Exception:
                     report_errors.append("INVALID_ACTION")
             has_pending_claim = any(c.review_status == "pending" for s in sections for c in s.claims)
-            report_status = "pending_review" if waiting_review or report_errors or has_pending_claim else "ready"
+            memory_refs=references(run.get('context_snapshot'))
+            report_status = "pending_review" if waiting_review or report_errors or has_pending_claim or memory_refs else "ready"
             consent_refs = [{"consent_id": str(case_meta["consent_id"]),
                              "version": case_meta["consent_version"], "purpose": "case_guidance"}]
             conn.execute("DELETE FROM reports WHERE run_id=%s", (run["run_id"],))
@@ -622,12 +699,12 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
             conn.execute(
                 """INSERT INTO reports(report_id,case_id,run_id,report_version,status,sections,actions,
                    input_hash,model_id,prompt_version,knowledge_version,policy_version,memory_refs,
-                   consent_refs,validation_errors) VALUES (%s,%s,%s,%s,%s,%s::jsonb,%s::jsonb,%s,%s,%s,%s,%s,'[]',%s::jsonb,%s::jsonb)""",
+                   consent_refs,validation_errors) VALUES (%s,%s,%s,%s,%s,%s::jsonb,%s::jsonb,%s,%s,%s,%s,%s,%s::jsonb,%s::jsonb,%s::jsonb)""",
                 (report_id, run["case_id"], run["run_id"], report_version, report_status,
                  json.dumps([s.model_dump(mode="json") for s in sections], ensure_ascii=False),
                  json.dumps(actions, ensure_ascii=False), run["input_hash"], model_id,
                  REPORT_PROMPT_VERSION, knowledge_version or "knowledge:none", REPORT_POLICY_VERSION,
-                 json.dumps(consent_refs), json.dumps(report_errors)),
+                 json.dumps(memory_refs), json.dumps(consent_refs), json.dumps(report_errors)),
             )
             if report_status == 'pending_review':
                 conn.execute("""INSERT INTO review_tasks
@@ -732,6 +809,7 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
             performance['elapsed_seconds'] = round(time.monotonic()-run_started,3)
             result = {"performance":performance,"parse": {
                 "status": "waiting_review" if waiting_review else "completed",
+                "reused_pages":reused_pages,"processed_pages":recognized_pages,
                 "routing_version": ROUTING_VERSION, "pages": routing,
                 "document_count": len(parsed_documents), "evidence_ids": evidence_ids,
             }, "extract": {
@@ -763,6 +841,7 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
                 "reading_quality": report_model_result.get('usage_metadata',{}).get('guidance_delivery'),
             }}
             result_status = 'failed' if report_model_result['status'] == 'failed' else ('waiting_review' if waiting_review else 'completed')
+            context_sources(conn,run,lock=True)
             conn.execute(
                 """UPDATE analysis_runs SET status=%s, current_stage='validate', stage_results=%s::jsonb,
                    finished_at=now(), error=%s::jsonb,
@@ -797,6 +876,8 @@ def main() -> None:
     signal.signal(signal.SIGINT, request_stop)
     # Separate connection/thread: record organization never delays report delivery or OCR.
     threading.Thread(target=medical_records.worker_loop,args=(dsn,lambda:stop_requested),name='medical-records',daemon=True).start()
+    from . import conversation_titles
+    threading.Thread(target=conversation_titles.worker_loop,args=(dsn,lambda:stop_requested),name='conversation-titles',daemon=True).start()
     while not stop_requested:
         try:
             with connect(dsn) as conn:

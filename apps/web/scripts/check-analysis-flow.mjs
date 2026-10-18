@@ -12,20 +12,30 @@ dom.window.HTMLElement.prototype.scrollIntoView=function(){};
 dom.window.HTMLDialogElement.prototype.showModal=function(){this.open=true;};
 dom.window.HTMLDialogElement.prototype.close=function(){this.open=false;};
 const realTimeout=globalThis.setTimeout;
+const realInterval=globalThis.setInterval,realNow=Date.now;
+let estimateTime=0;
+Date.now=()=>estimateTime;
+globalThis.setInterval=(fn,ms,...args)=>realInterval(fn,ms===250?1:ms,...args);
 globalThis.setTimeout=(fn,ms,...args)=>realTimeout(fn,ms>=1500?20:ms,...args);
-const conversation={conversation_id:'analysis-ui',subject_id:'synthetic',case_id:'case-ui',title:'合成分析流程',recall_enabled:false,updated_at:'2026-10-08T00:00:00Z'};
-let phase='initial',run='run-1',uploads=0,submissions=[],turns=[],resolveSecond,resolveNarrative;
+let conversation={conversation_id:'analysis-ui',subject_id:'synthetic',case_id:'case-ui',title:'合成分析流程',recall_enabled:false,updated_at:'2026-10-08T00:00:00Z'};
+let phase='initial',run='run-1',uploads=0,acceptedUploads=[],submissions=[],turns=[],resolveSecond,resolveNarrative;
 let delayNarrative=false,failNarrative=false,continuations=0,polls=0,pollOutage=false;
 const section={section_type:'cost_explanation',pending_count:1,items:[{text:'医疗总费用：120元',kind:'checked',evidence_refs:['00000000-0000-4000-8000-000000000002']}]};
-const state=()=>({conversation,turns,analysis:{status:phase==='initial'?'not_started':phase==='ready'?'waiting_review':phase==='failed'?'failed':phase==='queued'?'queued':'running',run_id:phase==='initial'?undefined:run,stage:phase==='ready'?'validate':phase},
+const state=()=>({conversation,turns,analysis:{status:phase==='initial'?'not_started':phase==='ready'?'waiting_review':phase==='failed'?'failed':phase==='queued'?'queued':'running',run_id:phase==='initial'?undefined:run,stage:phase==='ready'?'validate':phase,stage_results:{parse:{reused_pages:['initial','parse','queued'].includes(phase)?0:2}}},
   report:{status:'not_released'},material_report:{status:phase==='ready'?'available':phase==='failed'?'failed':phase,run_id:run,report_id:'material-ui',document_count:2,source_report_version:1,pending_count:1,notice:'合成自动核对提示',sections:[section]}});
 globalThis.fetch=async(url,options={})=>{
  const path=new URL(url,'http://localhost').pathname;
- if(path==='/v1/conversations')return Response.json([conversation]);
+ if(path==='/v1/conversations'){
+  if(options.method==='POST'){conversation={...conversation,conversation_id:JSON.parse(options.body).conversation_id};return Response.json(conversation);}
+  return Response.json([conversation]);
+ }
  if(path==='/v1/me/members')return Response.json([{subject_id:'synthetic',name:'合成分析用户',relationship:'self',gender:'unspecified',birth_date:null,profile_completed:true}]);
  if(path==='/v1/chat/subjects')return Response.json([{subject_id:'synthetic'}]);
  if(path.endsWith('/deliveries'))return Response.json([]);
- if(path.endsWith('/documents')){uploads++;if(uploads===2)await new Promise(r=>resolveSecond=r);return Response.json({document_id:'doc-'+uploads});}
+ if(path.endsWith('/documents')){
+  uploads++;if(uploads===2){await new Promise(r=>resolveSecond=r);return Response.json({message:'合成上传中断'},{status:503});}
+  const document_id='doc-'+uploads;acceptedUploads.push(document_id);return Response.json({document_id});
+ }
  if(path.endsWith('/analyses')){
   const body=JSON.parse(options.body);submissions.push(body);phase='queued';run='run-'+submissions.length;
   turns=[{turn_id:'turn-ui',request_id:body.request_id,question:body.message,input_kind:'user',status:'completed',answer:{text:'材料已收到',evidence_refs:[],history_refs:[]},attachments:[],tool_events:[{tool:'start_analysis',run_id:run,status:'queued'}]}];
@@ -35,6 +45,7 @@ globalThis.fetch=async(url,options={})=>{
   continuations++;
   if(delayNarrative)await new Promise(r=>resolveNarrative=r);
   if(failNarrative){failNarrative=false;return Response.json({detail:'合成解读失败'},{status:503});}
+  conversation={...conversation,title:'票据费用与支付金额核对',has_interpretation_report:true};
   turns=[...turns.filter(t=>t.input_kind!=='analysis_ready'),{turn_id:'continue-ui',input_kind:'analysis_ready',status:'completed',question:'解释材料',attachments:[],tool_events:[],
    answer:{text:'我先帮你把这张票据理清楚。材料记载医疗总费用：120元。\n\n这张票据没有说明保险赔付金额，我们先把它与票据上的费用区分开。你最想先核对哪一项？',evidence_refs:['00000000-0000-4000-8000-000000000002'],history_refs:[],citations:[{quote:'材料记载医疗总费用：120元。',source_refs:['00000000-0000-4000-8000-000000000002']}],analysis_run_id:run,
     guidance_delivery:{status:'needs_improvement',notice:'报告已生成，部分内容的解释仍可完善。'}}}];
@@ -42,7 +53,7 @@ globalThis.fetch=async(url,options={})=>{
  }
  if(path==='/v1/evidence/00000000-0000-4000-8000-000000000002')return Response.json({evidence_id:'00000000-0000-4000-8000-000000000002',document_version:1,page_index:0,text_span:{text:'医疗总费用：120元'}});
  if(path.endsWith('/messages'))return Response.json({turn_id:'follow-ui'});
- if(path==='/v1/conversations/analysis-ui'){polls++;if(pollOutage)return new Response('Bad gateway',{status:502});return Response.json(state());}
+ if(path==='/v1/conversations/'+conversation.conversation_id){polls++;if(pollOutage)return new Response('Bad gateway',{status:502});return Response.json(state());}
  throw Error('Unexpected fixture request '+path);
 };
 sessionStorage.setItem('zhongan_chat_token','synthetic-test-only');
@@ -50,28 +61,55 @@ const modules=await loadTestModules(),root=createRoot(document.getElementById('r
 const flush=()=>act(async()=>new Promise(r=>realTimeout(r,60)));
 const click=async(text)=>{const node=[...document.querySelectorAll('button')].find(n=>!n.closest('[hidden]') && (n.textContent.trim()===text || n.getAttribute('aria-label')===text));assert.ok(node,text);await act(async()=>node.click());await flush();};
 try{
+ for(const previousStatus of ['available','failed']){
+  const submitting=modules.analysisView({...state(),material_report:{status:previousStatus}},undefined,true);
+  assert.equal(submitting.index,-1,'A fresh submission cannot inherit an old report stage');
+  assert.equal(submitting.kind,'processing');
+ }
  await act(async()=>root.render(React.createElement(modules.App)));await flush();
- const input=document.querySelector('[aria-label="选择文档文件"]');
+ await click('＋ 新建解读报告');
+ assert.ok(document.querySelector('dialog.member-dialog'),'A report asks for its person');
+ await act(async()=>document.querySelector('.member-list button').click());await flush();
+ assert.equal(document.querySelector('.report-upload-dialog').open,true,'Choosing a person immediately opens report upload');
+ const input=document.querySelector('[aria-label="选择报告材料"]');
  Object.defineProperty(input,'files',{value:Array.from({length:25},(_,i)=>new File(['synthetic'],`${i+1}.txt`,{type:'text/plain'}))});
  await act(async()=>input.dispatchEvent(new dom.window.Event('change',{bubbles:true})));await flush();
+ assert.equal(uploads,0,'Selecting report materials waits for explicit confirmation');
+ await click('上传并生成解读报告');
  assert.equal(document.querySelector('.chat-workspace > dialog.analysis-dialog').open,true);
  assert.equal(document.querySelector('.chat-workspace > dialog.analysis-dialog progress').value,4,'Only acknowledged uploads count');
  assert.equal(submissions.length,0,'Analysis waits for all selected uploads');
- await act(async()=>resolveSecond());await flush();assert.equal(submissions.length,1);
- assert.deepEqual(submissions[0].document_ids,Array.from({length:25},(_,i)=>'doc-'+(i+1)));
+ await act(async()=>resolveSecond());await flush();assert.equal(submissions.length,0,'A partially failed upload cannot generate an incomplete report');
+ await click('重新分析材料');assert.equal(submissions.length,1);
+ assert.equal(uploads,26,'Retry uploads only the failed and remaining files');
+ assert.deepEqual(submissions[0].document_ids,acceptedUploads);
  assert.equal(document.querySelector('.chat-workspace > dialog.analysis-dialog progress').value,0);
- for(const [next,percent] of [['extract',20],['insights',40],['guidance',60],['validate',80]]){
-  phase=next;await flush();const displayed=document.querySelector('.chat-workspace > dialog.analysis-dialog progress').value;
-  assert.ok(displayed>=percent+1 && displayed<percent+20,'Estimated progress stays within the actual stage');
-  assert.match(document.querySelector('.chat-workspace > dialog.analysis-dialog').textContent,/预估进度/);
+ for(const [next,completed] of [['parse',0],['extract',1],['insights',1],['guidance',2],['validate',3]]){
+  phase=next;let displayed;
+  for(let attempt=0;attempt<12;attempt++){await flush();displayed=document.querySelector('.chat-workspace > dialog.analysis-dialog progress').value;if(displayed>=completed*20)break;}
+  const progress=document.querySelector('.chat-workspace > dialog.analysis-dialog progress');
+  assert.equal(progress.max,100);assert.ok(displayed>=completed*20&&displayed<(completed+1)*20,`Estimate stays in the real stage during ${next}`);
+  assert.match(progress.getAttribute('aria-valuetext'),new RegExp(`已完成 ${completed} / 5 步`));
+  assert.match(document.querySelector('.analysis-percent').textContent,new RegExp(`${displayed}%`),'The estimate is visible as well as the real step count');
+  assert.match(document.querySelector('.analysis-step-summary').textContent,new RegExp(`已完成 ${completed} / 5 步`));
  }
+ estimateTime+=6000;await flush();
+ const simulated=document.querySelector('.analysis-dialog progress').value;
+ assert.ok(simulated>60&&simulated<80,'The percentage simulates progress inside the current stage');
+ assert.equal(document.querySelectorAll('.analysis-steps .done').length,3,'Simulation never completes a step');
+ assert.match(document.querySelector('.analysis-reuse-note').textContent,/已直接使用 2 页已识别内容/);
+ assert.match(document.querySelector('.analysis-progress-note').textContent,/模拟预估/);
+ estimateTime+=86400000;
+ for(let attempt=0;attempt<12&&document.querySelector('.analysis-dialog progress').value<79;attempt++)await flush();
+ assert.equal(document.querySelector('.analysis-dialog progress').value,79,'A long wait stops before the next real stage');
  await click('收起进度，稍后查看');assert.equal(document.querySelector('.chat-workspace > dialog.analysis-dialog').open,false);
  const pollsBeforeNarrative=polls;
  delayNarrative=true;phase='ready';await flush();await flush();
  await act(async()=>document.querySelector('.analysis-card').click());await flush();
  const waiting=document.querySelector('.chat-workspace > dialog.analysis-dialog');
  assert.equal(waiting.open,true,'Material readiness cannot dismiss progress before the text arrives');
- assert.ok(waiting.querySelector('progress').value>=95 && waiting.querySelector('progress').value<100,'Narrative generation remains below 100%');
+ assert.equal(waiting.querySelector('progress').value,80,'Narrative generation is the unfinished fifth step');
+ assert.equal(waiting.querySelector('progress').max,100);
  assert.match(waiting.textContent,/写好解读|把情况讲清楚/);
  assert.equal(document.querySelector('.analysis-narrative'),null);
  assert.ok(polls>pollsBeforeNarrative+1,'Progress polling continues while the narrative request waits');
@@ -81,6 +119,8 @@ try{
  assert.equal(window.location.hash,'#/chat','Analysis stays in the conversation');
  assert.match(document.body.textContent,/医疗总费用：120元/);
  assert.ok(document.querySelector('.analysis-narrative'),'AI free text is the report');
+ assert.match(document.querySelector('.history-list').textContent,/票据费用与支付金额核对/,'Report completion refreshes sidebar titles');
+ assert.equal(document.querySelector('.history-report-badge')?.textContent,'解读报告','Report completion updates the history badge immediately');
  assert.match(document.querySelector('.analysis-reading-notice').textContent,/报告已生成.*仍可完善/);
  assert.doesNotMatch(document.body.textContent,/生成没有完成|解读暂时没能完成/,'Advisory quality never becomes a failure screen');
  assert.equal(document.querySelectorAll('.analysis-narrative-copy p').length,2,'Paragraphs follow the model text, not six fixed sections');
@@ -129,5 +169,5 @@ try{
  assert.equal(continuations,modelsBeforeOutage);assert.equal(submissions.length,analysesBeforeOutage);
  assert.doesNotMatch(document.body.textContent,/服务暂时不可用/,'Saved report recovery clears its earlier generation failure');
  console.log('PASS: uploads, real stages, conversational AI report, adaptive paragraphs, inline source links, legacy route redirect, failure retry and completion. Synthetic fixtures only.');
-}finally{await act(async()=>root.unmount());await modules.close();dom.window.close();globalThis.setTimeout=realTimeout;}
+}finally{await act(async()=>root.unmount());await modules.close();dom.window.close();globalThis.setTimeout=realTimeout;globalThis.setInterval=realInterval;Date.now=realNow;}
 

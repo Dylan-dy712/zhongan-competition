@@ -6,6 +6,8 @@ explicit scripted test doubles; file ingestion, worker, SQL and HTTP are real.
 import json
 import os
 import tempfile
+from io import BytesIO
+from types import SimpleNamespace
 from contextlib import redirect_stdout
 from io import StringIO
 from pathlib import Path
@@ -19,6 +21,7 @@ from services.api.app import main as api
 from services.api.app import conversation_repository as chats
 from services.api.app.conversation_agent import CareTools, ANALYSIS_PROMPT_VERSION
 from services.api.app.repository import AccessDenied, connect, token_digest
+from services.api.app.accounts import hash_password
 from services.api.app.worker import claim_run, process_run
 from services.api.app.report_builder import SECTION_TYPES
 from services.api.app.report_llm import PROMPT_VERSION as REPORT_PROMPT_VERSION
@@ -82,6 +85,9 @@ def main():
                          (actor,subject,outsider,subject))
             conn.execute("INSERT INTO consents(consent_id,subject_id,notice_version,version) VALUES (%s,%s,'test',1)", (consent,subject))
             conn.execute("INSERT INTO consent_purposes(consent_id,purpose,status,granted_at) VALUES (%s,'case_guidance','active',now())", (consent,))
+            conn.execute('''INSERT INTO user_accounts(actor_id,subject_id,username,display_name,password_hash)
+                VALUES (%s,%s,'13900000991','Synthetic memory owner',%s)''', (actor,subject,hash_password('synthetic-integration-only')))
+            conn.execute("INSERT INTO auth_sessions(token_sha256,actor_id,expires_at) VALUES (%s,%s,now()+interval '1 hour')",(token_digest(token),actor))
         api.app.dependency_overrides[api.database] = database
         client = TestClient(api.app)
         headers = {'Authorization':f'Bearer {token}'}
@@ -111,6 +117,8 @@ def main():
         with patch('services.api.app.conversation_agent.AgentModel',return_value=model):
             next_response=client.post(base+'/messages',headers=headers,json={'request_id':str(uuid4()),'message':'我刚才关心什么？'})
         check(next_response.status_code==200 and any(m.get('content')=='我最关心费用' for m in model.messages), 'model receives preceding conversation')
+        check(not client.get('/v1/conversations',headers=headers).json()[0].get('has_interpretation_report'),
+              'ordinary completed chat does not have a report badge')
         check(len(TestClient(api.app).get(base,headers=headers).json()['turns'])==2,'history survives a new HTTP client')
 
         with tempfile.TemporaryDirectory(prefix='zhongan-chat-files-') as storage:
@@ -128,10 +136,11 @@ def main():
                   'chat report context sharing is disabled by default')
             enabled=client.patch(base+'/report-context',headers=headers,json={'enabled':True})
             check(enabled.status_code==200,'owner explicitly authorizes current chat expressions for case reports')
-            model=ScriptedModel([tool('start_analysis'),reply('材料已排队。')])
-            with patch('services.api.app.conversation_agent.AgentModel',return_value=model):
-                sent=client.post(base+'/messages',headers=headers,json={'request_id':str(uuid4()),'message':'分析刚上传的票据','document_ids':[document_id]})
-            check(sent.status_code==200,'model can invoke real analysis queue')
+            with patch('services.api.app.conversation_agent.AgentModel',side_effect=AssertionError('Report entry queues directly')):
+                sent=client.post(base+'/analyses',headers=headers,json={'request_id':str(uuid4()),'message':'分析刚上传的票据','document_ids':[document_id]})
+            check(sent.status_code==200,'explicit report entry invokes real analysis queue')
+            check(not client.get('/v1/conversations',headers=headers).json()[0].get('has_interpretation_report'),
+                  'queued report does not claim a completed interpretation')
             run_id=sent.json()['tool_events'][0]['run_id']
             with connection() as conn:
                 conn.autocommit=True
@@ -239,6 +248,62 @@ def main():
                 check(checked['report_id']==material['report_id'] and bool(checked_tools.evidence_ids),
                       'follow-up agent can read the same checked material report and cite its evidence')
             evidence_ref=[]
+            # Ordinary message images are separate from report documents and runs.
+            from PIL import Image
+            image = BytesIO()
+            Image.new('RGB', (24, 24), 'white').save(image, format='PNG')
+            image_bytes = image.getvalue()
+            with connection() as conn:
+                report_counts = conn.execute('''SELECT
+                    (SELECT count(*) FROM documents WHERE case_id=%s) AS documents,
+                    (SELECT count(*) FROM analysis_runs WHERE case_id=%s) AS runs''', (case_id, case_id)).fetchone()
+            image_up = client.post(base+'/attachments', headers=headers,
+                files={'file': ('合成检查结果.png', image_bytes, 'image/png')})
+            check(image_up.status_code == 201, 'ordinary image has independent attachment storage')
+            attachment_id = image_up.json()['attachment_id']
+            duplicate = client.post(base+'/attachments', headers=headers,
+                files={'file': ('retry.png', image_bytes, 'image/png')})
+            check(duplicate.status_code == 200 and duplicate.json()['attachment_id'] == attachment_id,
+                  'ordinary image upload retry deduplicates by conversation and hash')
+            check(client.post(base+'/attachments', headers=other_headers,
+                files={'file': ('other.png', image_bytes, 'image/png')}).status_code == 404,
+                  'another actor cannot upload to a private chat')
+            check(client.post(base+'/attachments', headers=headers,
+                files={'file': ('spoof.png', b'not an image', 'image/png')}).status_code == 415,
+                  'chat attachment validates actual media signature')
+            fake_ocr = SimpleNamespace(version='synthetic-ocr', method='synthetic', recognize=MagicMock(return_value={
+                'text': '疑似肺炎\n不能确认的低置信度金额999元', 'request_id': 'synthetic', 'angle': 0,
+                'blocks': [{'type': 'paragraph', 'order': 0, 'text': '疑似肺炎', 'metadata': {'confidence_score': .99}},
+                           {'type': 'paragraph', 'order': 1, 'text': '不能确认的低置信度金额999元', 'metadata': {'confidence_score': .2}}]}))
+            image_question = {'request_id': str(uuid4()), 'message': '这张图片是什么意思？', 'attachment_ids': [attachment_id]}
+            image_model = ScriptedModel([tool('start_analysis'), reply('这张图片写的是疑似肺炎，还需要结合医生判断。')])
+            with patch('services.api.app.worker.create_ocr', return_value=fake_ocr), \
+                 patch('services.api.app.conversation_agent.AgentModel', return_value=image_model):
+                image_reply = client.post(base+'/messages', headers=headers, json=image_question)
+            check(image_reply.status_code == 200, 'OCR and question produce an ordinary chat reply')
+            image_sources = next(json.loads(m['content'])['message_attachment_text'] for m in image_model.messages
+                                 if m['role'] == 'user' and 'message_attachment_text' in (m.get('content') or ''))
+            check('疑似肺炎' in json.dumps(image_sources,ensure_ascii=False)
+                  and '999元' not in json.dumps(image_sources,ensure_ascii=False),
+                  'ordinary OCR preserves qualifiers and excludes low-confidence lines')
+            check(any(e['status'] == 'use_report_entry' for e in image_reply.json()['tool_events']),
+                  'even an unsolicited model tool call cannot start an analysis from ordinary chat')
+            with patch('services.api.app.worker.create_ocr', side_effect=AssertionError('cached attachment must not OCR again')), \
+                 patch('services.api.app.conversation_agent.AgentModel', return_value=ScriptedModel([tool('read_chat_attachments'), reply('仍然只能确认疑似的记录。')])):
+                reread = client.post(base+'/messages', headers=headers, json={'request_id':str(uuid4()), 'message':'再解释一下这张图'})
+            check(reread.status_code == 200 and fake_ocr.recognize.call_count == 1,
+                  'attachment follow-up reads the cached OCR from this private conversation')
+            with connection() as conn:
+                after_counts = conn.execute('''SELECT
+                    (SELECT count(*) FROM documents WHERE case_id=%s) AS documents,
+                    (SELECT count(*) FROM analysis_runs WHERE case_id=%s) AS runs''', (case_id, case_id)).fetchone()
+            check(after_counts == report_counts and client.get(base,headers=headers).json()['material_report']['report_id'] == material['report_id'],
+                  'ordinary image neither creates report work nor invalidates the saved report')
+            foreign_conv = str(uuid4())
+            client.post('/v1/conversations',headers=headers,json={'conversation_id':foreign_conv,'subject_id':str(subject)}).raise_for_status()
+            check(client.post(f'/v1/conversations/{foreign_conv}/messages',headers=headers,
+                  json={**image_question,'request_id':str(uuid4())}).status_code == 404,
+                  'an attachment from another conversation cannot be attached to a message')
             def grounded_reply(messages):
                 data=json.loads(next(m['content'] for m in reversed(messages)
                                      if 'authorized_material_pages' in (m.get('content') or '')))['authorized_material_pages'][0]
@@ -248,6 +313,9 @@ def main():
             with patch('services.api.app.conversation_agent.AgentModel',return_value=model):
                 completed=client.post(base+f'/analyses/{run_id}/continue',headers=headers)
             check(completed.status_code==200,'analysis completion continues with real evidence')
+            check(next(c for c in client.get('/v1/conversations',headers=headers).json()
+                       if c['conversation_id']==conversation_id).get('has_interpretation_report') is True,
+                  'completed narrative is marked as a report in history')
             check(completed.json()['answer']['analysis_run_id']==str(run_id) and
                   completed.json()['answer']['prompt_version']==ANALYSIS_PROMPT_VERSION,
                   'personal narrative is model-generated and bound to the exact analysis run')
@@ -328,10 +396,10 @@ def main():
             client.patch(c2 + '/report-context', headers=headers, json={'enabled': True}).raise_for_status()
 
             def send2(text, docs=None):
-                responses = [tool('start_analysis'), reply('材料已排队。')] if docs else [reply('收到。')]
+                responses = [reply('收到。')]
                 with patch('services.api.app.conversation_agent.AgentModel',
                            return_value=ScriptedModel(responses)):
-                    r = client.post(c2 + '/messages', headers=headers,
+                    r = client.post(c2 + ('/analyses' if docs else '/messages'), headers=headers,
                                     json={'request_id': str(uuid4()), 'message': text, 'document_ids': docs or []})
                 check(r.status_code == 200, f'context lifecycle message delivered: {text[:12]}')
                 return r.json()
@@ -439,9 +507,17 @@ def main():
 
         follow_id=str(uuid4())
         check(client.post('/v1/conversations',headers=headers,json={'conversation_id':follow_id,'case_id':case_id}).status_code==201,'new conversation can continue same case')
+        check(not next(c for c in client.get('/v1/conversations',headers=headers).json()
+                       if c['conversation_id']==follow_id).get('has_interpretation_report'),
+              'report badge belongs to its conversation rather than every chat for the same case')
+        def memory_flags(conversation,read,export):
+            path=f'/v1/conversations/{conversation}/memory-settings'
+            current=client.get(path,headers=headers).json()
+            changed=client.patch(path,headers=headers,json={'read_enabled':read,'export_enabled':export,'expected_version':current['version']})
+            check(changed.status_code==200,'legacy source withdrawal remains effective')
         with connection() as conn:
             found=chats.search_history(conn,actor,follow_id,'费用')
-            check(bool(found['messages']),'new conversation finds prior topic')
+            check(bool(found['messages']),'new conversation automatically finds prior topic without memory setup')
             check(not chats.search_history(conn,actor,follow_id,'%')['messages'],'history query treats wildcard as literal')
         def memory_answer(messages):
             result=json.loads(next(m['content'] for m in reversed(messages) if m['role']=='tool'))
@@ -491,6 +567,7 @@ def main():
             print(json.dumps({'live_model':'passed','synthetic_only':True,
                 'material_tools':amount['tool_events'],'memory_tools':memory['tool_events']},ensure_ascii=False))
         check(client.patch(base+'/recall',headers=headers,json={'enabled':False}).status_code==200,'recall setting can be disabled')
+        memory_flags(conversation_id,False,False)
         with connection() as conn:
             matches=chats.search_history(conn,actor,follow_id,'费用')['messages']
             check(all(str(m['turn_id'])!=first.json()['turn_id'] for m in matches),'recall disabled source is excluded immediately')

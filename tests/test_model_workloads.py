@@ -63,7 +63,7 @@ class ModelWorkloadTests(unittest.TestCase):
 
     def test_strict_format_limits_metadata_slots_and_keeps_free_text(self):
         schema=strict_analysis_tool()['function']['parameters']
-        self.assertEqual(len(schema['properties']),26)
+        self.assertEqual(len(schema['properties']),29)
         self.assertEqual(set(schema['required']),set(schema['properties']))
         self.assertFalse(schema['additionalProperties'])
         self.assertEqual(schema['properties']['citations']['maxItems'],40)

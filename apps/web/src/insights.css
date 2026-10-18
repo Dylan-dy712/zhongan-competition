@@ -12,6 +12,7 @@
 .source-sheet small,.muted{color:#5c7368;font-size:12px;overflow-wrap:anywhere}
 .source-image{position:relative;line-height:0;margin-top:24px}
 .source-image img{width:100%;height:auto;display:block}
+.source-sheet .source-excerpt{max-height:180px;overflow:auto}
 .source-image>span{position:absolute;border:2px solid #cf832c;background:#ffd07a33;box-sizing:border-box}
 .photo-review{width:min(780px,100vw)}
 .photo-review-item{display:flex;gap:16px;padding:20px 0;border-top:1px solid #d6e9df}
@@ -57,11 +58,6 @@
 @media(max-width:700px){.encounter-overview{padding:16px 16px 84px}.overview-hero{padding:20px;border-radius:16px}.overview-hero h1{font-size:23px}.overview-tabs{top:-16px;gap:4px}.overview-tabs button{min-width:0;font-size:13px;padding:10px 5px}.fact-grid,.profile-grid{grid-template-columns:1fr}.source-sheet{inset:auto 0 0;height:auto;max-height:88dvh;width:100vw;border-radius:20px 20px 0 0;border:0;padding:22px}.source-sheet h2{font-size:19px}.source-sheet footer{bottom:-22px}.photo-review-item{gap:12px}.photo-review-item>img{width:64px;height:90px}.overview-content h2{font-size:20px}}
 @media(prefers-reduced-motion:reduce){.encounter-overview *,.source-sheet *{scroll-behavior:auto!important;transition:none!important}}
 
-/* Keep analysis entry points visible above the long conversation. */
-.chat-analysis-nav{flex:none;margin:0 26px 12px;padding:14px 18px;border:1px solid #c5ebdb;border-radius:16px;background:#effaf5;display:block;color:#1e2926}
-.chat-analysis-nav>div:first-child{display:flex;gap:10px;align-items:baseline;margin-bottom:8px}.chat-analysis-nav strong{display:block;font-size:14px}.chat-analysis-nav small{font-size:12px;color:#5c7368}
-.chat-analysis-nav>div:last-child{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;flex:1;min-width:0}
-.chat-analysis-nav button{display:flex;align-items:center;justify-content:space-between;gap:4px;min-width:0;padding:10px 12px;border:1px solid #d6e9df;border-radius:10px;background:white;color:#008565;font:inherit;font-size:13px;cursor:pointer}
 .overview-back{border:0;background:transparent;color:#008565;font:inherit;padding:0 0 14px;cursor:pointer}.overview-ai-content{margin:20px 0;background:#fff;border:1px solid #d6e9df;border-radius:18px;padding:22px}.overview-ai-content>small{color:#5c7368}.overview-ai-point{padding:12px 0;border-bottom:1px solid #e7f3ed}.overview-ai-point:last-child{border-bottom:0}.overview-ai-point p{line-height:1.95;margin:8px 0;white-space:pre-wrap}.overview-ai-point p:first-child{font-weight:500}
 .overview-extracted,.overview-institutions{margin:22px 0;border:1px solid #d6e9df;border-radius:14px;background:#fff;padding:18px}.overview-extracted>summary,.overview-institutions>summary{cursor:pointer;font-weight:600;color:#008565}.overview-extracted .fact-grid{margin-top:18px}.overview-note{padding:18px;background:#f0fcf6;border-radius:14px;color:#5c7368}.overview-reference{margin:24px 0}.overview-reference article{padding:14px 0;border-bottom:1px solid #d6e9df}
-@media(max-width:700px){.chat-analysis-nav{margin:0 12px 8px;padding:12px;display:block}.chat-analysis-nav>div:first-child{display:flex;gap:10px;align-items:baseline;margin-bottom:8px}.chat-analysis-nav>div:last-child{gap:5px}.chat-analysis-nav button{font-size:12px;padding:9px 3px;justify-content:center}.chat-analysis-nav button svg{display:none}.overview-ai-content{padding:16px}}
+@media(max-width:700px){.overview-ai-content{padding:16px}}

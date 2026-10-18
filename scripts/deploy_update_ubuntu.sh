@@ -12,6 +12,8 @@ test -d "$app_dir/.venv"
 test -f "$release_dir/services/api/sql/011_conversations.sql"
 test -f "$release_dir/apps/web/dist/index.html"
 test -f "$release_dir/REVISION"
+test -x "$release_dir/output_dir/memory-ranker/semantix-ranker"
+printf '%s\n' '{"protocol":"zhongan-memory-rank-v1","request_id":"deploy-probe","query":"","documents":[]}' | "$release_dir/output_dir/memory-ranker/semantix-ranker" | python3 -c 'import json,sys; r=json.load(sys.stdin); assert r["protocol"]=="zhongan-memory-rank-v1" and r["request_id"]=="deploy-probe" and r["hits"]==[]'
 revision="$(< "$release_dir/REVISION")"
 [[ "$revision" =~ ^[0-9a-f]{40}$ ]]
 mobile_dir="$release_dir/output_dir/mobile-demo/dist"
@@ -39,7 +41,7 @@ chmod 600 "$backup_dir"/*.tar.gz
 backend_changed=0
 # UI releases keep the API/worker running. Compare all runtime code, schemas,
 # knowledge and service definitions; uncertainty takes the full backup path.
-for relative in services contracts/knowledge docs/medical/knowledge; do
+for relative in services contracts/knowledge contracts/medical-services docs/medical/knowledge; do
     if ! diff -qr --exclude=__pycache__ "$release_dir/$relative" "$app_dir/$relative" >/dev/null; then
         backend_changed=1
     fi
@@ -49,6 +51,9 @@ for unit in zhongan-api zhongan-worker; do
         backend_changed=1
     fi
 done
+if ! cmp -s "$release_dir/output_dir/memory-ranker/semantix-ranker" "$app_dir/output_dir/memory-ranker/semantix-ranker"; then
+    backend_changed=1
+fi
 printf 'BACKEND_CHANGED=%s\n' "$backend_changed"
 stopped=0
 changed=0
@@ -98,10 +103,14 @@ fi
 changed=1
 install -d -m 755 "$app_dir/scripts" "$app_dir/contracts" "$app_dir/docs/medical"
 sudo install -d -m 700 -o "$(id -u)" -g "$(id -g)" /home/ubuntu/zhongan-data/web-search
+sudo install -d -m 700 -o "$(id -u)" -g "$(id -g)" /home/ubuntu/zhongan-data/judge-recognition
 cp -a "$release_dir/scripts/." "$app_dir/scripts/"
 if [[ "$backend_changed" == 1 ]]; then
     cp -a "$release_dir/services" "$app_dir/"
+    install -d -m 755 "$app_dir/output_dir/memory-ranker"
+    install -m 755 "$release_dir/output_dir/memory-ranker/semantix-ranker" "$app_dir/output_dir/memory-ranker/semantix-ranker"
     cp -a "$release_dir/contracts/knowledge" "$app_dir/contracts/"
+    cp -a "$release_dir/contracts/medical-services" "$app_dir/contracts/"
     cp -a "$release_dir/docs/medical/knowledge" "$app_dir/docs/medical/"
 fi
 cp "$release_dir/REVISION" "$app_dir/REVISION"
@@ -112,6 +121,7 @@ if [[ "$backend_changed" == 1 ]]; then
     "$app_dir/.venv/bin/python" -m scripts.build_knowledge_vectors
 fi
 "$app_dir/.venv/bin/python" -m pip check
+"$app_dir/.venv/bin/python" -c 'from services.api.app.medical_services import catalog; data=catalog(); assert data["benefits"] and data["hospitals"]'
 if [[ "$backend_changed" == 1 ]]; then
     sudo install -m 644 "$release_dir/deploy/zhongan-api.service" /etc/systemd/system/zhongan-api.service
     sudo install -m 644 "$release_dir/deploy/zhongan-worker.service" /etc/systemd/system/zhongan-worker.service
@@ -146,5 +156,10 @@ sudo systemctl reload nginx
 systemctl is-active zhongan-api zhongan-worker nginx
 curl -fsS http://127.0.0.1/health
 "$app_dir/.venv/bin/python" -m scripts.verify_deployed_release --revision "$revision"
+# Once HTTPS is configured, a release must preserve the public TLS entry too.
+if [[ -s /etc/nginx/zhongan-https-listener.conf ]]; then
+    "$app_dir/.venv/bin/python" -m scripts.verify_deployed_release --revision "$revision" --base https://zhongan.xinzhipingtai.cn
+    curl --fail --silent --show-error --max-time 15 https://zhongan.xinzhipingtai.cn/judge/ > /dev/null
+fi
 printf '\nDEPLOYED_REVISION=%s\n' "$(< "$app_dir/REVISION")"
 trap - ERR

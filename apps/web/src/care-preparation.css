@@ -1,0 +1,44 @@
+.claim-react>[hidden]{display:none}
+.care-preparation{flex:1;min-height:0;display:flex;flex-direction:column;background:radial-gradient(ellipse at 100% 8%,#c9fae6,transparent 48%),#edfff8;color:#183f38;font-family:"PingFang SC","Microsoft YaHei",sans-serif}
+.care-preparation *{box-sizing:border-box}
+.care-preparation button{font:inherit;cursor:pointer}
+.care-preparation-header{display:flex;align-items:center;justify-content:space-between;flex:none;padding:7px 14px;min-height:58px;background:#eefff9dc}
+.care-preparation-header strong{font-size:17px;font-weight:650}
+.claim-react .care-preparation-header button,.claim-react .care-preparation-header>span{width:40px;flex:none;min-height:42px;padding:0;color:#234e45;background:transparent;box-shadow:none;border:0;font-size:32px}
+.care-preparation-scroll{overflow-y:auto;min-height:0;flex:1;padding:0 14px calc(26px + env(safe-area-inset-bottom));scrollbar-width:thin}
+.care-preparation-art{display:block;width:calc(100% + 28px);max-width:none;height:148px;object-fit:cover;object-position:50% 44%;margin:0 -14px -51px}
+.care-preparation-card{position:relative;width:100%;max-width:620px;margin:0 auto;padding:27px 18px 18px;border:1px solid #fff;border-radius:25px;background:linear-gradient(150deg,#faffffed,#fffffffa);box-shadow:0 9px 24px #30bb8d12}
+.care-preparation-card h1{font-size:25px;line-height:1.4;letter-spacing:.3px;margin:0 0 8px;color:#173d35;font-weight:750}
+.care-preparation-card p{font-size:14px;line-height:1.8;color:#677f79;margin:15px 0}
+.care-preparation-card .care-preparation-episode{font-size:12px;margin:0 0 10px;color:#7c928b}
+.care-material-list{list-style:none;margin:0 0 16px;padding:0}
+.care-material-list li{display:flex;align-items:center;gap:6px;border-bottom:1px solid #edf3f0;min-height:67px}
+.claim-react .care-material-file{flex:1;min-width:0;display:flex;align-items:center;gap:11px;background:transparent;box-shadow:none;border:0;border-radius:6px;padding:12px 0;text-align:left;color:#284e44}
+.care-document-icon{width:36px;height:39px;flex:none;border-radius:9px;display:grid;place-items:center;background:#e8fcf4;color:#04b98a;overflow:hidden}
+.care-document-icon svg{width:24px;height:24px}
+.care-document-icon img{width:100%;height:100%;object-fit:cover}
+.care-file-copy{min-width:0;flex:1}
+.care-file-copy strong{display:block;overflow-wrap:anywhere;font-size:14px;line-height:1.5;font-weight:550}
+.care-file-copy small{display:block;color:#8a9d96;font-size:11px;margin-top:4px}
+.care-file-arrow{color:#93aaa1;font-size:24px}
+.claim-react .care-file-remove{background:transparent;color:#8b7167;box-shadow:none;border:0;font-size:12px;min-height:44px;padding:4px}
+.care-preparation-card h2{font-size:15px;margin:18px 0 6px;color:#325c4f}
+.claim-react .care-preparation .care-outline,.claim-react .care-preparation .care-primary{width:100%;min-height:46px;border-radius:14px;padding:10px 14px;font-size:15px;font-weight:650;line-height:1.5;display:block;text-align:center}
+.claim-react .care-preparation .care-outline{border:1px solid #8ce5ca;background:#f5fffb;color:#049e78;box-shadow:none;margin:14px 0 8px}
+.claim-react .care-preparation .care-primary{border:0;background:linear-gradient(110deg,#00c995,#00cc8d 65%,#83f86d);color:#fff;box-shadow:0 6px 14px #00c58e28;margin:16px 0 8px}
+.care-preparation-note{display:block;text-align:center;font-size:10px;line-height:1.8;color:#91a39b;padding:0 4px}
+.care-preparation-eyebrow{font-size:11px;color:#079a75;display:block;margin-bottom:9px;letter-spacing:1px}
+.care-privacy-card h1{font-size:23px}
+.care-privacy-item{display:flex;align-items:flex-start;gap:12px;border-top:1px solid #edf3f0;padding:16px 0 4px}
+.care-privacy-item>span{flex:none;font-size:12px;color:#0bae83;background:#e7fbf1;border-radius:9px;padding:5px}
+.care-privacy-item h2{margin:2px 0 4px;font-size:15px}
+.care-privacy-item p{margin:0 0 10px;font-size:13px;line-height:1.8}
+.care-privacy-item summary{font-size:12px;color:#059773;cursor:pointer;min-height:36px;line-height:1.8}
+.care-privacy-item details p{font-size:12px;background:#f2fbf6;padding:10px;border-radius:8px}
+.care-agreement{display:flex;align-items:flex-start;gap:9px;font-size:13px;line-height:1.8;padding:14px 10px;margin:10px 0;background:#edfbf4;border-radius:11px;cursor:pointer}
+.care-agreement input{flex:none;accent-color:#00af82;width:19px;height:19px;margin:2px 0 0}
+.claim-react .care-later{width:100%;min-height:44px;background:transparent;color:#729184;font-size:13px;border:0;box-shadow:none}
+.care-preparation button:focus-visible,.care-preparation input:focus-visible,.care-preparation summary:focus-visible{outline:2px solid #008760;outline-offset:3px}
+.claim-react .claim-footer .claim-home{flex:0 0 27%;max-width:130px;min-height:46px;border:1px solid #d2e3da;background:#fff;color:#648475;border-radius:13px;box-shadow:none;font-size:13px;padding:8px}
+.claim-react .claim-footer .claim-primary{min-width:0}
+@media(min-width:761px){.care-preparation-scroll{padding-inline:28px}.care-preparation-art{width:calc(100% + 56px);height:180px;margin-inline:-28px;margin-bottom:-62px;object-position:50% 42%}.care-preparation-card{padding:30px}.claim-react .claim-footer .claim-home+.claim-primary{flex:1;margin-left:0}}
