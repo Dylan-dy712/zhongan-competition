@@ -35,6 +35,7 @@ from .contracts.knowledge import DiseaseCode
 from .llm_extractor import PROMPT_VERSION, SCHEMA_VERSION as MODEL_SCHEMA_VERSION, OpenAiCompatibleExtractor, validate_evidence_quotes
 from .ocr import OCR_METHOD, OCR_VERSION, Ocr, create_ocr, page_ocr_method
 from .document_quality import classify_material
+from .material_routing import route_material
 from . import medical_records
 from .parse_cache import cached_pages,save_page,require_parse_scope,payload_digest
 from .volcengine_ocr import VolcengineOcr
@@ -240,6 +241,7 @@ def ocr_page(image_bytes: bytes, width: int, height: int, base: dict, ocr: Ocr):
             **base["metadata"], "ocr_method": getattr(ocr, 'method', OCR_METHOD),
             "ocr_request_id": result["request_id"], "ocr_angle": result["angle"],
             "ocr_line_count": len(result["blocks"]),
+            "material_routing": route_material(result['text']),
             "photo_quality": {"material_type":kind,"type_certainty":certainty,
                               "uncertain_lines":uncertain,"readable_lines":len(result['blocks'])-uncertain,
                               "needs_reupload":bool(uncertain or not text),"method":"ocr-line-triage-v1"},
@@ -463,13 +465,15 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
              run['run_id'],run['lease_token'])).fetchone()
         if not row:raise RuntimeError('ANALYSIS_LEASE_LOST')
         advance('extract')
-        material = "\n\n".join(
-            page["text"] for _document, pages in parsed_documents for page in pages if page["text"]
-        )
+        nonclinical = {(document['document_id'], document['document_version'], page['page_index'])
+            for document, pages in parsed_documents for page in pages
+            if route_material(page.get('text') or '')['extraction_profile'] == 'policy'}
+        material = "\n\n".join(page["text"] for document, pages in parsed_documents for page in pages
+            if page["text"] and (document['document_id'], document['document_version'], page['page_index']) not in nonclinical)
         fully_prepared=bool(prepared_sample_pages and prepared_sample_pages==sum(len(pages) for _,pages in parsed_documents))
         prepared_by_page={(document['document_id'],document['document_version'],page['page_index']):evidence_for_page(document,page)
             for document,pages in parsed_documents for page in pages}
-        fact_inputs=[row for rows in prepared_by_page.values() for row in rows]
+        fact_inputs=[row for key, rows in prepared_by_page.items() if key not in nonclinical for row in rows]
         narrative_sources={}
         if fully_prepared:
             from .page_sources import narrative_page_source
