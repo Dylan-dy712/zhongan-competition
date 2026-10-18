@@ -26,6 +26,8 @@ class PaddleOcr:
                 response = session.post(self.url + '/recognize', json={
                     'image_base64': base64.b64encode(image_bytes).decode('ascii'),
                     'rotation_degrees': rotation_degrees}, timeout=(5, 600))
+                if response.status_code == 504:
+                    raise RuntimeError('PADDLE_OCR_NATIVE_TIMEOUT')
                 response.raise_for_status()
                 result = response.json()
             if result.get('parser_version') != self.version:

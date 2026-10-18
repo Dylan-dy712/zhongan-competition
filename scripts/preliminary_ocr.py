@@ -81,6 +81,8 @@ def main():
         except Exception as exc:
             cache = {'source_image_sha256':row['image_sha256'], 'ocr_status':'failed',
                      'error_code':type(exc).__name__, 'text':'', 'lines':[]}
+            if str(exc) in {'PADDLE_OCR_NATIVE_TIMEOUT', 'PADDLE_OCR_SERVICE_UNAVAILABLE'}:
+                cache['provider_error'] = str(exc)
         write(destination, cache)
         return cache['ocr_status']
     counts = {}

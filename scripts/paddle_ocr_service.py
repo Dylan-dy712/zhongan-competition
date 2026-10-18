@@ -7,6 +7,9 @@ import io
 import json
 import os
 from pathlib import Path
+import queue
+import subprocess
+import sys
 import threading
 import time
 import uuid
@@ -14,15 +17,7 @@ import uuid
 MAX_REQUEST_BYTES = 32 * 1024 * 1024
 
 
-def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--port', type=int, default=8866)
-    parser.add_argument('--model-root', type=Path, required=True, help='existing official_models directory')
-    args = parser.parse_args()
-    model_root = args.model_root.resolve()
-    for name in ('PP-OCRv5_server_det', 'PP-OCRv5_server_rec'):
-        if not (model_root / name).is_dir():
-            parser.error('missing local model directory: ' + name)
+def native_worker(model_root):
     os.environ['PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK'] = 'True'
     os.environ['HF_HUB_DISABLE_TELEMETRY'] = '1'
     from PIL import Image
@@ -37,8 +32,6 @@ def main():
         use_doc_orientation_classify=False, use_doc_unwarping=False,
         use_textline_orientation=False, device='cpu', cpu_threads=4, enable_mkldnn=False,
         text_det_limit_side_len=960, text_det_limit_type='max')
-    lock = threading.Lock()
-
     def recognize(payload):
         rotation = payload.get('rotation_degrees', 0)
         if type(rotation) is not int or rotation not in (0, 90, 180, 270):
@@ -51,22 +44,115 @@ def main():
         width, height = upright.size
         blocks = []
         started = time.monotonic()
-        with lock:
-            for result in pipeline.predict(np.asarray(upright)[:, :, ::-1].copy()):
-                for text, polygon, score in zip(result['rec_texts'], result['rec_polys'], result['rec_scores']):
-                    if not text.strip():
-                        continue
-                    xs, ys = [float(p[0]) / width for p in polygon], [float(p[1]) / height for p in polygon]
-                    x1, y1, x2, y2 = min(xs), min(ys), max(xs), max(ys)
-                    # Restore boxes to original image coordinates, matching the other adapters.
-                    box = {0: [x1, y1, x2, y2], 90: [1-y2, x1, 1-y1, x2],
-                           180: [1-x2, 1-y2, 1-x1, 1-y1], 270: [y1, 1-x2, y2, 1-x1]}[rotation]
-                    blocks.append({'text': text, 'bbox': [max(0., min(1., v)) for v in box],
-                        'metadata': {'confidence_score': float(score), 'confidence_method': OCR_VERSION}})
+        for result in pipeline.predict(np.asarray(upright)[:, :, ::-1].copy()):
+            for text, polygon, score in zip(result['rec_texts'], result['rec_polys'], result['rec_scores']):
+                if not text.strip():
+                    continue
+                xs, ys = [float(p[0]) / width for p in polygon], [float(p[1]) / height for p in polygon]
+                x1, y1, x2, y2 = min(xs), min(ys), max(xs), max(ys)
+                # Restore boxes to original image coordinates, matching the other adapters.
+                box = {0: [x1, y1, x2, y2], 90: [1-y2, x1, 1-y1, x2],
+                       180: [1-x2, 1-y2, 1-x1, 1-y1], 270: [y1, 1-x2, y2, 1-x1]}[rotation]
+                blocks.append({'text': text, 'bbox': [max(0., min(1., v)) for v in box],
+                    'metadata': {'confidence_score': float(score), 'confidence_method': OCR_VERSION}})
         return {'text': '\n'.join(b['text'] for b in blocks), 'blocks': blocks,
                 'request_id': str(uuid.uuid4()), 'angle': rotation, 'parser_version': OCR_VERSION,
                 'seconds': round(time.monotonic()-started, 3), 'tables': [],
                 'limits': 'CPU detection longest side 960; no table structure model; explicit rotation only'}
+
+    print('_PADDLE_RESULT_' + json.dumps({'status': 'ready'}), flush=True)
+    for line in sys.stdin:
+        try:
+            result = {'result': recognize(json.loads(line))}
+        except (ValueError, KeyError, TypeError, OSError, binascii.Error):
+            result = {'error': 'invalid_image_request'}
+        except Exception:
+            result = {'error': 'paddle_inference_failed'}
+        print('_PADDLE_RESULT_' + json.dumps(result, ensure_ascii=True), flush=True)
+
+
+class PaddleProcess:
+    """One persistent native worker; a native crash/timeout cannot block later pages."""
+    def __init__(self, model_root, timeout):
+        self.model_root, self.timeout = model_root, timeout
+        self.lock = threading.Lock()
+        self.process = None
+        self.start()
+
+    def stop(self):
+        if self.process is not None:
+            if self.process.poll() is None:
+                self.process.terminate()
+            self.process.wait(timeout=10)
+            self.process.stdin.close()
+            self.process.stdout.close()
+            self.process = None
+
+    def start(self):
+        self.messages = queue.Queue()
+        options = {'creationflags': subprocess.CREATE_NO_WINDOW} if os.name == 'nt' else {}
+        self.process = subprocess.Popen([sys.executable, '-u', '-m', 'scripts.paddle_ocr_service',
+            '--model-root', str(self.model_root), '--native-worker'], stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE, text=True, encoding='utf-8', **options)
+        def read(process, messages):
+            try:
+                for line in process.stdout:
+                    if line.startswith('_PADDLE_RESULT_'):
+                        messages.put(json.loads(line[len('_PADDLE_RESULT_'):]))
+            except (ValueError, OSError):
+                pass
+            finally:
+                messages.put({'error': 'paddle_native_exited'})
+        threading.Thread(target=read, args=(self.process, self.messages), daemon=True).start()
+        try:
+            if self.messages.get(timeout=90).get('status') != 'ready':
+                raise RuntimeError('PADDLE_NATIVE_START_FAILED')
+        except (queue.Empty, RuntimeError):
+            self.stop()
+            raise RuntimeError('PADDLE_NATIVE_START_FAILED') from None
+
+    def recognize(self, payload):
+        with self.lock:
+            if self.process is None or self.process.poll() is not None:
+                self.stop()
+                self.start()
+            try:
+                self.process.stdin.write(json.dumps(payload, ensure_ascii=True) + '\n')
+                self.process.stdin.flush()
+                response = self.messages.get(timeout=self.timeout)
+            except queue.Empty:
+                self.stop()
+                raise TimeoutError('PADDLE_NATIVE_TIMEOUT') from None
+            except (BrokenPipeError, OSError):
+                self.stop()
+                raise RuntimeError('PADDLE_NATIVE_EXITED') from None
+            if 'result' not in response:
+                if response.get('error') == 'invalid_image_request':
+                    raise ValueError('invalid image')
+                self.stop()
+                raise RuntimeError('PADDLE_NATIVE_FAILED')
+            response['result']['native_timeout_seconds'] = self.timeout
+            return response['result']
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--port', type=int, default=8866)
+    parser.add_argument('--model-root', type=Path, required=True, help='existing official_models directory')
+    parser.add_argument('--native-worker', action='store_true', help=argparse.SUPPRESS)
+    parser.add_argument('--page-timeout', type=int, default=300)
+    args = parser.parse_args()
+    model_root = args.model_root.resolve()
+    for name in ('PP-OCRv5_server_det', 'PP-OCRv5_server_rec'):
+        if not (model_root / name).is_dir():
+            parser.error('missing local model directory: ' + name)
+    if not 1 <= args.page_timeout <= 480:
+        parser.error('page-timeout must be between 1 and 480 seconds')
+    if args.native_worker:
+        native_worker(model_root)
+        return
+    from services.api.app.paddle_ocr import OCR_VERSION
+    worker = PaddleProcess(model_root, args.page_timeout)
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args):
@@ -85,7 +171,9 @@ def main():
 
         def do_GET(self):
             self.respond(200 if self.path == '/health' else 404,
-                         {'status': 'ready', 'parser_version': OCR_VERSION} if self.path == '/health' else {'error': 'not_found'})
+                         {'status': 'ready', 'parser_version': OCR_VERSION,
+                          'native_worker_ready': worker.process is not None and worker.process.poll() is None,
+                          'busy': worker.lock.locked()} if self.path == '/health' else {'error': 'not_found'})
 
         def do_POST(self):
             if self.path != '/recognize':
@@ -97,8 +185,12 @@ def main():
                 payload = json.loads(self.rfile.read(size))
                 if not isinstance(payload, dict):
                     raise ValueError('invalid payload')
-                result = recognize(payload)
+                result = worker.recognize(payload)
                 self.respond(200, result)
+            except TimeoutError:
+                self.respond(504, {'error': 'paddle_native_timeout'})
+            except RuntimeError:
+                self.respond(503, {'error': 'paddle_native_unavailable'})
             except (ValueError, KeyError, TypeError, OSError, binascii.Error):
                 self.respond(400, {'error': 'invalid_image_request'})
             except Exception:
