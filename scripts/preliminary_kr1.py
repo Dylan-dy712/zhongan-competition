@@ -352,6 +352,10 @@ def main():
             if not row['ocr'] or sha(row['ocr']) != row['ocr_sha256']:
                 raise ValueError('missing or changed OCR source')
             cache = load(row['ocr'])
+            run['ocr_status'] = cache.get('ocr_status', 'not_recorded')
+            if run['ocr_status'] in {'failed', 'empty'}:
+                # Do not bypass a failed OCR provider with image-only LLM output in OCR comparisons.
+                raise ValueError('OCR did not produce a usable recognition result')
             if not cache.get('text', '').strip() and not args.vision:
                 raise ValueError('OCR source is empty')
             run['ocr_layout_method'] = args.ocr_layout
