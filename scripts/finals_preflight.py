@@ -21,6 +21,7 @@ def configuration():
     provider = os.getenv('ZHONGAN_OCR_PROVIDER', 'tencent')
     required = {'tencent': ('TENCENTCLOUD_SECRET_ID', 'TENCENTCLOUD_SECRET_KEY'),
                 'tencent_table': ('TENCENTCLOUD_SECRET_ID', 'TENCENTCLOUD_SECRET_KEY'),
+                'paddle': (),
                 'volcengine': ('VOLCENGINE_OCR_ACCESS_KEY_ID', 'VOLCENGINE_OCR_SECRET_ACCESS_KEY')}
     host = urlparse(os.getenv('LLM_BASE_URL', '')).hostname
     return {'ocr_provider': provider,
@@ -119,7 +120,7 @@ def main():
     parser.add_argument('--config', action='append', default=[], help='private JSON; later files override earlier ones')
     parser.add_argument('--manifest', help='optional prepared OCR input manifest')
     parser.add_argument('--output', required=True)
-    parser.add_argument('--ocr-provider', choices=['tencent','tencent_table','volcengine'])
+    parser.add_argument('--ocr-provider', choices=['tencent','tencent_table','volcengine','paddle'])
     parser.add_argument('--live', action='store_true', help='make one synthetic OCR and model probe; may consume quota')
     parser.add_argument('--table', action='store_true', help='also probe table OCR; requires --live')
     args = parser.parse_args()
