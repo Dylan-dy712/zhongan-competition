@@ -62,7 +62,8 @@ def bind_fee_evidence(blocks, text, has_image, tables=None):
                 audit['visual_only_rows'] += 1
             if verification is None:
                 audit['rejected_rows'].append({'block_index': block_index, 'row_index': index,
-                    'detailName': row['detailName'], 'reason': failure or 'no_same_row_source_support'})
+                    'detailName': row['detailName'], 'candidate': original,
+                    'reason': failure or 'no_same_row_source_support'})
                 continue
             if quote:
                 row['evidence_quote'] = quote
