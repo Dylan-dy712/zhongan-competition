@@ -95,6 +95,8 @@ class OpenAiCompatibleExtractor:
             raise RuntimeError("LLM_NOT_CONFIGURED")
         if self.provider == 'mock' and urlparse(self.base_url).hostname not in {'localhost', '127.0.0.1', '::1'}:
             raise RuntimeError('MOCK_PROVIDER_MUST_BE_LOCAL')
+        if urlparse(self.base_url).hostname == 'qianfan.baidubce.com' and self.model_id not in {'glm-5.3', 'glm-5.3-flash'}:
+            raise RuntimeError('QIANFAN_MODEL_NOT_AUTHORIZED')
 
     def _call(self, messages, *, timeout=45, workload='review'):
         response = model_post(
@@ -106,6 +108,7 @@ class OpenAiCompatibleExtractor:
                   **workload_options(self.base_url,self.model_id,workload)},
             timeout=timeout,
         )
+
         response.raise_for_status()
         payload = response.json()
         if getattr(self, 'provider', 'openai_compatible') == 'mock' and payload.get('execution_mode') != 'mock':

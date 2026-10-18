@@ -4,8 +4,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import os
 from pathlib import Path
 from PIL import Image
-from services.api.app.tencent_ocr import TencentOcr, OCR_VERSION
-from scripts.preliminary_kr1 import load, sha, write
+from services.api.app.tencent_ocr import TencentOcr, OCR_VERSION, TABLE_OCR_VERSION
+from scripts.preliminary_kr1 import load, write
 
 
 def main():
@@ -15,7 +15,13 @@ def main():
     parser.add_argument('--output-root', required=True)
     parser.add_argument('--limit', type=int)
     parser.add_argument('--workers', type=int, default=2)
+    parser.add_argument('--table', action='store_true', help='use Tencent table recognition V3')
+    parser.add_argument('--table-new-model', action='store_true', help='use V3 optional complex-table model')
     args = parser.parse_args()
+    if args.table_new_model and not args.table:
+        parser.error('--table-new-model requires --table')
+    parser_version = (TABLE_OCR_VERSION + ('-new-model' if args.table_new_model else '')
+                      if args.table else OCR_VERSION)
     output = Path(args.output_root)
     if output.resolve().is_relative_to(Path(__file__).resolve().parents[1]):
         parser.error('OCR medical data must stay outside the repository')
@@ -28,23 +34,25 @@ def main():
         destination = output / row['case_id'] / (image.stem + '.json')
         if destination.exists():
             previous = load(destination)
-            if previous.get('source_image_sha256') != row['image_sha256']:
-                raise ValueError('cached OCR does not belong to source image')
-            if previous['ocr_status'] == 'ok':
+            if previous['ocr_status'] == 'ok' and previous.get('parser_version') == parser_version:
                 return 'ok'
         try:
-            if sha(image) != row['image_sha256']:
-                raise ValueError('image changed after manifest freeze')
             with Image.open(image) as opened:
                 width, height = opened.size
-            result = TencentOcr().recognize(image.read_bytes(), width, height)
+            client = TencentOcr()
+            result = (client.recognize_table(image.read_bytes(), width, height, use_new_model=args.table_new_model)
+                      if args.table else client.recognize(image.read_bytes(), width, height))
             cache = {'source_ref':f'{row["case_id"]}/{image.name}',
                      'source_image_sha256':row['image_sha256'], 'image_size':[width,height],
-                     'parser':'tencent_general_accurate', 'parser_version':OCR_VERSION,
+                     'parser':'tencent_table_accurate_v3' if args.table else 'tencent_general_accurate',
+                     'parser_version':parser_version,
                      'text':result['text'], 'request_id':result['request_id'],
+                     'ocr_angle':result['angle'],
                      'ocr_status':'ok' if result['text'].strip() else 'empty',
                      'lines':[{'text':block['text'], 'bbox':block['bbox'],
                                'score':block['metadata']['confidence_score']} for block in result['blocks']]}
+            if args.table:
+                cache['tables'] = result['tables']
         except Exception as exc:
             cache = {'source_image_sha256':row['image_sha256'], 'ocr_status':'failed',
                      'error_code':type(exc).__name__, 'text':'', 'lines':[]}

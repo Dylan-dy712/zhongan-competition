@@ -13,6 +13,7 @@ from tencentcloud.ocr.v20181119 import models, ocr_client
 
 OCR_METHOD = "tencent_general_accurate_ocr"
 OCR_VERSION = "tencent-ocr-2018-11-19-general-accurate-v1"
+TABLE_OCR_VERSION = "tencent-ocr-2018-11-19-table-accurate-v3-default"
 RETRYABLE_CODES = {
     "FailedOperation.EngineRecognizeTimeout",
     "FailedOperation.OcrFailed",
@@ -47,6 +48,37 @@ class TencentOcr:
         self.client = ocr_client.OcrClient(
             credential.Credential(secret_id, secret_key), region, profile
         )
+
+    def recognize_table(self, image_bytes: bytes, width: int, height: int, *, use_new_model=False):
+        request = models.RecognizeTableAccurateOCRRequest()
+        request.ImageBase64 = base64.b64encode(image_bytes).decode("ascii")
+        request.UseNewModel = use_new_model
+        response = None
+        for attempt in range(3):
+            try:
+                response = self.client.RecognizeTableAccurateOCR(request)
+                break
+            except TencentCloudSDKException as exc:
+                if exc.code not in RETRYABLE_CODES or attempt == 2:
+                    raise RuntimeError(f"OCR_PROVIDER_ERROR:{exc.code}") from None
+                time.sleep(2 ** attempt)
+        tables, blocks, text = [], [], []
+        for table_index, table in enumerate(response.TableDetections or []):
+            cells = []
+            for index, cell in enumerate(table.Cells or []):
+                value = cell.Text or ""
+                bbox = normalize_bbox(cell, width, height)
+                cells.append({"id": f"t{table_index}c{index}", "text": value,
+                    "row_start": cell.RowTl, "row_end": cell.RowBr,
+                    "column_start": cell.ColTl, "column_end": cell.ColBr,
+                    "bbox": bbox, "confidence": cell.Confidence})
+                if value.strip():
+                    text.append(f"[t{table_index} r{cell.RowTl} c{cell.ColTl}] {value}")
+                    blocks.append({"text": value, "bbox": bbox,
+                        "metadata": {"confidence_score": cell.Confidence}})
+            tables.append({"table_index": table_index, "type": table.Type, "cells": cells})
+        return {"text": "\n".join(text), "blocks": blocks, "tables": tables,
+                "request_id": response.RequestId, "angle": response.Angle}
 
     def recognize(self, image_bytes: bytes, width: int, height: int):
         request = models.GeneralAccurateOCRRequest()
