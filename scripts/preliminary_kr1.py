@@ -39,6 +39,12 @@ def sha(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
+def observed_count(result):
+    fields = (result or {}).get('fields', {})
+    return (sum(value is not None and value != '' and value != [] for key,value in fields.items() if key != 'blocks')
+            + sum(len(block.get('costDetailList', [])) for block in fields.get('blocks', [])))
+
+
 def repair_name(value):
     try:
         return b''.join(b'\x80' if ch == '€' else ch.encode('gbk') for ch in value).decode('utf-8')
@@ -262,6 +268,7 @@ def main():
     parser.add_argument('--workers', type=int, default=4)
     parser.add_argument('--ocr-layout', choices=['plain', 'bbox'], default='plain')
     parser.add_argument('--vision', action='store_true', help='read original image with OCR as optional context')
+    parser.add_argument('--retry-partial', action='store_true', help='explicitly rerun partial documents under identical frozen settings')
     parser.add_argument('--include-inferred-categories', action='store_true',
                         help='score semantic fee classification too; changes policy to v3, not comparable to v2 totals')
     args = parser.parse_args()
@@ -293,7 +300,10 @@ def main():
     implementation_hashes = {'runner': sha(__file__),
                              'extractor': sha(repo/'services/api/app/document_fields.py'),
                              'provider': sha(repo/'services/api/app/llm_extractor.py'),
-                             'workload': sha(repo/'services/api/app/model_workloads.py')}
+                             'workload': sha(repo/'services/api/app/model_workloads.py'),
+                             'routing': sha(repo/'services/api/app/material_routing.py'),
+                             'fee_binding': sha(repo/'services/api/app/fee_binding.py'),
+                             'fee_evidence': sha(repo/'services/api/app/fee_evidence.py')}
     rows = manifest['documents']
     def infer(row):
         destination = Path(args.predictions_dir) / (row['document_id'] + '.json')
@@ -304,6 +314,8 @@ def main():
                 raise ValueError('use a new predictions directory for a new model or prompt')
             if previous.get('implementation_sha256') != implementation_hashes:
                 raise ValueError('runner changed; use a new predictions directory')
+            if previous.get('ocr_sha256') != row.get('ocr_sha256'):
+                raise ValueError('OCR source changed; use a new predictions directory')
             if previous.get('ocr_layout_method') != args.ocr_layout:
                 raise ValueError('OCR layout changed; use a new predictions directory')
             if previous.get('vision') != args.vision:
@@ -312,7 +324,8 @@ def main():
                 raise ValueError('source image orientation changed; use a new predictions directory')
             if previous.get('extraction_mode') != ('mock' if provider.provider == 'mock' else 'live'):
                 raise ValueError('execution mode changed; use a new predictions directory')
-            if previous.get('status') in ('completed', 'partial') and not previous.get('in_progress'):
+            if (previous.get('status') == 'completed' or
+                previous.get('status') == 'partial' and not args.retry_partial) and not previous.get('in_progress'):
                 return previous['status']
         run = {k: row[k] for k in ('document_id', 'image_sha256', 'ocr_sha256')}
         run.update(model_id=provider.model_id, prompt_version=PROMPT_VERSION, code_revision=revision,
@@ -322,7 +335,10 @@ def main():
         run['orientation_method'] = row.get('orientation_method', 'original_orientation')
         start = time.monotonic()
         if previous.get('status') == 'partial' and previous.get('result'):
-            run['result'] = previous['result']
+            saved = max((previous['result'], previous.get('recovery_snapshot', {})), key=observed_count)
+            run['result'] = saved
+            # Persist alongside new checkpoints, so interruption cannot erase an older useful partial.
+            run['recovery_snapshot'] = saved
         def checkpoint(result, stage):
             run.update(result=result, status='partial', in_progress=True,
                        last_completed_stage=stage, seconds=round(time.monotonic() - start, 3))
@@ -354,6 +370,11 @@ def main():
                            validation_errors=exc.validation_errors, stage_error_code=exc.error_code,
                            failed_usage=exc.usage, finish_reason=exc.finish_reason, http_status=exc.http_status)
                 run['provider_error'] = exc.provider_error
+        if run['status'] != 'completed' and observed_count(run.get('recovery_snapshot')) > observed_count(run.get('result')):
+            run['result'] = run['recovery_snapshot']
+            run['status'] = 'partial'
+            run['retained_previous_partial'] = True
+        run.pop('recovery_snapshot', None)
         run['seconds'] = round(time.monotonic() - start, 3)
         run['in_progress'] = False
         write(destination, run)
