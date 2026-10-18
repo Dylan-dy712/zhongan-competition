@@ -33,7 +33,7 @@ from .report_llm import PROMPT_VERSION as REPORT_PROMPT_VERSION, draft_report
 from .contracts.core import Action
 from .contracts.knowledge import DiseaseCode
 from .llm_extractor import PROMPT_VERSION, SCHEMA_VERSION as MODEL_SCHEMA_VERSION, OpenAiCompatibleExtractor, validate_evidence_quotes
-from .ocr import OCR_METHOD, OCR_VERSION, Ocr, create_ocr, page_ocr_method, recognize_routed
+from .ocr import OCR_METHOD, OCR_VERSION, Ocr, create_ocr, page_ocr_method, recognize_routed, provider_ocr_version
 from .document_quality import classify_material
 from .material_routing import route_material
 from . import medical_records
@@ -405,7 +405,7 @@ def analyze_models(material, knowledge_entries, user_context, source_refs, fact_
 
 def recognition_profile(pipeline_version):
     provider=os.environ.get('ZHONGAN_OCR_PROVIDER','tencent').strip().lower()
-    ocr_version=VolcengineOcr.version if provider=='volcengine' else OCR_VERSION
+    ocr_version=provider_ocr_version(provider)
     fingerprint=payload_digest({'cache':'parsed-pages-v1','pipeline':pipeline_version,
         'text':TEXT_PARSER_VERSION,'pdf':PDF_PARSER_VERSION,'router':ROUTING_VERSION,
         'ocr_provider':provider,'ocr_version':ocr_version})

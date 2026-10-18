@@ -5,6 +5,7 @@ from typing import Protocol
 from .tencent_ocr import OCR_METHOD, OCR_VERSION, TABLE_OCR_METHOD, TABLE_OCR_VERSION, TencentOcr, TencentTableOcr
 from .volcengine_ocr import VolcengineOcr
 from .material_routing import route_material
+from .paddle_ocr import PaddleOcr
 
 
 def recognize_routed(ocr, image_bytes, width, height, *, enable_table=False, use_new_model=False):
@@ -48,9 +49,20 @@ def create_ocr(provider: str | None = None) -> Ocr:
         return TencentTableOcr()
     if provider == 'volcengine':
         return VolcengineOcr()
+    if provider == 'paddle':
+        return PaddleOcr()
     raise RuntimeError('OCR_PROVIDER_NOT_SUPPORTED')
+
+
+def provider_ocr_version(provider):
+    versions = {'tencent': OCR_VERSION, 'tencent_table': TABLE_OCR_VERSION,
+                'volcengine': VolcengineOcr.version, 'paddle': PaddleOcr.version}
+    if provider not in versions:
+        raise RuntimeError('OCR_PROVIDER_NOT_SUPPORTED')
+    return versions[provider]
 
 
 def page_ocr_method(page: dict) -> str | None:
     return {OCR_VERSION: OCR_METHOD, TABLE_OCR_VERSION: TABLE_OCR_METHOD,
+            PaddleOcr.version: PaddleOcr.method,
             VolcengineOcr.version: VolcengineOcr.method}.get(page.get('parser_version'))
