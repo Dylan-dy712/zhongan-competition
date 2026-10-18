@@ -11,6 +11,7 @@ from datetime import date
 from typing import Any, Literal
 from PIL import Image
 from .material_routing import route_material, PROFILE_INSTRUCTIONS
+from .fee_binding import validate_fee_binding
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
@@ -116,6 +117,9 @@ class FeeItem(BaseModel):
     confidence: dict[str, float]
     evidence_quote: str = Field(min_length=1)
     source_cells: list[str] = Field(default_factory=list)
+    binding_status: Literal['unverified', 'verified_cells', 'visual_review_required'] = 'unverified'
+    binding_reason: str | None = None
+    source_row: int | None = None
 
     @model_validator(mode='after')
     def field_confidence(self):
@@ -383,6 +387,8 @@ def extract_table_cells(call_stage, system, tables, attempts, image_bytes=None, 
                 parsed = FeeTable.model_validate_json(raw)
                 if any(not row.source_cells or not set(row.source_cells) <= ids for row in parsed.rows):
                     raise ValueError('table rows require valid original cell references')
+                for item in parsed.rows:
+                    validate_fee_binding(item, selected, start, end)
                 return parsed
             name_headers = [cell for cell in headers if '名称' in cell['text']]
             name_columns = {cell['column_start'] for cell in name_headers}
@@ -401,6 +407,8 @@ def extract_table_cells(call_stage, system, tables, attempts, image_bytes=None, 
                 covered = {key for row in batch.rows for key in row.source_cells}
                 if candidates - covered:
                     reason = 'uncovered_name_cells'
+                elif any(row.binding_status != 'verified_cells' for row in batch.rows):
+                    reason = 'unverified_cell_binding'
                 elif any(min(row.confidence.values()) < .9 for row in batch.rows):
                     reason = 'low_field_confidence'
                 elif any(cell['column_start'] in amount_columns and cell['row_end'] - cell['row_start'] > 1
@@ -481,6 +489,8 @@ def extract_table_cells(call_stage, system, tables, attempts, image_bytes=None, 
                                                'source_cells': sorted(repair_targets - new_names)})
                         if any(min(row.confidence.values()) < .9 for row in recovered.rows):
                             unresolved.append({'stage': recovery_stage, 'reason': 'low_field_confidence'})
+                        if any(row.binding_status != 'verified_cells' for row in recovered.rows):
+                            unresolved.append({'stage': recovery_stage, 'reason': 'unverified_cell_binding'})
                     except (ValueError, DocumentExtractionFailure) as exc:
                         attempts.append({'stage': recovery_stage, 'status': 'failed', 'source_box': box,
                             'error_code': type(exc).__name__, 'usage': getattr(exc, 'usage', {})})
