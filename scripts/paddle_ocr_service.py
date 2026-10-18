@@ -59,7 +59,8 @@ def native_worker(model_root, device):
         return {'text': '\n'.join(b['text'] for b in blocks), 'blocks': blocks,
                 'request_id': str(uuid.uuid4()), 'angle': rotation, 'parser_version': OCR_VERSION,
                 'seconds': round(time.monotonic()-started, 3), 'tables': [],
-                'limits': 'CPU detection longest side 960; no table structure model; explicit rotation only'}
+                'device': device,
+                'limits': 'Detection longest side 960; no table structure model; explicit rotation only'}
 
     print('_PADDLE_RESULT_' + json.dumps({'status': 'ready'}), flush=True)
     for line in sys.stdin:
