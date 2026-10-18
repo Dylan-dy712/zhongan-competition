@@ -17,20 +17,21 @@ import uuid
 MAX_REQUEST_BYTES = 32 * 1024 * 1024
 
 
-def native_worker(model_root):
+def native_worker(model_root, device):
     os.environ['PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK'] = 'True'
     os.environ['HF_HUB_DISABLE_TELEMETRY'] = '1'
     from PIL import Image
     import numpy as np
     from paddleocr import PaddleOCR
-    from services.api.app.paddle_ocr import OCR_VERSION
+    from services.api.app.paddle_ocr import OCR_VERSIONS
+    OCR_VERSION = OCR_VERSIONS[device]
     pipeline = PaddleOCR(ocr_version='PP-OCRv5',
         text_detection_model_name='PP-OCRv5_server_det',
         text_recognition_model_name='PP-OCRv5_server_rec',
         text_detection_model_dir=str(model_root / 'PP-OCRv5_server_det'),
         text_recognition_model_dir=str(model_root / 'PP-OCRv5_server_rec'),
         use_doc_orientation_classify=False, use_doc_unwarping=False,
-        use_textline_orientation=False, device='cpu', cpu_threads=4, enable_mkldnn=False,
+        use_textline_orientation=False, device=device, cpu_threads=4, enable_mkldnn=False,
         text_det_limit_side_len=960, text_det_limit_type='max')
     def recognize(payload):
         rotation = payload.get('rotation_degrees', 0)
@@ -73,8 +74,9 @@ def native_worker(model_root):
 
 class PaddleProcess:
     """One persistent native worker; a native crash/timeout cannot block later pages."""
-    def __init__(self, model_root, timeout):
+    def __init__(self, model_root, timeout, device):
         self.model_root, self.timeout = model_root, timeout
+        self.device = device
         self.lock = threading.Lock()
         self.process = None
         self.start()
@@ -92,7 +94,7 @@ class PaddleProcess:
         self.messages = queue.Queue()
         options = {'creationflags': subprocess.CREATE_NO_WINDOW} if os.name == 'nt' else {}
         self.process = subprocess.Popen([sys.executable, '-u', '-m', 'scripts.paddle_ocr_service',
-            '--model-root', str(self.model_root), '--native-worker'], stdin=subprocess.PIPE,
+            '--model-root', str(self.model_root), '--device', self.device, '--native-worker'], stdin=subprocess.PIPE,
             stdout=subprocess.PIPE, text=True, encoding='utf-8', **options)
         def read(process, messages):
             try:
@@ -141,6 +143,7 @@ def main():
     parser.add_argument('--model-root', type=Path, required=True, help='existing official_models directory')
     parser.add_argument('--native-worker', action='store_true', help=argparse.SUPPRESS)
     parser.add_argument('--page-timeout', type=int, default=300)
+    parser.add_argument('--device', choices=['cpu', 'gpu:0'], default='cpu')
     args = parser.parse_args()
     model_root = args.model_root.resolve()
     for name in ('PP-OCRv5_server_det', 'PP-OCRv5_server_rec'):
@@ -149,10 +152,11 @@ def main():
     if not 1 <= args.page_timeout <= 480:
         parser.error('page-timeout must be between 1 and 480 seconds')
     if args.native_worker:
-        native_worker(model_root)
+        native_worker(model_root, args.device)
         return
-    from services.api.app.paddle_ocr import OCR_VERSION
-    worker = PaddleProcess(model_root, args.page_timeout)
+    from services.api.app.paddle_ocr import OCR_VERSIONS
+    OCR_VERSION = OCR_VERSIONS[args.device]
+    worker = PaddleProcess(model_root, args.page_timeout, args.device)
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args):
@@ -199,7 +203,10 @@ def main():
     server = ThreadingHTTPServer(('127.0.0.1', args.port), Handler)
     server.daemon_threads = True
     print(json.dumps({'status': 'ready', 'port': args.port, 'parser_version': OCR_VERSION}), flush=True)
-    server.serve_forever()
+    try:
+        server.serve_forever()
+    finally:
+        worker.stop()
 
 
 if __name__ == '__main__':

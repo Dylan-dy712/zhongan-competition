@@ -27,6 +27,9 @@ def main():
         parser.error('--table-new-model requires --table or --auto-table')
     if args.provider == 'paddle' and (args.table or args.auto_table or args.table_new_model):
         parser.error('Paddle text provider has no table structure module; do not mix Tencent table calls')
+    if args.config:
+        os.environ.update({k:str(v) for k,v in load(args.config).items()
+                           if k.startswith(('TENCENTCLOUD_', 'ZHONGAN_PADDLE_'))})
     parser_version = (TABLE_OCR_VERSION + ('-new-model' if args.table_new_model else '')
                       if args.table else OCR_VERSION)
     if args.auto_table:
@@ -36,9 +39,6 @@ def main():
     output = Path(args.output_root)
     if output.resolve().is_relative_to(Path(__file__).resolve().parents[1]):
         parser.error('OCR medical data must stay outside the repository')
-    if args.config:
-        os.environ.update({k:str(v) for k,v in load(args.config).items()
-                           if k.startswith(('TENCENTCLOUD_', 'ZHONGAN_PADDLE_'))})
     rows = load(args.manifest)['documents']
     if args.limit:
         rows = rows[:args.limit]

@@ -6,6 +6,7 @@ import requests
 
 OCR_METHOD = 'paddle_ocr_v5_server'
 OCR_VERSION = 'paddle-ocr-v5-server-cpu-960-v1'
+OCR_VERSIONS = {'cpu': OCR_VERSION, 'gpu:0': 'paddle-ocr-v5-server-gpu-960-v1'}
 
 
 class PaddleOcr:
@@ -13,6 +14,10 @@ class PaddleOcr:
     version = OCR_VERSION
 
     def __init__(self):
+        self.device = os.getenv('ZHONGAN_PADDLE_OCR_DEVICE', 'cpu')
+        if self.device not in OCR_VERSIONS:
+            raise RuntimeError('PADDLE_OCR_DEVICE_NOT_SUPPORTED')
+        self.version = OCR_VERSIONS[self.device]
         self.url = os.getenv('ZHONGAN_PADDLE_OCR_URL', 'http://127.0.0.1:8866').rstrip('/')
         parsed = urlparse(self.url)
         if (parsed.scheme != 'http' or parsed.hostname not in {'127.0.0.1', 'localhost', '::1'}
