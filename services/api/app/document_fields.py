@@ -5,6 +5,7 @@ import unicodedata
 import io
 import time
 import math
+import os
 import requests
 from decimal import Decimal, InvalidOperation
 from datetime import date
@@ -427,7 +428,8 @@ def extract_table_cells(call_stage, system, tables, attempts, image_bytes=None, 
             batch = FeeTable(rows=[])
             reason = None
             try:
-                direct = direct_fee_rows(selected, start, end)
+                # Engine confidence can be 100 on wrong text. Keep this speed experiment opt-in.
+                direct = direct_fee_rows(selected, start, end) if os.environ.get('ZHONGAN_DIRECT_FEE_ROWS') == '1' else None
                 if direct is not None:
                     payload, raw = {}, json.dumps({'rows': direct}, ensure_ascii=False)
                 else:

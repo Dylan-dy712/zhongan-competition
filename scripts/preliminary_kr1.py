@@ -320,6 +320,8 @@ def main():
                 raise ValueError('OCR layout changed; use a new predictions directory')
             if previous.get('vision') != args.vision:
                 raise ValueError('vision mode changed; use a new predictions directory')
+            if previous.get('direct_fee_rows_enabled', False) != (os.environ.get('ZHONGAN_DIRECT_FEE_ROWS') == '1'):
+                raise ValueError('direct fee experiment changed; use a new predictions directory')
             if previous.get('image_rotation_degrees', 0) != row.get('image_rotation_degrees', 0):
                 raise ValueError('source image orientation changed; use a new predictions directory')
             if previous.get('extraction_mode') != ('mock' if provider.provider == 'mock' else 'live'):
@@ -333,6 +335,7 @@ def main():
                    implementation_sha256=implementation_hashes)
         run['image_rotation_degrees'] = row.get('image_rotation_degrees', 0)
         run['orientation_method'] = row.get('orientation_method', 'original_orientation')
+        run['direct_fee_rows_enabled'] = os.environ.get('ZHONGAN_DIRECT_FEE_ROWS') == '1'
         start = time.monotonic()
         if previous.get('status') == 'partial' and previous.get('result'):
             saved = max((previous['result'], previous.get('recovery_snapshot', {})), key=observed_count)
