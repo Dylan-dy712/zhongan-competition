@@ -6,6 +6,7 @@ from pathlib import Path
 from PIL import Image
 from services.api.app.tencent_ocr import TencentOcr, OCR_VERSION, TABLE_OCR_VERSION
 from scripts.preliminary_kr1 import load, write
+from services.api.app.ocr import recognize_routed
 
 
 def main():
@@ -16,12 +17,17 @@ def main():
     parser.add_argument('--limit', type=int)
     parser.add_argument('--workers', type=int, default=2)
     parser.add_argument('--table', action='store_true', help='use Tencent table recognition V3')
+    parser.add_argument('--auto-table', action='store_true', help='classify general OCR, then request tables only for fee/settlement pages')
     parser.add_argument('--table-new-model', action='store_true', help='use V3 optional complex-table model')
     args = parser.parse_args()
-    if args.table_new_model and not args.table:
-        parser.error('--table-new-model requires --table')
+    if args.table and args.auto_table:
+        parser.error('choose --table or --auto-table')
+    if args.table_new_model and not (args.table or args.auto_table):
+        parser.error('--table-new-model requires --table or --auto-table')
     parser_version = (TABLE_OCR_VERSION + ('-new-model' if args.table_new_model else '')
                       if args.table else OCR_VERSION)
+    if args.auto_table:
+        parser_version += '-auto-table-v1' + ('-new-model' if args.table_new_model else '')
     output = Path(args.output_root)
     if output.resolve().is_relative_to(Path(__file__).resolve().parents[1]):
         parser.error('OCR medical data must stay outside the repository')
@@ -34,14 +40,16 @@ def main():
         destination = output / row['case_id'] / (image.stem + '.json')
         if destination.exists():
             previous = load(destination)
-            if previous['ocr_status'] == 'ok' and previous.get('parser_version') == parser_version:
+            if (previous['ocr_status'] == 'ok' and previous.get('parser_version') == parser_version
+                    and previous.get('table_routing', {}).get('status') != 'unavailable'):
                 return 'ok'
         try:
             with Image.open(image) as opened:
                 width, height = opened.size
             client = TencentOcr()
             result = (client.recognize_table(image.read_bytes(), width, height, use_new_model=args.table_new_model)
-                      if args.table else client.recognize(image.read_bytes(), width, height))
+                      if args.table else recognize_routed(client, image.read_bytes(), width, height,
+                          enable_table=args.auto_table, use_new_model=args.table_new_model))
             cache = {'source_ref':f'{row["case_id"]}/{image.name}',
                      'source_image_sha256':row['image_sha256'], 'image_size':[width,height],
                      'parser':'tencent_table_accurate_v3' if args.table else 'tencent_general_accurate',
@@ -51,8 +59,11 @@ def main():
                      'ocr_status':'ok' if result['text'].strip() else 'empty',
                      'lines':[{'text':block['text'], 'bbox':block['bbox'],
                                'score':block['metadata']['confidence_score']} for block in result['blocks']]}
-            if args.table:
+            if 'tables' in result:
                 cache['tables'] = result['tables']
+            if args.auto_table:
+                cache['material_routing'] = result['material_routing']
+                cache['table_routing'] = result['table_routing']
         except Exception as exc:
             cache = {'source_image_sha256':row['image_sha256'], 'ocr_status':'failed',
                      'error_code':type(exc).__name__, 'text':'', 'lines':[]}
