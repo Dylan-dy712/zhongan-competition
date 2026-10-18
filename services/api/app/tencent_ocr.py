@@ -75,7 +75,9 @@ class TencentOcr:
                 if value.strip():
                     text.append(f"[t{table_index} r{cell.RowTl} c{cell.ColTl}] {value}")
                     blocks.append({"text": value, "bbox": bbox,
-                        "metadata": {"confidence_score": cell.Confidence}})
+                        "metadata": {"confidence_score": (cell.Confidence / 100.0
+                            if cell.Confidence is not None and 0 <= cell.Confidence <= 100 else None),
+                                     "confidence_method": TABLE_OCR_VERSION}})
             tables.append({"table_index": table_index, "type": table.Type, "cells": cells})
         return {"text": "\n".join(text), "blocks": blocks, "tables": tables,
                 "request_id": response.RequestId, "angle": response.Angle}
