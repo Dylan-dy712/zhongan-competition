@@ -15,8 +15,8 @@ from .fee_binding import validate_fee_binding
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
-PROMPT_VERSION = 'document-fields-evidence-v40-material-routing'
-SCHEMA_VERSION = 'document-fields-v3-derived-stay'
+PROMPT_VERSION = 'document-fields-evidence-v41-source-row-binding'
+SCHEMA_VERSION = 'document-fields-v4-source-row-binding'
 FEE_TAXONOMY = {
     'inspectionFee': '检查费', 'westernMedicineFee': '西药费', 'materialFee': '材料费',
     'treatmentFee': '治疗费', 'chineseHerbalMedicineFee': '中草药费',
