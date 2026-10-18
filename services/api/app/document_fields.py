@@ -14,7 +14,7 @@ from .material_routing import route_material, PROFILE_INSTRUCTIONS
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
-PROMPT_VERSION = 'document-fields-evidence-v39-semantic-fee-taxonomy'
+PROMPT_VERSION = 'document-fields-evidence-v40-material-routing'
 SCHEMA_VERSION = 'document-fields-v3-derived-stay'
 FEE_TAXONOMY = {
     'inspectionFee': '检查费', 'westernMedicineFee': '西药费', 'materialFee': '材料费',
