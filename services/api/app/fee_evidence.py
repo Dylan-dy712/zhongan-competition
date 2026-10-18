@@ -23,16 +23,24 @@ def bind_fee_evidence(blocks, text, has_image, tables=None):
                     candidate = SimpleNamespace(detailName=row['detailName'], feeAmount=row['feeAmount'],
                                                 source_cells=list(refs))
                     try:
+                        box = row.get('visual_source_box')
+                        visual_name = bool(has_image and row.get('visual_correction_method') == 'local_name_crop_v1'
+                            and isinstance(box, list) and len(box) == 4
+                            and all(isinstance(v, (int, float)) and 0 <= v <= 1 for v in box)
+                            and box[0] < box[2] and box[1] < box[3])
                         validate_fee_binding(candidate, table['cells'], 0,
-                                             max(c['row_end'] for c in table['cells']))
-                        if candidate.binding_status == 'verified_cells':
+                                             max(c['row_end'] for c in table['cells']), allow_visual_name=visual_name)
+                        if candidate.binding_status in {'verified_cells', 'verified_amount_visual_name'}:
                             name_refs = {c['id'] for c in table['cells'] if c['id'] in refs
-                                         and compact(c['text']) == compact(row['detailName'])}
+                                         and compact(c['text']) == compact(getattr(candidate, 'raw_ocr_name', row['detailName']))}
                             if name_refs & used_cells:
                                 failure = 'duplicate_source_name_cell'
                             else:
                                 used_cells.update(name_refs)
                                 verification = 'literal_source_cells_same_row'
+                                if candidate.binding_status == 'verified_amount_visual_name':
+                                    verification = 'local_visual_name_with_verified_amount_cell'
+                                    row['raw_ocr_name'] = candidate.raw_ocr_name
                                 quote = ' | '.join(c['text'] for c in table['cells'] if c['id'] in refs)
                                 row.update(binding_status=candidate.binding_status,
                                            binding_reason=candidate.binding_reason, source_row=candidate.source_row)
