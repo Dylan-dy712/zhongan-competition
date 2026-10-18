@@ -5,18 +5,19 @@ import unicodedata
 import io
 import time
 import math
+import os
 import requests
 from decimal import Decimal, InvalidOperation
 from datetime import date
 from typing import Any, Literal
 from PIL import Image
 from .material_routing import route_material, PROFILE_INSTRUCTIONS
-from .fee_binding import validate_fee_binding
+from .fee_binding import validate_fee_binding, direct_fee_rows
 from .fee_evidence import bind_fee_evidence
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
-PROMPT_VERSION = 'document-fields-evidence-v43-local-name-correction'
+PROMPT_VERSION = 'document-fields-evidence-v44-direct-fee-rows'
 SCHEMA_VERSION = 'document-fields-v6-visual-name-evidence'
 FEE_TAXONOMY = {
     'inspectionFee': '检查费', 'westernMedicineFee': '西药费', 'materialFee': '材料费',
@@ -427,8 +428,13 @@ def extract_table_cells(call_stage, system, tables, attempts, image_bytes=None, 
             batch = FeeTable(rows=[])
             reason = None
             try:
-                payload, raw = call_stage(stage, [{'role': 'system', 'content': system},
-                    {'role': 'user', 'content': json.dumps(source, ensure_ascii=False, separators=(',', ':'))}])
+                # Engine confidence can be 100 on wrong text. Keep this speed experiment opt-in.
+                direct = direct_fee_rows(selected, start, end) if os.environ.get('ZHONGAN_DIRECT_FEE_ROWS') == '1' else None
+                if direct is not None:
+                    payload, raw = {}, json.dumps({'rows': direct}, ensure_ascii=False)
+                else:
+                    payload, raw = call_stage(stage, [{'role': 'system', 'content': system},
+                        {'role': 'user', 'content': json.dumps(source, ensure_ascii=False, separators=(',', ':'))}])
                 batch = validate(raw)
                 covered = {key for row in batch.rows for key in row.source_cells}
                 if candidates - covered:
@@ -443,6 +449,7 @@ def extract_table_cells(call_stage, system, tables, attempts, image_bytes=None, 
                          for cell in selected):
                     reason = 'merged_amount_cells'
                 attempts.append({'stage': stage, 'status': 'completed', 'source_row_range': [start, end],
+                    'input_method': 'direct_verified_cells' if direct is not None else 'llm_cell_transcription',
                     'usage': payload.get('usage', {}), 'recovery_reason': reason,
                     'uncovered_name_cells': sorted(candidates - covered),
                     'finish_reason': (payload.get('choices') or [{}])[0].get('finish_reason')})
