@@ -16,20 +16,22 @@
 
 ## 工程实现
 
-Paddle运行在独立Python 3.11 CPU环境，服务仅监听127.0.0.1:8866；API通过ZHONGAN_OCR_PROVIDER=paddle选择它，使用ZHONGAN_PADDLE_OCR_URL指定本机地址。API进程不导入Paddle原生库，侧车通过常驻子进程加载一次模型并串行推理，关闭请求正文和识别正文日志。PP失败明确报错，不回退到腾讯。工厂保留既有供应商选项以兼容其他部署，本机私密运行配置已显式选择paddle，并关闭腾讯表格二次调用。
+Paddle运行在独立Python 3.11环境，本机最终选择GPU 960，服务仅监听127.0.0.1:8867；API通过ZHONGAN_OCR_PROVIDER=paddle选择它，使用ZHONGAN_PADDLE_OCR_URL指定本机地址。API进程不导入Paddle原生库，侧车通过常驻子进程加载一次模型并串行推理，关闭请求正文和识别正文日志。PP失败明确报错，不回退到腾讯。工厂保留既有供应商选项以兼容其他部署，本机私密运行配置已显式选择paddle，并关闭腾讯表格二次调用。
 
 实跑第4页出现600秒HTTP超时且原生调用未返回。修复后原生子进程有300秒单页预算，超时返回504并终止该子进程，下页重新加载模型；原生崩溃也可重建。不能靠HTTP超时本身取消Paddle调用。前三页既有输出均在300秒内，保留使用；超时页明确计入失败数。health同时提供busy和native_worker_ready，不把服务存活当成效果达标。
 
-版本为PaddleOCR 3.7.0 / PaddleX 3.7.2 / PaddlePaddle 3.2.2 / NumPy 1.26.4，PP-OCRv5_server_det与server_rec。复用已下载模型，不向API依赖环境安装Paddle。最长检测边960、4线程、MKLDNN关闭，是本机此前实际运行成功的配置；不能承诺是效果最优参数。模型不含表格结构恢复，不自动纠偏或旋转；可使用已有流程明确给定的方向，并将坐标映射回原图。
+版本为PaddleOCR 3.7.0 / PaddleX 3.7.2 / PaddlePaddle 3.2.2 / NumPy 1.26.4，PP-OCRv5_server_det与server_rec。复用已下载模型，不向API依赖环境安装Paddle。检测边长参数960、CPU配置4线程且MKLDNN关闭；GPU与CPU使用独立原生环境。GPU 960为本轮最终选用配置，不能承诺是效果最优参数。模型不含表格结构恢复，不自动纠偏或旋转；可使用已有流程明确给定的方向，并将坐标映射回原图。
 
 ```powershell
-# 在独立Paddle环境安装，或复用已有paddleocr-local/.venv
-python -m pip install -r services/api/requirements-paddle.txt
-python -m scripts.paddle_ocr_service --model-root ../paddleocr-local/model-cache/official_models
+# 在独立GPU Python 3.11环境安装；CPU备选使用requirements-paddle.txt
+python -m pip install -r services/api/requirements-paddle-gpu.txt
+python -m scripts.paddle_ocr_service --model-root ../paddleocr-local/model-cache/official_models --device gpu:0 --det-limit 960 --port 8867
 
 # API和Worker启动前设置；服务必须已ready
 $env:ZHONGAN_OCR_PROVIDER='paddle'
-$env:ZHONGAN_PADDLE_OCR_URL='http://127.0.0.1:8866'
+$env:ZHONGAN_PADDLE_OCR_URL='http://127.0.0.1:8867'
+$env:ZHONGAN_PADDLE_OCR_DEVICE='gpu:0'
+$env:ZHONGAN_PADDLE_OCR_DET_LIMIT='960'
 $env:ZHONGAN_TABLE_OCR='0'
 
 # 所有医疗缓存、运行输出保留在Git仓库外
@@ -39,3 +41,11 @@ python -m scripts.preliminary_ocr --provider paddle --manifest ../preliminary-pr
 随后只替换清单内OCR路径和对应OCR摘要，保留相同document_id、原图、方向、参考及参考摘要。两组分别调用preliminary_kr1 infer --vision --ocr-layout bbox及score --include-inferred-categories。版本、配置与结果一起记录；新增输出目录避免复用旧预测。
 
 本轮不新增、修改或主动运行测试，只比较实际识别、抽取结果与标注。替换本机运行配置不代表公网已部署。
+
+## GPU运行与最终结果
+
+本机为RTX4060 Laptop 8GiB，驱动566.07；GPU运行时CUDA12.6。安装入口见[Paddle官方安装说明](https://github.com/PaddlePaddle/PaddleOCR/blob/main/docs/version3.x/paddlepaddle_installation.md)。新机器应在独立环境完整安装GPU依赖。本机为复用已有OCR依赖，GPU虚拟环境通过本地`.pth`引用CPU环境的Python包目录，GPU环境自身的Paddle与CUDA包优先；该路径桥接不是可移植环境，迁移机器请使用依赖清单安装。
+
+CPU 960、GPU 960、GPU 1600各有独立parser版本，缓存不得混用。服务返回实际device和parser_version，适配器校验与配置一致。本机私密config和启动脚本已选择GPU960；代码工厂的未配置默认值仍保留Tencent兼容其他部署。
+
+[最终七页实测结果](paddle-migration-results.md)：GPU960总体F1 0.7217，对照腾讯0.6783；尚未达到0.90。GPU1600批量有失败，未选用。
