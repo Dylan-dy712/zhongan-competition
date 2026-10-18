@@ -33,7 +33,7 @@ from .report_llm import PROMPT_VERSION as REPORT_PROMPT_VERSION, draft_report
 from .contracts.core import Action
 from .contracts.knowledge import DiseaseCode
 from .llm_extractor import PROMPT_VERSION, SCHEMA_VERSION as MODEL_SCHEMA_VERSION, OpenAiCompatibleExtractor, validate_evidence_quotes
-from .ocr import OCR_METHOD, OCR_VERSION, Ocr, create_ocr, page_ocr_method
+from .ocr import OCR_METHOD, OCR_VERSION, Ocr, create_ocr, page_ocr_method, recognize_routed
 from .document_quality import classify_material
 from .material_routing import route_material
 from . import medical_records
@@ -219,7 +219,8 @@ def parse_controlled_text(document: dict, path: Path):
 
 
 def ocr_page(image_bytes: bytes, width: int, height: int, base: dict, ocr: Ocr):
-    result = ocr.recognize(image_bytes, width, height)
+    result = recognize_routed(ocr, image_bytes, width, height,
+        enable_table=os.environ.get('ZHONGAN_TABLE_OCR', '0').lower() in {'1', 'true'})
     kind, certainty = classify_material(result['text'])
     uncertain = 0
     for block in result['blocks']:
@@ -242,6 +243,8 @@ def ocr_page(image_bytes: bytes, width: int, height: int, base: dict, ocr: Ocr):
             "ocr_request_id": result["request_id"], "ocr_angle": result["angle"],
             "ocr_line_count": len(result["blocks"]),
             "material_routing": route_material(result['text']),
+            "table_routing": result.get('table_routing'),
+            "tables": result.get('tables', []),
             "photo_quality": {"material_type":kind,"type_certainty":certainty,
                               "uncertain_lines":uncertain,"readable_lines":len(result['blocks'])-uncertain,
                               "needs_reupload":bool(uncertain or not text),"method":"ocr-line-triage-v1"},
