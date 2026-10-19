@@ -100,9 +100,9 @@ def row_risk(row, lines):
     if not any(float(v.replace(',', '')) == row['feeAmount'] for v in values):
         score = min(score, .6)
         reasons.append('amount_missing_from_quote')
-    if row.get('binding_status') == 'visual_review_required':
+    if row.get('binding_status', 'unverified') not in ('verified_cells', 'verified_amount_visual_name'):
         score = min(score, .8)
-        reasons.append('ambiguous_row_binding')
+        reasons.append('unverified_row_binding')
     if row.get('unit_price') is not None and row.get('quantity') is not None:
         if abs(row['unit_price'] * row['quantity'] - row['feeAmount']) > .02:
             score = min(score, .7)
@@ -207,6 +207,8 @@ def review_extraction(result, text, image_bytes, rotation, lines, layout, call_s
         result.fields, result.confidence, result.evidence = validated.fields, validated.confidence, validated.evidence
         if not decision.coverage_complete and expected_fees:
             audit['unresolved'].append('fee_coverage_not_confirmed')
+        if expected_fees and decision.visible_item_rows is not None and decision.visible_item_rows != len(rows):
+            audit['unresolved'].append('visible_row_count_disagreement')
     except Exception as exc:
         audit.update(status='failed', error_code=type(exc).__name__)
         # First-pass extraction is retained atomically if review fails.
