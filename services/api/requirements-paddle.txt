@@ -1,0 +1,6 @@
+# Separate Python 3.11 CPU environment; do not install into the API environment.
+paddleocr==3.7.0
+paddlex==3.7.2
+paddlepaddle==3.2.2
+numpy==1.26.4
+requests==2.34.2

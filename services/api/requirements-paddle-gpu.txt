@@ -1,0 +1,7 @@
+# Separate Python 3.11 CUDA 12.6 environment. Does not install the CPU engine.
+--extra-index-url https://www.paddlepaddle.org.cn/packages/stable/cu126/
+paddleocr==3.7.0
+paddlex==3.7.2
+paddlepaddle-gpu==3.2.2
+numpy==1.26.4
+requests==2.34.2
