@@ -153,6 +153,14 @@ def main():
                                 source_ocr_lines=matched,
                                 confidence_method='minimum_source_ocr_score_not_structure_confidence',
                                 review_required=not literal or confidence is None)
+                from services.api.app.fee_binding import fee_columns
+                name_columns, amount_columns = fee_columns(cells.cells)
+                if (len(name_columns) != 1 or len(amount_columns) != 1
+                        or name_columns & amount_columns):
+                    diagnostics.append({'table': table_index, 'reason': 'ambiguous_fee_columns',
+                                        'name_columns': sorted(name_columns),
+                                        'amount_columns': sorted(amount_columns)})
+                    continue
                 tables.append({'table_index': table_index, 'type': 1, 'cells': cells.cells,
                                'provider': 'paddle_table_recognition_v2'})
             write(output / (row['document_id'] + '.native.json'), {'tables': raw_tables})
@@ -166,7 +174,7 @@ def main():
             table_structure_diagnostics=diagnostics,
             table_structure_seconds=round(time.monotonic()-started, 3),
             original_ocr_parser_version=cache.get('parser_version'),
-            parser_version='paddle-v5-gpu960-tablemagic-v1')
+            parser_version='paddle-v5-gpu960-tablemagic-v2-column-gate')
         # Explicit fallback retains original OCR; never label failed structure as success.
         write(destination, combined)
         updated = dict(row, ocr=str(destination),
