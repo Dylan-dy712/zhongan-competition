@@ -18,7 +18,7 @@ from .fee_evidence import bind_fee_evidence
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
-PROMPT_VERSION = 'document-fields-evidence-v56-material-layout-guided'
+PROMPT_VERSION = 'document-fields-evidence-v57-explicit-fee-name-components'
 SCHEMA_VERSION = 'document-fields-v6-visual-name-evidence'
 FEE_TAXONOMY = {
     'inspectionFee': '检查费', 'westernMedicineFee': '西药费', 'materialFee': '材料费',
@@ -793,7 +793,13 @@ surgery只转录明确手术名称或术式标签的原文数组，完整保留�
                     '独立医保/收费编码放source_billing_codes数组，附加厂家型号/产品规格放specification，'
                     '完整的原名称放raw_detail_name，evidence_quote保留完整原行。'
                     '项目自身的医学缩写、检查方法和名称括号仍保留；无法分辨边界时保留原名并降低置信度，不猜拆。'
-                    '这些附加字段可以省略，不能凭空补充。')
+                    '不能凭空补充。对于这类布局，每行必须显式返回raw_detail_name、specification、source_billing_codes；'
+                    '未记载附加规格时specification为null，无独立编码时source_billing_codes为空数组。'
+                    '项目本体名之后以连接符接续的厂家型号或产品尺寸，应放specification，不保留在detailName中；'
+                    '项目名本身的医学连接符和检查方法仍保留。'
+                    '本布局采用此JSON结构：{"rows":[{"detailName":"项目本体名","raw_detail_name":"名称栏完整原文",'
+                    '"specification":null,"source_billing_codes":[],"feeAmount":12.34,'
+                    '"confidence":{"detailName":0.9,"feeAmount":0.9},"evidence_quote":"完整项目原行及金额"}]}。')
         if structured_tables:
             table_payload, table_raw, fee_extraction = extract_table_cells(call_stage, fee_system,
                 structured_tables, table_attempts, image_bytes, image_rotation_degrees, publish_progress)
