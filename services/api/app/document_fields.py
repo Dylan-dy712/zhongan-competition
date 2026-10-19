@@ -17,7 +17,7 @@ from .fee_evidence import bind_fee_evidence
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
-PROMPT_VERSION = 'document-fields-evidence-v48-paddle-vision-ocr-context'
+PROMPT_VERSION = 'document-fields-evidence-v49-fee-json-mode-compatibility'
 SCHEMA_VERSION = 'document-fields-v6-visual-name-evidence'
 FEE_TAXONOMY = {
     'inspectionFee': '检查费', 'westernMedicineFee': '西药费', 'materialFee': '材料费',
@@ -750,7 +750,7 @@ surgery只转录明确手术名称或术式标签的原文数组，完整保留�
             '相邻单独项目编码、规格、厂家、单位不拼入名称；规格栏表示空规格的斜杠/也不拼入名称。'
             '只有单价且数量明确为1时，可取该单价，输出quantity=1和amount_source=unit_price_quantity_one；其他无明确行金额情况不猜、不计算。'
             '若仅有药费、检查费等收费分类汇总而无逐项明细，输出row_kind=category_summary；不含全页合计。有逐项明细时不重复收同类别小计。医保支付、现金支付等支付方式不是收费项目。'
-            '每行给名称与金额各自置信度和原文名称金额引用。只输出如下结构，不解释：'
+            '每行给名称与金额各自置信度和原文名称金额引用。只输出如下JSON结构，不解释：'
             '{"rows":[{"detailName":"原项目名","feeAmount":12.34,"confidence":{"detailName":0.9,"feeAmount":0.9},"evidence_quote":"原项目名 12.34"}]}。')
         fee_system += ('若输入是OCR文字，evidence_quote逐字复制完整项目行，保留|列分隔符与中间的数量、单价；'
                        '不要把不相邻的名称和金额拼成不存在的原文。')

@@ -50,7 +50,7 @@ GPU 1600 作为额外参数探索仅完成 4/7 页 OCR，后三页服务错误�
 在已具备授权输入、模型私密配置及侧车环境的机器，启动方式见[实验协议](paddle-migration-experiment.md)。重新推理应使用新输出目录，避免把旧预测当作新推理：
 
 ```powershell
-python -m scripts.preliminary_kr1 infer --manifest ../preliminary-private/paddle-migration-gpu-frozen7.json --config ../local-runtime/private/config.json --predictions-dir ../preliminary-private/paddle-gpu-reproduce-predictions --output ../preliminary-private/paddle-gpu-reproduce-run.json --vision --ocr-layout bbox --workers 2
+python -m scripts.preliminary_kr1 infer --manifest ../preliminary-private/paddle-migration-gpu-frozen7.json --config ../local-runtime/private/qianfan-config.json --predictions-dir ../preliminary-private/paddle-gpu-reproduce-predictions --output ../preliminary-private/paddle-gpu-reproduce-run.json --vision --ocr-layout bbox --workers 2
 python -m scripts.preliminary_kr1 score --manifest ../preliminary-private/paddle-migration-gpu-frozen7.json --predictions-dir ../preliminary-private/paddle-gpu-reproduce-predictions --output ../preliminary-private/paddle-gpu-reproduce-metrics.json --include-inferred-categories
 ```
 
