@@ -23,7 +23,7 @@
 
 ```powershell
 ../hpd-parsing-local/.venv/Scripts/python.exe -m scripts.hpd_parsing_experiment --model-root ../hpd-parsing-local/model --manifest ../preliminary-private/finals-optimization-fixed7.json --output-root ../preliminary-private/hpd-frozen7-ocr --output-manifest ../preliminary-private/hpd-frozen7.json
-../venv-care-quality/Scripts/python.exe -m scripts.preliminary_kr1 infer --manifest ../preliminary-private/hpd-frozen7.json --config ../local-runtime/private/config.json --predictions-dir ../preliminary-private/hpd-v48-frozen7-predictions --output ../preliminary-private/hpd-v48-frozen7-run.json --vision --ocr-layout bbox --workers 2
+../venv-care-quality/Scripts/python.exe -m scripts.preliminary_kr1 infer --manifest ../preliminary-private/hpd-frozen7.json --config ../local-runtime/private/qianfan-config.json --predictions-dir ../preliminary-private/hpd-v48-frozen7-predictions --output ../preliminary-private/hpd-v48-frozen7-run.json --vision --ocr-layout bbox --workers 2
 ../venv-care-quality/Scripts/python.exe -m scripts.preliminary_kr1 score --manifest ../preliminary-private/hpd-frozen7.json --predictions-dir ../preliminary-private/hpd-v48-frozen7-predictions --output ../preliminary-private/hpd-v48-frozen7-metrics.json --include-inferred-categories
 ```
 
@@ -32,3 +32,9 @@
 本轮不新增或运行测试，用真实原图推理与现有标注比较。
 
 来源：[官方公告](https://github.com/PaddlePaddle/PaddleOCR#-recent-updates)、[部署要求](https://www.paddleocr.ai/latest/en/version3.x/pipeline_usage/HPD-Parsing.html)、[官方模型与Transformers实现](https://huggingface.co/PaddlePaddle/HPD-Parsing)。
+
+## 执行中的口径修正
+
+首次调用误用应用的`config.json`（DeepSeek Flash），不能与原先GLM结果直接比较；该轮失败与输出保留在私密目录。后续统一使用独立的`qianfan-config.json`（GLM-5.3-Flash）。命令中的模型配置路径不能用应用默认配置替代。
+
+实跑同时发现费用转录提示词未明确写JSON，会被DeepSeek的JSON模式网关以400拒绝。v49仅在该提示词加入JSON并更新版本号；腾讯、PP GPU960和HPD全部在相同v49上重跑。v48输出保留用于诊断，不作为最终配对结果。最终GLM比较的产物前缀为`tencent-v49-glm-frozen7`、`paddle-v49-glm-frozen7`和`hpd-v49-glm-frozen7`；上面的v48命名仅是早期输出命名示例，请用新目录复现当前版本。
