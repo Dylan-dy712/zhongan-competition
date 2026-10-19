@@ -42,3 +42,9 @@ A/B/C输出前缀为`hybrid-v50-control7`、`hybrid-v50-structure7`、`hybrid-v5
 不写或主动运行测试。验证来自真实表格模型、实际GLM调用和现有标注评分。默认配置和公网部署保持原状，等结果决定是否采用。
 
 来源：[Paddle官方表格管线说明](https://www.paddleocr.ai/latest/en/version3.x/pipeline_usage/table_recognition_v2.html)。
+
+## 最终结果与版本说明
+
+[完整实测报告](paddle-table-hybrid-results.md)：A/B/C的F1分别为0.7115/0.5042/0.4472，不采用候选。原实验结构为v1（代码9c7d383、协议407664a）。看过结果后，当前代码加入v2名称/金额列门槛，因此当前命令生成的是受保护的新结构；不得将它冒充原A/B/C。需要复现原结构，应固定原代码版本或对已保存的v1缓存评分。
+
+门槛实跑七页后没有可接入表格，全部回退。已比较传给抽取器的text、lines、tables与原PP缓存完全相同，没有再调用LLM，也不新增一个F1声称。证据为私密产物`paddle-table-hybrid-gated-input-comparison.json`。
