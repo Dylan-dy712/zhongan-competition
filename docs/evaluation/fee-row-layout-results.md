@@ -23,6 +23,7 @@ OCR 的证据框保存在原图坐标中；构建辅助阅读文本时，先按�
 | v52：旋转＋倾斜行序＋扩大裁剪 | 0.724512 | 0.725490 | 0.676471 | 167 / 67 / 60 |
 | v53：旋转＋倾斜行序，保留原有图片策略 | 0.741866 | 0.745098 | 0.696078 | 171 / 63 / 56 |
 | v54：尝试仅用提示词区分编码与名称，已撤回 | 0.724891 | 0.719212 | 0.673267 | 166 / 65 / 61 |
+| v55：原有费用提示词＋有来源约束的编码分离 | 0.724512 | 0.725490 | 0.676471 | 167 / 67 / 60 |
 
 以上各组均七页完成。v53 在这一次调用中总体提升 0.87 个百分点，名称金额配对提升 1.34 个百分点。不是逐页都改善：第四页总体 F1 从 0.529412 降至 0.521739。扩大范围后发现模型重复调用有明显波动，不能将该小幅变化解释为已证明稳定收益。
 
@@ -42,6 +43,7 @@ OCR 的证据框保存在原图坐标中；构建辅助阅读文本时，先按�
 | v52 扩大裁剪 | 0.727773 | 397 / 98 / 199 | 0.156040 |
 | v53 行序校正 | 0.686007 | 402 / 174 / 194 | 0.005034 |
 | v54 提示词分离 | 0.752530 | 409 / 82 / 187 | 0.156040 |
+| v55 来源约束编码分离 | 0.713805 | 424 / 168 / 172 | 0.005034 |
 
 十页各组均运行结束。v52/v54 的一张页面没有费用输出，全部缺失项仍计入，不因“completed”运行状态排除。源码与实际输入比较确认：这十页没有命中本轮新增倾斜基线规则，v50/v53 的阅读文本完全相同，调用结果仍有差异。该对比说明真实模型调用存在波动，不能把这部分差异归因为行序算法。
 
@@ -58,13 +60,21 @@ OCR 的证据框保存在原图坐标中；构建辅助阅读文本时，先按�
 
 实际分离十一条费用中的收费编码，原名称与引用均保留。十七页共 823 个评分原子，同一输入下修正二十二个评分原子（名称金额配对与类别复合分别计分），F1 提高 2.69 个百分点。未使用参考答案决定哪条费用需要分离。
 
+## 最终新鲜调用结论
+
+v55 将固定七页与预先选定的十页合为 `fee-row-fixed17.json`，在 `fee-v55-predictions17/` 中对十七页全部重新调用模型，17/17 完成。总体 TP/FP/FN 为 591/235/232，F1 为 **0.716798**，名称金额配对 F1 为 0.723514，类别复合 F1 为 0.683053。参考评分原子共 823 个，未校验原图哈希。
+
+原 v50 七页保存结果加十页新鲜基线合计 TP/FP/FN 为 576/202/247，F1 为 **0.719550**。因此本轮新鲜结果没有证明整体提升，不将 0.741866 的某次开发结果或编码重放增益作为最终链路分数。代码保留为实验 PR，尚未合并或部署；下一轮前置页面布局方案独立对照。
+
+模型输出的不稳定、附带规格/型号与标注项目名边界差异、名称细字误读、金额错行和未纠正的横置页面仍需解决。本轮没有达到 KR1 F1 0.90。
+
 ## 复算方式
 
 医疗原图、清单、OCR、预测、逐项错误清单及私密配置均保存在仓库外的 `work/preliminary-private/`、`work/local-runtime/private/`，不随代码提交。需要授权取得这些输入以及可用模型配置。
 
 ```powershell
-python -m scripts.preliminary_kr1 infer --manifest ../preliminary-private/paddle-v6-960-frozen7.json --config ../local-runtime/private/qianfan-config.json --predictions-dir ../preliminary-private/fee-v53-predictions7 --output ../preliminary-private/fee-v53-run7.json --vision --ocr-layout bbox --workers 2
-python -m scripts.preliminary_kr1 score --manifest ../preliminary-private/paddle-v6-960-frozen7.json --predictions-dir ../preliminary-private/fee-v53-predictions7 --output ../preliminary-private/fee-v53-metrics7.json --include-inferred-categories
+python -m scripts.preliminary_kr1 infer --manifest ../preliminary-private/fee-row-fixed17.json --config ../local-runtime/private/qianfan-config.json --predictions-dir ../preliminary-private/fee-v55-predictions17 --output ../preliminary-private/fee-v55-run17.json --vision --ocr-layout bbox --workers 2
+python -m scripts.preliminary_kr1 score --manifest ../preliminary-private/fee-row-fixed17.json --predictions-dir ../preliminary-private/fee-v55-predictions17 --output ../preliminary-private/fee-v55-metrics17.json --include-inferred-categories
 ```
 
 扩大范围时将清单替换为 `fee-expanded10-v6-frozen.json`，预测目录与结果文件使用新的独立路径。每个代码或输入版本使用独立预测目录，不覆盖旧预测。OCR 缓存复用与新鲜模型调用分别记录；该对比不是每次重新 OCR 的端到端测速。
