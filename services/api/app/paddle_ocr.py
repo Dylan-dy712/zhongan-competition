@@ -8,9 +8,16 @@ OCR_METHOD = 'paddle_ocr_v5_server'
 OCR_VERSION = 'paddle-ocr-v5-server-cpu-960-v1'
 OCR_VERSIONS = {'cpu': OCR_VERSION, 'gpu:0': 'paddle-ocr-v5-server-gpu-960-v1'}
 GPU_HIGH_RES_VERSION = 'paddle-ocr-v5-server-gpu-1600-v1'
+V6_OCR_METHOD = 'paddle_ocr_v6_medium'
+V6_OCR_VERSIONS = {960: 'paddle-ocr-v6-medium-gpu-max960-v1',
+                   64: 'paddle-ocr-v6-medium-gpu-min64-max4000-v1'}
 
 
-def profile_version(device, det_limit):
+def profile_version(device, det_limit, ocr_model='v5_server'):
+    if ocr_model == 'v6_medium' and device == 'gpu:0' and det_limit in V6_OCR_VERSIONS:
+        return V6_OCR_VERSIONS[det_limit]
+    if ocr_model != 'v5_server':
+        raise RuntimeError('PADDLE_OCR_PROFILE_NOT_SUPPORTED')
     if det_limit == 960 and device in OCR_VERSIONS:
         return OCR_VERSIONS[device]
     if det_limit == 1600 and device == 'gpu:0':
@@ -30,7 +37,9 @@ class PaddleOcr:
             self.det_limit = int(os.getenv('ZHONGAN_PADDLE_OCR_DET_LIMIT', '960'))
         except ValueError:
             raise RuntimeError('PADDLE_OCR_PROFILE_NOT_SUPPORTED') from None
-        self.version = profile_version(self.device, self.det_limit)
+        self.ocr_model = os.getenv('ZHONGAN_PADDLE_OCR_MODEL', 'v5_server')
+        self.version = profile_version(self.device, self.det_limit, self.ocr_model)
+        self.method = V6_OCR_METHOD if self.ocr_model == 'v6_medium' else OCR_METHOD
         self.url = os.getenv('ZHONGAN_PADDLE_OCR_URL', 'http://127.0.0.1:8866').rstrip('/')
         parsed = urlparse(self.url)
         if (parsed.scheme != 'http' or parsed.hostname not in {'127.0.0.1', 'localhost', '::1'}

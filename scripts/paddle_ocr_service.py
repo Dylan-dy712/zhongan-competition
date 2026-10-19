@@ -15,24 +15,28 @@ import time
 import uuid
 
 MAX_REQUEST_BYTES = 32 * 1024 * 1024
+MODEL_NAMES = {'v5_server': ('PP-OCRv5_server_det', 'PP-OCRv5_server_rec'),
+               'v6_medium': ('PP-OCRv6_medium_det', 'PP-OCRv6_medium_rec')}
 
 
-def native_worker(model_root, device, det_limit):
+def native_worker(model_root, device, det_limit, ocr_model='v5_server'):
     os.environ['PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK'] = 'True'
     os.environ['HF_HUB_DISABLE_TELEMETRY'] = '1'
     from PIL import Image
     import numpy as np
     from paddleocr import PaddleOCR
     from services.api.app.paddle_ocr import profile_version
-    OCR_VERSION = profile_version(device, det_limit)
-    pipeline = PaddleOCR(ocr_version='PP-OCRv5',
-        text_detection_model_name='PP-OCRv5_server_det',
-        text_recognition_model_name='PP-OCRv5_server_rec',
-        text_detection_model_dir=str(model_root / 'PP-OCRv5_server_det'),
-        text_recognition_model_dir=str(model_root / 'PP-OCRv5_server_rec'),
+    OCR_VERSION = profile_version(device, det_limit, ocr_model)
+    det_name, rec_name = MODEL_NAMES[ocr_model]
+    limit_type = 'min' if det_limit == 64 else 'max'
+    pipeline = PaddleOCR(
+        text_detection_model_name=det_name,
+        text_recognition_model_name=rec_name,
+        text_detection_model_dir=str(model_root / det_name),
+        text_recognition_model_dir=str(model_root / rec_name),
         use_doc_orientation_classify=False, use_doc_unwarping=False,
         use_textline_orientation=False, device=device, cpu_threads=4, enable_mkldnn=False,
-        text_det_limit_side_len=det_limit, text_det_limit_type='max')
+        text_det_limit_side_len=det_limit, text_det_limit_type=limit_type)
     def recognize(payload):
         rotation = payload.get('rotation_degrees', 0)
         if type(rotation) is not int or rotation not in (0, 90, 180, 270):
@@ -60,7 +64,8 @@ def native_worker(model_root, device, det_limit):
                 'request_id': str(uuid.uuid4()), 'angle': rotation, 'parser_version': OCR_VERSION,
                 'seconds': round(time.monotonic()-started, 3), 'tables': [],
                 'device': device,
-                'limits': f'Detection longest side {det_limit}; no table structure model; explicit rotation only'}
+                'ocr_model': ocr_model, 'detection_model': det_name, 'recognition_model': rec_name,
+                'limits': f'Detection {limit_type} side {det_limit}, max_side_limit 4000; no tables; explicit rotation only'}
 
     print('_PADDLE_RESULT_' + json.dumps({'status': 'ready'}), flush=True)
     for line in sys.stdin:
@@ -75,10 +80,11 @@ def native_worker(model_root, device, det_limit):
 
 class PaddleProcess:
     """One persistent native worker; a native crash/timeout cannot block later pages."""
-    def __init__(self, model_root, timeout, device, det_limit):
+    def __init__(self, model_root, timeout, device, det_limit, ocr_model='v5_server'):
         self.model_root, self.timeout = model_root, timeout
         self.device = device
         self.det_limit = det_limit
+        self.ocr_model = ocr_model
         self.lock = threading.Lock()
         self.process = None
         self.start()
@@ -97,7 +103,7 @@ class PaddleProcess:
         options = {'creationflags': subprocess.CREATE_NO_WINDOW} if os.name == 'nt' else {}
         self.process = subprocess.Popen([sys.executable, '-u', '-m', 'scripts.paddle_ocr_service',
             '--model-root', str(self.model_root), '--device', self.device,
-            '--det-limit', str(self.det_limit), '--native-worker'], stdin=subprocess.PIPE,
+            '--det-limit', str(self.det_limit), '--ocr-model', self.ocr_model, '--native-worker'], stdin=subprocess.PIPE,
             stdout=subprocess.PIPE, text=True, encoding='utf-8', **options)
         def read(process, messages):
             try:
@@ -147,22 +153,23 @@ def main():
     parser.add_argument('--native-worker', action='store_true', help=argparse.SUPPRESS)
     parser.add_argument('--page-timeout', type=int, default=300)
     parser.add_argument('--device', choices=['cpu', 'gpu:0'], default='cpu')
-    parser.add_argument('--det-limit', type=int, choices=[960, 1600], default=960)
+    parser.add_argument('--det-limit', type=int, choices=[64, 960, 1600], default=960)
+    parser.add_argument('--ocr-model', choices=sorted(MODEL_NAMES), default='v5_server')
     args = parser.parse_args()
     model_root = args.model_root.resolve()
-    for name in ('PP-OCRv5_server_det', 'PP-OCRv5_server_rec'):
+    for name in MODEL_NAMES[args.ocr_model]:
         if not (model_root / name).is_dir():
             parser.error('missing local model directory: ' + name)
     if not 1 <= args.page_timeout <= 480:
         parser.error('page-timeout must be between 1 and 480 seconds')
     if args.device == 'cpu' and args.det_limit != 960:
         parser.error('CPU retains the previously verified 960 limit; higher resolution is GPU-only')
-    if args.native_worker:
-        native_worker(model_root, args.device, args.det_limit)
-        return
     from services.api.app.paddle_ocr import profile_version
-    OCR_VERSION = profile_version(args.device, args.det_limit)
-    worker = PaddleProcess(model_root, args.page_timeout, args.device, args.det_limit)
+    OCR_VERSION = profile_version(args.device, args.det_limit, args.ocr_model)
+    if args.native_worker:
+        native_worker(model_root, args.device, args.det_limit, args.ocr_model)
+        return
+    worker = PaddleProcess(model_root, args.page_timeout, args.device, args.det_limit, args.ocr_model)
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args):
