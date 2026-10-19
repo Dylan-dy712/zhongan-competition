@@ -41,3 +41,5 @@ python -m scripts.preliminary_kr1 score --manifest ../preliminary-private/paddle
 本轮不写或主动运行测试。验证来自实际OCR、真实GLM调用及金标评分。七页是开发材料，不代表全量、独立或官方KR1达标。未据实测结果决定前不改变应用默认配置，不部署公网。
 
 来源：[官方OCR使用说明](https://www.paddleocr.ai/latest/en/version3.x/pipeline_usage/OCR.html)；同时核对了本机PaddleX3.7.2的OCR管线默认配置。
+
+[最终结果](paddle-v6-medium-results.md)：v6-960 F1为0.7332，原v5基线0.7115；默认分辨率3/7成功、全部计入后F1为0.5278。没有自动切换应用默认模型。
