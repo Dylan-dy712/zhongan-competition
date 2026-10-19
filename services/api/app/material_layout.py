@@ -1,5 +1,6 @@
 """Image-only material layout hypotheses before OCR; never medical facts."""
 import io
+import json
 from typing import Literal
 
 from PIL import Image
@@ -48,6 +49,6 @@ def analyze_material_layout(provider, image_bytes):
     return provider._call([
         {'role': 'system', 'content': system},
         {'role': 'user', 'content': [
-            {'type': 'text', 'text': 'JSON schema: ' + __import__('json').dumps(MaterialLayout.model_json_schema(), ensure_ascii=False)},
+            {'type': 'text', 'text': 'JSON schema: ' + json.dumps(MaterialLayout.model_json_schema(), ensure_ascii=False)},
             image_content(output.getvalue())]},
     ], timeout=(10, 120), workload='material_layout')
