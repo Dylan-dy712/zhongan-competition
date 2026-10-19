@@ -269,6 +269,8 @@ def main():
     parser.add_argument('--ocr-layout', choices=['plain', 'bbox'], default='plain')
     parser.add_argument('--vision', action='store_true', help='read original image with OCR as optional context')
     parser.add_argument('--retry-partial', action='store_true', help='explicitly rerun partial documents under identical frozen settings')
+    parser.add_argument('--disable-local-fee-review', action='store_true',
+                        help='ablation: keep table OCR but disable selective image recovery')
     parser.add_argument('--include-inferred-categories', action='store_true',
                         help='score semantic fee classification too; changes policy to v3, not comparable to v2 totals')
     args = parser.parse_args()
@@ -295,6 +297,7 @@ def main():
         return
     if args.config:
         os.environ.update({k: str(v) for k, v in load(args.config).items() if k.startswith('LLM_')})
+    os.environ['ZHONGAN_LOCAL_FEE_REVIEW'] = '0' if args.disable_local_fee_review else '1'
     provider = OpenAiCompatibleExtractor()
     revision = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
     implementation_hashes = {'runner': sha(__file__),
@@ -320,6 +323,8 @@ def main():
                 raise ValueError('OCR layout changed; use a new predictions directory')
             if previous.get('vision') != args.vision:
                 raise ValueError('vision mode changed; use a new predictions directory')
+            if previous.get('local_fee_review_enabled', True) != (not args.disable_local_fee_review):
+                raise ValueError('local fee review changed; use a new predictions directory')
             if previous.get('direct_fee_rows_enabled', False) != (os.environ.get('ZHONGAN_DIRECT_FEE_ROWS') == '1'):
                 raise ValueError('direct fee experiment changed; use a new predictions directory')
             if previous.get('image_rotation_degrees', 0) != row.get('image_rotation_degrees', 0):
@@ -336,6 +341,7 @@ def main():
         run['image_rotation_degrees'] = row.get('image_rotation_degrees', 0)
         run['orientation_method'] = row.get('orientation_method', 'original_orientation')
         run['direct_fee_rows_enabled'] = os.environ.get('ZHONGAN_DIRECT_FEE_ROWS') == '1'
+        run['local_fee_review_enabled'] = not args.disable_local_fee_review
         start = time.monotonic()
         if previous.get('status') == 'partial' and previous.get('result'):
             saved = max((previous['result'], previous.get('recovery_snapshot', {})), key=observed_count)
