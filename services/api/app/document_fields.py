@@ -9,7 +9,6 @@ import os
 import requests
 from decimal import Decimal, InvalidOperation
 from datetime import date
-from statistics import median
 from typing import Any, Literal
 from PIL import Image
 from .material_routing import route_material, PROFILE_INSTRUCTIONS
@@ -18,7 +17,7 @@ from .fee_evidence import bind_fee_evidence
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
-PROMPT_VERSION = 'document-fields-evidence-v52-fee-baseline-layout'
+PROMPT_VERSION = 'document-fields-evidence-v53-fee-reading-order'
 SCHEMA_VERSION = 'document-fields-v6-visual-name-evidence'
 FEE_TAXONOMY = {
     'inspectionFee': '检查费', 'westernMedicineFee': '西药费', 'materialFee': '材料费',
@@ -365,27 +364,13 @@ def ocr_fee_region(image_bytes, lines, rotation_degrees=0):
     names = [box for text, box in positioned if text in ('名称', '项目名称', '费用名称', '收费名称', '药品名称')]
     amounts = [box for text, box in positioned if text in ('金额', '总金额', '费用金额')]
     pairs = [(n, a) for n in names for a in amounts if abs((n[1]+n[3]-a[1]-a[3])/2) < .035]
-    if len(pairs) == 1:
-        headers = list(pairs[0])
-    elif not amounts and len(names) == 1:
-        # An unreadable amount heading must not leave a small table surrounded
-        # by photo background. Other distinct headings can locate it without
-        # guessing which numeric column is the amount.
-        name = names[0]
-        nearby = [(text, box) for text, box in positioned
-                  if text in ('规格', '单位', '单价', '数量', '医保类别')
-                  and box[0] > name[0] and abs((box[1]+box[3]-name[1]-name[3])/2) < .035]
-        if len({text for text, _ in nearby}) < 2:
-            return None
-        headers = [name, *(box for _, box in nearby)]
-    else:
-        return None  # Ambiguous headers: retain the full source image.
-    top = min(box[1] for box in headers)
+    if len(pairs) != 1:
+        return None  # Ambiguous or missing headers: retain the full source image.
+    top = min(pairs[0][0][1], pairs[0][1][1])
     totals = [box for text, box in positioned if text in ('合计', '总计', '本页合计', '费用合计', '金额合计') and box[1] > top]
-    # Some itemized pages have only group subtotals or continue onto another
-    # page. Keep every OCR region below the header instead of truncating there.
-    below = [box for _, box in positioned if box[3] > top]
-    bottom = max(box[3] for box in (totals or below))
+    if not totals:
+        return None
+    bottom = max(box[3] for box in totals)
     region_lines = [box for _, box in positioned if top-.01 <= (box[1]+box[3])/2 <= bottom+.015]
     if len(region_lines) < 10 or bottom-top < .025:
         return None
@@ -393,11 +378,10 @@ def ocr_fee_region(image_bytes, lines, rotation_degrees=0):
               min(1, max(b[2] for b in region_lines)+.025), min(1, bottom+.025)]
     original_box = [1-region[2], 1-region[3], 1-region[0], 1-region[1]] if rotation_degrees else region
     with Image.open(io.BytesIO(image_bytes)) as original:
-        name = headers[0]
-        slopes = [math.degrees(math.atan2((box[1]+box[3]-name[1]-name[3])*original.height,
-                                         (box[0]+box[2]-name[0]-name[2])*original.width))
-                  for box in headers[1:] if box[0]-name[0] > .08]
-        deskew = median(slopes) if slopes else 0
+        name, amount = pairs[0]
+        dx = (amount[0]+amount[2]-name[0]-name[2])*original.width/2
+        dy = (amount[1]+amount[3]-name[1]-name[3])*original.height/2
+        deskew = math.degrees(math.atan2(dy, dx)) if dx > 0 else 0
         if abs(deskew) > 8:
             deskew = 0
         crop = original.crop(tuple(round(v*(original.width if i%2 == 0 else original.height))
