@@ -342,6 +342,7 @@ def main():
                              'provider': sha(repo/'services/api/app/llm_extractor.py'),
                              'workload': sha(repo/'services/api/app/model_workloads.py'),
                              'routing': sha(repo/'services/api/app/material_routing.py'),
+                             'layout': sha(repo/'services/api/app/material_layout.py'),
                              'fee_binding': sha(repo/'services/api/app/fee_binding.py'),
                              'fee_evidence': sha(repo/'services/api/app/fee_evidence.py')}
     rows = manifest['documents']
@@ -407,7 +408,8 @@ def main():
                 image_bytes = Path(row['image']).read_bytes()
             run['result'] = extract_document(provider, layout_text(cache) if args.ocr_layout == 'bbox' else cache['text'],
                 image_bytes, image_rotation_degrees=row.get('image_rotation_degrees', 0),
-                table_context=cache.get('tables'), on_progress=checkpoint, ocr_lines=cache.get('lines'))
+                table_context=cache.get('tables'), on_progress=checkpoint, ocr_lines=cache.get('lines'),
+                material_layout=cache.get('material_layout'))
             run['status'] = ('partial' if run['result'].get('fee_extraction', {}).get('status') == 'partial'
                              else 'completed')
         except Exception as exc:
