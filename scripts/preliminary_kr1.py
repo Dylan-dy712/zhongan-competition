@@ -158,6 +158,18 @@ def layout_text(cache):
     lines = cache.get('lines', [])
     if not lines or any(not isinstance(line.get('bbox'), list) or len(line['bbox']) != 4 for line in lines):
         return cache.get('text', '')
+    rotation = cache.get('image_rotation_degrees', 0)
+    if rotation not in (0, 90, 180, 270):
+        raise ValueError('OCR layout rotation must be a cardinal angle')
+    # Providers store evidence boxes in original-image coordinates. Read them in
+    # the same upright orientation as the image sent to the extraction model.
+    upright = []
+    for line in lines:
+        x1, y1, x2, y2 = line['bbox']
+        box = {0: [x1, y1, x2, y2], 90: [y1, 1-x2, y2, 1-x1],
+               180: [1-x2, 1-y2, 1-x1, 1-y1], 270: [1-y2, x1, 1-y1, x2]}[rotation]
+        upright.append({**line, 'bbox': box})
+    lines = upright
     heights = [line['bbox'][3] - line['bbox'][1] for line in lines if line['bbox'][3] > line['bbox'][1]]
     tolerance = median(heights) * .45 if heights else .005
     rows = []
