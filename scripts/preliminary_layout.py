@@ -65,6 +65,8 @@ def main():
         if accepted:
             row.update(image_rotation_degrees=prediction['rotation_degrees'],
                        orientation_method=LAYOUT_VERSION, orientation_review_required=False)
+        else:
+            row['orientation_review_required'] = True
         record['adopted_rotation_degrees'] = row.get('image_rotation_degrees', 0)
         row['material_layout'] = record
         write(destination, record)
