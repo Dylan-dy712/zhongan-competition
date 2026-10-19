@@ -17,7 +17,7 @@ from .fee_evidence import bind_fee_evidence
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
-PROMPT_VERSION = 'document-fields-evidence-v53-fee-reading-order'
+PROMPT_VERSION = 'document-fields-evidence-v54-fee-name-code-separation'
 SCHEMA_VERSION = 'document-fields-v6-visual-name-evidence'
 FEE_TAXONOMY = {
     'inspectionFee': '检查费', 'westernMedicineFee': '西药费', 'materialFee': '材料费',
@@ -749,7 +749,9 @@ surgery只转录明确手术名称或术式标签的原文数组，完整保留�
         fee_extraction = {'status': 'completed'}
         fee_system = ('逐行转录费用清单。项目名称取名称栏，金额取该行总金额，不取单价或右侧自费金额。'
             '沿表格横线绑定同一行，不按照片上的同一水平高度配对。首行和末行都要保留，同名重复行也逐行输出，不合并不去重。'
-            '不计算，不归类，不包含小计合计，不抄背景纸张。detailName严格只取项目名称栏，合并该栏换行续文，保留该栏括号与内嵌编号。'
+            '不计算，不归类，不包含小计合计，不抄背景纸张。detailName严格只取项目名称，合并名称换行续文，保留名称括号与产品规格型号。'
+            '国家医保编码、收费项目编码属于独立标识，即使印在名称栏内、名称后括号内或紧接名称的下一行，也不能拼入detailName。'
+            '区分长数字或数字连字符组成的收费编码与项目本身的型号，不能误删名称中的产品型号、医学缩写或规格。原文证据仍保留编码。'
             '相邻单独项目编码、规格、厂家、单位不拼入名称；规格栏表示空规格的斜杠/也不拼入名称。'
             '只有单价且数量明确为1时，可取该单价，输出quantity=1和amount_source=unit_price_quantity_one；其他无明确行金额情况不猜、不计算。'
             '若仅有药费、检查费等收费分类汇总而无逐项明细，输出row_kind=category_summary；不含全页合计。有逐项明细时不重复收同类别小计。医保支付、现金支付等支付方式不是收费项目。'
