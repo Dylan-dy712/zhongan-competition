@@ -15,10 +15,11 @@ from .material_routing import route_material, PROFILE_INSTRUCTIONS
 from .material_layout import MaterialLayout
 from .fee_binding import validate_fee_binding, direct_fee_rows
 from .fee_evidence import bind_fee_evidence
+from .extraction_skills import instruction, review_extraction
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
-PROMPT_VERSION = 'document-fields-evidence-v57-explicit-fee-name-components'
+PROMPT_VERSION = 'document-fields-evidence-v58-four-review-skills'
 SCHEMA_VERSION = 'document-fields-v6-visual-name-evidence'
 FEE_TAXONOMY = {
     'inspectionFee': '检查费', 'westernMedicineFee': '西药费', 'materialFee': '材料费',
@@ -126,6 +127,8 @@ class FeeItem(BaseModel):
     raw_ocr_name: str | None = None
     raw_detail_name: str | None = None
     specification: str | None = None
+    normalized_detail_name: str | None = None
+    unit_price: float | None = Field(default=None, allow_inf_nan=False)
     source_billing_codes: list[str] = Field(default_factory=list)
     visual_source_box: list[float] | None = None
     visual_correction_method: str | None = None
@@ -753,7 +756,7 @@ surgery只转录明确手术名称或术式标签的原文数组，完整保留�
             'fee_classification': {'status': 'pending'}, 'prompt_version': PROMPT_VERSION,
             'schema_version': SCHEMA_VERSION, 'stage_seconds': dict(stage_seconds)}, stage)
     publish_progress('header')
-    if result.has_fee_table or result.document_kind == 'fee_list':
+    if result.has_fee_table or result.document_kind == 'fee_list' or (layout_hint and layout_hint['has_fee_table']):
         fee_extraction = {'status': 'completed'}
         fee_system = ('逐行转录费用清单。项目名称取名称栏，金额取该行总金额，不取单价或右侧自费金额。'
             '沿表格横线绑定同一行，不按照片上的同一水平高度配对。首行和末行都要保留，同名重复行也逐行输出，不合并不去重。'
@@ -763,6 +766,7 @@ surgery只转录明确手术名称或术式标签的原文数组，完整保留�
             '若仅有药费、检查费等收费分类汇总而无逐项明细，输出row_kind=category_summary；不含全页合计。有逐项明细时不重复收同类别小计。医保支付、现金支付等支付方式不是收费项目。'
             '每行给名称与金额各自置信度和原文名称金额引用。只输出如下JSON结构，不解释：'
             '{"rows":[{"detailName":"原项目名","feeAmount":12.34,"confidence":{"detailName":0.9,"feeAmount":0.9},"evidence_quote":"原项目名 12.34"}]}。')
+        fee_system += '\n' + instruction('original-fidelity') + '\n' + instruction('row-alignment')
         fee_system += ('若输入是OCR文字，evidence_quote逐字复制完整项目行，保留|列分隔符与中间的数量、单价；'
                        '不要把不相邻的名称和金额拼成不存在的原文。')
         fee_content = text if not views else [image_content(data) for _, data in views]
@@ -788,18 +792,6 @@ surgery只转录明确手术名称或术式标签的原文数组，完整保留�
                 fee_content.insert(0, {'type': 'text', 'text': hint})
             else:
                 fee_content = hint + '\n' + fee_content
-            if layout_hint['name_contains_billing_code'] or layout_hint['name_contains_specification']:
-                fee_system += ('本布局可能把项目名与附加信息排在同一格。detailName只保留项目本体名称，'
-                    '独立医保/收费编码放source_billing_codes数组，附加厂家型号/产品规格放specification，'
-                    '完整的原名称放raw_detail_name，evidence_quote保留完整原行。'
-                    '项目自身的医学缩写、检查方法和名称括号仍保留；无法分辨边界时保留原名并降低置信度，不猜拆。'
-                    '不能凭空补充。对于这类布局，每行必须显式返回raw_detail_name、specification、source_billing_codes；'
-                    '未记载附加规格时specification为null，无独立编码时source_billing_codes为空数组。'
-                    '项目本体名之后以连接符接续的厂家型号或产品尺寸，应放specification，不保留在detailName中；'
-                    '项目名本身的医学连接符和检查方法仍保留。'
-                    '本布局采用此JSON结构：{"rows":[{"detailName":"项目本体名","raw_detail_name":"名称栏完整原文",'
-                    '"specification":null,"source_billing_codes":[],"feeAmount":12.34,'
-                    '"confidence":{"detailName":0.9,"feeAmount":0.9},"evidence_quote":"完整项目原行及金额"}]}。')
         if structured_tables:
             table_payload, table_raw, fee_extraction = extract_table_cells(call_stage, fee_system,
                 structured_tables, table_attempts, image_bytes, image_rotation_degrees, publish_progress)
@@ -848,6 +840,12 @@ surgery只转录明确手术名称或术式标签的原文数组，完整保留�
             result.confidence['blocks'] = min(min(row.confidence.values()) for row in table.rows)
             result.evidence['blocks'] = table.rows[0].evidence_quote
         publish_progress('fee_transcription', table.rows, fee_extraction.get('unresolved'))
+    skill_review = review_extraction(result, text, image_bytes, image_rotation_degrees,
+        ocr_lines, layout_hint, call_stage, FeeItem)
+    if skill_review.get('unresolved') and (result.has_fee_table or result.fields.get('blocks')):
+        fee_extraction = {**fee_extraction, 'status': 'partial',
+            'unresolved': [*fee_extraction.get('unresolved', []),
+                           *({'reason': reason} for reason in skill_review['unresolved'])]}
     unsupported, vision_only, fee_audit = bind_document_evidence(result, text, image_bytes is not None, table_context)
     if fee_audit['rejected_rows']:
         fee_extraction = {**fee_extraction, 'status': 'partial',
@@ -864,6 +862,7 @@ surgery只转录明确手术名称或术式标签的原文数组，完整保留�
     return {**result.model_dump(mode='json'), 'rejected_evidence_fields': unsupported,
             'material_routing': routing,
             'material_layout': material_layout,
+            'skill_review': skill_review,
             'field_status': {key: 'derived' if key in derivations else 'observed' for key in result.fields},
             'derivations': derivations,
             'fee_classification': fee_classification,

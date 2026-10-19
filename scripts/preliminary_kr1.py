@@ -343,6 +343,9 @@ def main():
                              'workload': sha(repo/'services/api/app/model_workloads.py'),
                              'routing': sha(repo/'services/api/app/material_routing.py'),
                              'layout': sha(repo/'services/api/app/material_layout.py'),
+                             'skill_runtime': sha(repo/'services/api/app/extraction_skills.py'),
+                             **{'skill_' + path.parent.name: sha(path)
+                                for path in sorted((repo/'skills').glob('extraction-*/SKILL.md'))},
                              'fee_binding': sha(repo/'services/api/app/fee_binding.py'),
                              'fee_evidence': sha(repo/'services/api/app/fee_evidence.py')}
     rows = manifest['documents']
