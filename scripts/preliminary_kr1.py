@@ -9,6 +9,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from decimal import Decimal, InvalidOperation
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -170,11 +171,35 @@ def layout_text(cache):
                180: [1-x2, 1-y2, 1-x1, 1-y1], 270: [1-y2, x1, 1-y1, x2]}[rotation]
         upright.append({**line, 'bbox': box})
     lines = upright
+    names = [line for line in lines if normalize(line['text']) in
+             {'名称', '项目名称', '费用名称', '收费名称', '药品名称'}]
+    slopes = []
+    if len(names) == 1:
+        box = names[0]['bbox']
+        nx, ny = (box[0]+box[2])/2, (box[1]+box[3])/2
+        for line in lines:
+            if normalize(line['text']) not in {'规格', '单位', '单价', '数量', '医保类别', '金额', '总金额', '费用金额'}:
+                continue
+            box = line['bbox']
+            x, y = (box[0]+box[2])/2, (box[1]+box[3])/2
+            if x > nx+.08 and abs(y-ny) < .035:
+                slopes.append((y-ny)/(x-nx))
+    slope = median(slopes) if len(slopes) >= 2 else 0
+    width, height = cache.get('image_size', [1, 1])
+    if rotation in (90, 270):
+        width, height = height, width
+    if abs(math.degrees(math.atan2(slope*height, width))) > 8:
+        slope = 0
+    # Project onto the header baseline so a tilted amount stays with its name.
+    # Preserve the original boxes and all text; this changes reading order only.
+    def row_y(line):
+        x1, y1, x2, y2 = line['bbox']
+        return (y1+y2)/2-slope*(x1+x2)/2
     heights = [line['bbox'][3] - line['bbox'][1] for line in lines if line['bbox'][3] > line['bbox'][1]]
     tolerance = median(heights) * .45 if heights else .005
     rows = []
-    for line in sorted(lines, key=lambda l: (l['bbox'][1] + l['bbox'][3]) / 2):
-        y = (line['bbox'][1] + line['bbox'][3]) / 2
+    for line in sorted(lines, key=row_y):
+        y = row_y(line)
         if rows and abs(rows[-1][0] - y) <= tolerance:
             rows[-1][1].append(line)
         else:

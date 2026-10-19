@@ -18,7 +18,7 @@ from .fee_evidence import bind_fee_evidence
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
-PROMPT_VERSION = 'document-fields-evidence-v51-fee-header-region'
+PROMPT_VERSION = 'document-fields-evidence-v52-fee-baseline-layout'
 SCHEMA_VERSION = 'document-fields-v6-visual-name-evidence'
 FEE_TAXONOMY = {
     'inspectionFee': '检查费', 'westernMedicineFee': '西药费', 'materialFee': '材料费',
