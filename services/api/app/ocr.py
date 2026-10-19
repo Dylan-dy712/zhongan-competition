@@ -5,7 +5,8 @@ from typing import Protocol
 from .tencent_ocr import OCR_METHOD, OCR_VERSION, TABLE_OCR_METHOD, TABLE_OCR_VERSION, TencentOcr, TencentTableOcr
 from .volcengine_ocr import VolcengineOcr
 from .material_routing import route_material
-from .paddle_ocr import PaddleOcr, OCR_VERSIONS as PADDLE_OCR_VERSIONS, GPU_HIGH_RES_VERSION
+from .paddle_ocr import (PaddleOcr, OCR_VERSIONS as PADDLE_OCR_VERSIONS, GPU_HIGH_RES_VERSION,
+                         V6_OCR_METHOD, V6_OCR_VERSIONS)
 
 
 def recognize_routed(ocr, image_bytes, width, height, *, enable_table=False, use_new_model=False):
@@ -68,4 +69,5 @@ def page_ocr_method(page: dict) -> str | None:
     return {OCR_VERSION: OCR_METHOD, TABLE_OCR_VERSION: TABLE_OCR_METHOD,
             **{version: PaddleOcr.method for version in PADDLE_OCR_VERSIONS.values()},
             GPU_HIGH_RES_VERSION: PaddleOcr.method,
+              **{version: V6_OCR_METHOD for version in V6_OCR_VERSIONS.values()},
             VolcengineOcr.version: VolcengineOcr.method}.get(page.get('parser_version'))
