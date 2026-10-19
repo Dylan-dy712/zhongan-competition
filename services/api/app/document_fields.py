@@ -17,7 +17,7 @@ from .fee_evidence import bind_fee_evidence
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
-PROMPT_VERSION = 'document-fields-evidence-v49-fee-json-mode-compatibility'
+PROMPT_VERSION = 'document-fields-evidence-v50-provider-neutral-table-hybrid'
 SCHEMA_VERSION = 'document-fields-v6-visual-name-evidence'
 FEE_TAXONOMY = {
     'inspectionFee': '检查费', 'westernMedicineFee': '西药费', 'materialFee': '材料费',
@@ -438,7 +438,7 @@ def extract_table_cells(call_stage, system, tables, attempts, image_bytes=None, 
                 and cell not in headers and cell['text'].strip()
                 and not cell['text'].strip().startswith(('小计', '合计', '总计', '本页合计'))}
             suspect_names = {cell['id'] for cell in selected if cell['id'] in candidates and
-                (len(cell['text'].splitlines()) > 1 or
+                (cell.get('review_required') or len(cell['text'].splitlines()) > 1 or
                  isinstance(cell.get('confidence'), (int, float)) and cell['confidence'] < 90)}
             batch = FeeTable(rows=[])
             reason = None
@@ -472,7 +472,10 @@ def extract_table_cells(call_stage, system, tables, attempts, image_bytes=None, 
                 reason = 'failed_cell_transcription'
                 attempts.append({'stage': stage, 'status': 'failed', 'error_code': type(exc).__name__,
                     'source_row_range': [start, end], 'usage': getattr(exc, 'usage', payload.get('usage', {}))})
-            if reason:
+            if reason and os.environ.get('ZHONGAN_LOCAL_FEE_REVIEW', '1') == '0':
+                unresolved.append({'stage': stage, 'reason': reason, 'local_review_disabled': True})
+                ranges = []
+            elif reason:
                 covered = {key for row in batch.rows for key in row.source_cells}
                 targets = (candidates - covered) | suspect_names
                 for row in batch.rows:
@@ -761,7 +764,7 @@ surgery只转录明确手术名称或术式标签的原文数组，完整保留�
                 fee_source_box, region_bytes, fee_deskew_degrees = located
                 fee_content = [image_content(region_bytes)]
         if structured_tables:
-            fee_system += ('本轮输入是腾讯表格识别V3的原始单元格，不含参考答案。依据行列索引及跨行跨列边界绑定名称与金额，'
+            fee_system += ('本轮输入是OCR表格识别的原始单元格，不含参考答案。依据行列索引及跨行跨列边界绑定名称与金额，'
                 '保留真实重复行。每条费用必须在source_cells数组中引用对应名称和金额单元格id；不创造原单元格没有的项目或数值。'
                 '表头、标题、小计不作为明细。不要将仅含其他字段的表强行当作费用表。')
             fee_content = json.dumps({'tables': structured_tables}, ensure_ascii=False)
