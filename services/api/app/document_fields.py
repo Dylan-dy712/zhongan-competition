@@ -147,6 +147,7 @@ class FeeItem(BaseModel):
 class FeeTable(BaseModel):
     model_config = ConfigDict(extra='forbid')
     rows: list[FeeItem] = Field(max_length=200)
+    unresolved: str | bool | list[str] | None = None
     _rejected_rows: list[dict] = PrivateAttr(default_factory=list)
 
     @model_validator(mode='wrap')
@@ -848,8 +849,16 @@ surgery只转录明确手术名称或术式标签的原文数组，完整保留�
                     raise DocumentExtractionFailure(stage, table_raw, recovery_error, table_payload) from None
                 recovered_rows.extend(region_table.rows)
                 rejected_recovery_rows.extend({'region': index, **item} for item in region_table._rejected_rows)
+                if region_table.unresolved:
+                    fee_extraction = {**fee_extraction, 'status': 'partial',
+                        'unresolved': [*fee_extraction.get('unresolved', []),
+                            {'reason': 'fee_region_uncertainty', 'region': index, 'detail': region_table.unresolved}]}
             table = FeeTable(rows=recovered_rows)
             table._rejected_rows = rejected_recovery_rows
+        if table.unresolved:
+            fee_extraction = {**fee_extraction, 'status': 'partial',
+                'unresolved': [*fee_extraction.get('unresolved', []),
+                               {'reason': 'fee_table_uncertainty', 'detail': table.unresolved}]}
         if table._rejected_rows:
             fee_extraction = {**fee_extraction, 'status': 'partial',
                 'unresolved': [*fee_extraction.get('unresolved', []),
