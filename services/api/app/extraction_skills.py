@@ -34,7 +34,7 @@ def quote_supports_amount(row):
 def supported_candidate(row):
     # The risk that triggered review must not itself veto a visual correction.
     # Acceptance checks the new candidate, rather than rerunning the scheduler.
-    return (min(row['confidence'].values()) >= .9
+    return (not row.get('unresolved') and min(row['confidence'].values()) >= .9
             and compact(row['detailName']) in compact(row['evidence_quote'])
             and quote_supports_amount(row))
 
@@ -87,6 +87,9 @@ def row_risk(row, lines):
     name = compact(row['detailName'])
     if score < REVIEW_THRESHOLD:
         reasons.append('low_model_confidence')
+    if row.get('unresolved'):
+        score = min(score, .6)
+        reasons.append('first_pass_row_uncertainty')
     if row.get('raw_detail_name') and compact(row['raw_detail_name']) != name:
         score = min(score, .6)
         reasons.append('original_name_contract_disagreement')

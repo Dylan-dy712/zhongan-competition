@@ -17,10 +17,10 @@ from .fee_binding import validate_fee_binding, direct_fee_rows
 from .fee_evidence import bind_fee_evidence
 from .extraction_skills import instruction, review_extraction
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, ValidationError, model_validator
 
 PROMPT_VERSION = 'document-fields-evidence-v60-independent-review-acceptance'
-SCHEMA_VERSION = 'document-fields-v6-visual-name-evidence'
+SCHEMA_VERSION = 'document-fields-v7-fee-row-uncertainty'
 FEE_TAXONOMY = {
     'inspectionFee': '检查费', 'westernMedicineFee': '西药费', 'materialFee': '材料费',
     'treatmentFee': '治疗费', 'chineseHerbalMedicineFee': '中草药费',
@@ -129,6 +129,7 @@ class FeeItem(BaseModel):
     specification: str | None = None
     normalized_detail_name: str | None = None
     unit_price: float | None = Field(default=None, allow_inf_nan=False)
+    unresolved: str | bool | list[str] | None = None
     source_billing_codes: list[str] = Field(default_factory=list)
     visual_source_box: list[float] | None = None
     visual_correction_method: str | None = None
@@ -146,6 +147,23 @@ class FeeItem(BaseModel):
 class FeeTable(BaseModel):
     model_config = ConfigDict(extra='forbid')
     rows: list[FeeItem] = Field(max_length=200)
+    _rejected_rows: list[dict] = PrivateAttr(default_factory=list)
+
+    @model_validator(mode='wrap')
+    @classmethod
+    def isolate_invalid_rows(cls, value, handler):
+        if not isinstance(value, dict) or not isinstance(value.get('rows'), list) or len(value['rows']) > 200:
+            return handler(value)
+        rows, rejected = [], []
+        for index, candidate in enumerate(value['rows']):
+            try:
+                rows.append(FeeItem.model_validate(candidate))
+            except ValidationError as exc:
+                rejected.append({'row_index': index, 'candidate': candidate,
+                    'validation_errors': exc.errors(include_input=False, include_context=False)})
+        table = handler({**value, 'rows': rows})
+        table._rejected_rows = rejected
+        return table
 
 
 def parse_prediction(content):
@@ -813,7 +831,7 @@ surgery只转录明确手术名称或术式标签的原文数组，完整保留�
                 raise DocumentExtractionFailure('fee_table', table_raw, exc, table_payload) from None
             # Bound each retry to a disjoint source region, instead of repeating the
             # same full page that exhausted the model's reasoning allowance.
-            recovered_rows = []
+            recovered_rows, rejected_recovery_rows = [], []
             for index, (box, data) in enumerate(fee_recovery_regions(image_bytes, image_rotation_degrees)):
                 recovery = [{'type': 'text', 'text':
                     '这是同页的一个不重叠区域，只转录该区域可见完整项目行，不从辅助OCR复制区域外项目。'
@@ -829,7 +847,13 @@ surgery只转录明确手术名称或术式标签的原文数组，完整保留�
                 except ValidationError as recovery_error:
                     raise DocumentExtractionFailure(stage, table_raw, recovery_error, table_payload) from None
                 recovered_rows.extend(region_table.rows)
+                rejected_recovery_rows.extend({'region': index, **item} for item in region_table._rejected_rows)
             table = FeeTable(rows=recovered_rows)
+            table._rejected_rows = rejected_recovery_rows
+        if table._rejected_rows:
+            fee_extraction = {**fee_extraction, 'status': 'partial',
+                'unresolved': [*fee_extraction.get('unresolved', []),
+                               {'reason': 'invalid_fee_rows_isolated', 'rows': table._rejected_rows}]}
         if not table.rows:
             fee_extraction = {**fee_extraction, 'status': 'partial',
                 'unresolved': [*fee_extraction.get('unresolved', []), {'reason': 'detected_fee_table_has_no_rows'}]}
@@ -842,6 +866,12 @@ surgery只转录明确手术名称或术式标签的原文数组，完整保留�
         publish_progress('fee_transcription', table.rows, fee_extraction.get('unresolved'))
     skill_review = review_extraction(result, text, image_bytes, image_rotation_degrees,
         ocr_lines, layout_hint, call_stage, FeeItem)
+    row_uncertainties = [{'reason': 'fee_row_uncertainty', 'row_index': index, 'detail': row['unresolved']}
+        for index, row in enumerate(r for b in result.fields.get('blocks', []) for r in b.get('costDetailList', []))
+        if row.get('unresolved')]
+    if row_uncertainties:
+        fee_extraction = {**fee_extraction, 'status': 'partial',
+            'unresolved': [*fee_extraction.get('unresolved', []), *row_uncertainties]}
     if skill_review.get('unresolved') and (result.has_fee_table or result.fields.get('blocks')):
         fee_extraction = {**fee_extraction, 'status': 'partial',
             'unresolved': [*fee_extraction.get('unresolved', []),
