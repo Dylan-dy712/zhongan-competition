@@ -303,7 +303,7 @@ def main():
     parser.add_argument('--config', help='private server configuration; never copied into outputs')
     parser.add_argument('--limit', type=int)
     parser.add_argument('--workers', type=int, default=4)
-    parser.add_argument('--experiment', choices=['A', 'B', 'C'], default='A',
+    parser.add_argument('--experiment', choices=['A', 'B', 'C'], default='C',
                         help='A: current baseline; B: specialized routing; C: B plus regional risk review')
     parser.add_argument('--ocr-layout', choices=['plain', 'bbox'], default='plain')
     parser.add_argument('--vision', action='store_true', help='read original image with OCR as optional context')

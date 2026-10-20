@@ -651,7 +651,7 @@ def derive_stay_days(result):
         'counting_convention': 'calendar_date_difference_excluding_discharge_day; not billed_days'}}
 
 
-def extract_document(provider, text, image_bytes=None, image_rotation_degrees=0, table_context=None, on_progress=None, ocr_lines=None, material_layout=None, experiment="A"):
+def extract_document(provider, text, image_bytes=None, image_rotation_degrees=0, table_context=None, on_progress=None, ocr_lines=None, material_layout=None, experiment="C"):
     if experiment not in {"A", "B", "C"}:
         raise ValueError("unknown extraction experiment")
     routing = route_material(text)
