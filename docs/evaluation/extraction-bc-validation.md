@@ -17,24 +17,54 @@
 三个版本分别重新进行在线抽取，每版最多两个并发，共用同一 OCR 缓存、模型配置、旋转信息与原图。不是同一首稿的复核消融；B/C 的首稿也会受模型随机性影响，单次差异不能全归因于区域调度。失败页照常计分。若有技术故障，单独披露恢复，不按分数挑选预测。
 
 私有清单：`../preliminary-private/bc-validation-fixed20.json`。
-各版预测/日志/运行信息/指标分别为 `bc-validation-{A,B,C}-20-*`。
-汇总为 `bc-validation-comparison20.json`。数据、预测、私有配置不入 Git。
+首轮各版预测/日志/运行信息/指标分别为 `bc-validation-{A,B,C}-20-*`。
+最终统一参数轮为 `bc-high-{A,B,C}-20-*`，汇总为 `bc-high-comparison20.json`，细项为 `bc-high-detail20.json`。数据、预测、私有配置不入 Git。
 
 ## 命令
 
 从仓库根目录执行，X 替换为 A / B / C，各版使用独立输出目录：
 
 ```powershell
-..\venv-care-quality\Scripts\python.exe -u -m scripts.preliminary_kr1 infer --manifest ..\preliminary-private\bc-validation-fixed20.json --predictions-dir ..\preliminary-private\bc-validation-X-20-predictions --output ..\preliminary-private\bc-validation-X-20-run.json --config ..\local-runtime\private\qianfan-config.json --workers 2 --vision --ocr-layout bbox --experiment X
-..\venv-care-quality\Scripts\python.exe -m scripts.preliminary_kr1 score --manifest ..\preliminary-private\bc-validation-fixed20.json --predictions-dir ..\preliminary-private\bc-validation-X-20-predictions --output ..\preliminary-private\bc-validation-X-20-metrics.json --include-inferred-categories
+..\venv-care-quality\Scripts\python.exe -u -m scripts.preliminary_kr1 infer --manifest ..\preliminary-private\bc-validation-fixed20.json --predictions-dir ..\preliminary-private\bc-high-X-20-predictions --output ..\preliminary-private\bc-high-X-20-run.json --config ..\local-runtime\private\qianfan-config.json --workers 2 --vision --ocr-layout bbox --experiment X
+..\venv-care-quality\Scripts\python.exe -m scripts.preliminary_kr1 score --manifest ..\preliminary-private\bc-validation-fixed20.json --predictions-dir ..\preliminary-private\bc-high-X-20-predictions --output ..\preliminary-private\bc-high-X-20-metrics.json --include-inferred-categories
 ```
 
 ## 验证状态
 
-已启动实际 A/B/C 对照；运行完成前不宣称分数提升。比较整体 precision / recall / F1、费用名称金额与分类、失败/部分完成、复核修改与补行、单页耗时。只有开发集有收益且没有明显安全退化，才考虑扩大全量；不自动替换线上版本。
+已完成两轮实际 A/B/C 对照，最终使用统一 high 参数轮。未编写或运行测试套件。未扩展重跑 728 页，未替换线上版本。
 
 ## 首轮发现的接口兼容问题
 
 首轮 A/B/C 完整保留在 `bc-validation-*`。A F1 0.835607（无失败），B F1 0.677311（5 失败），C F1 0.070423（14 失败）。B/C 的失败包含网关明确拒绝 `image_url.detail=original`，允许值为 auto/low/high；首轮不能作为分流/复核效果的可靠比较。
 
 提交 `64b36c8` 将通用图片请求 detail 改为 high；不改变图片字节、OCR 或标注。随后 A/B/C 全部重新在线推理，统一使用修复后的同一实现，以免只恢复部分页面造成输入设置不一致。第二轮预测、日志、运行及指标使用 `bc-high-{A,B,C}-20-*`；比较使用 `bc-high-comparison20.json`。不覆盖首轮，不按分数选择页面。
+
+## 最终统一参数轮结果
+
+10 病例、20 页、681 评分原子；每版均重新在线推理，三版均无失败/缺失预测。
+
+| 版本 | Precision | Recall | F1 | 费用名称金额 F1 | 费用分类 F1 | 完成/部分完成 | 整批耗时（秒） |
+|---|---:|---:|---:|---:|---:|---|---:|
+| A | 0.800270 | 0.870778 | 0.834037 | 0.856693 | 0.834646 | 15/5 | 750 |
+| B | 0.795424 | 0.867841 | 0.830056 | 0.845070 | 0.842271 | 16/4 | 527 |
+| C | 0.809140 | 0.883994 | 0.844912 | 0.860720 | 0.854890 | 16/4 | 346 |
+
+C 比 A 高 0.010876（约 1.09 个百分点），B 比 A 低 0.003980。C 是本轮最高分，不是已证明更优的通用方案，更不是全量 KR1 达标结果。
+
+### 复核是否真正产生改动
+
+| 版本 | 接纳行更正 | 名称或金额真正改变 | 接纳新增行 | 字段更正 | C 疑似漏行局部图 |
+|---|---:|---:|---:|---:|---:|
+| A | 4 | 0 | 1 | 0 | 不适用 |
+| B | 0 | 0 | 0 | 0 | 不适用 |
+| C | 1 | 0 | 0 | 0 | 14 |
+
+行更正次数包含元数据变化。C 未改变任何名称金额对、没有新增行、没有字段更正，因此本轮不能证明 C 的区域复核减少了主要费用漏项。首稿和后续费用分类的随机性可能贡献分数差异，不能把 C 的总分上涨直接解释为复核因果收益。未为了得到更高分重复挑选单页预测。
+
+诊断字段只有 18 个金标原子，A/B/C F1 分别 0.342857 / 0.342857 / 0.388889；样本量很小，费用主导的整体分数不能代替临床能力验证。整字段组缺失率分别为 1.0279% / 1.4684% / 1.4684%，不是费用逐行遗漏率。
+
+A 单页耗时中位数 18.758 秒、B 31.734 秒、C 23.258 秒；A 的一张密集费用页约 741 秒，主要为首轮费用抽取 412 秒和分区恢复 261 秒，Skill 复核约 21 秒。单次总耗时受模型服务状态和恢复次数影响，不能据此宣称 C 稳定提速。
+
+### 决策
+
+保留 B/C 独立开关与完整证据，不默认启用 B/C，不合并或部署生产。本轮可直接确认的工程修复是图片 detail 参数兼容；C 作为候选保留。下一次若要判断区域复核本身的效果，应固定同一份初次抽取结果再比较复核策略，而非继续追加提示词后把单次总分差当作因果收益。晚间新数据先冻结再跑，若用于调优则标为开发数据；不把这 20 页成绩替代 728 页全量 F1 0.771088。
