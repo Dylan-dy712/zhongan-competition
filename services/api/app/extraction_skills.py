@@ -126,7 +126,48 @@ def row_risk(row, lines):
             'ocr_box': match.get('bbox') if match else None}
 
 
-def review_extraction(result, text, image_bytes, rotation, lines, layout, call_stage, fee_type):
+def regional_targets(rows, risks, lines, expected_fees, rotation):
+    """Rank observable conflicts; unrepresented OCR lines are hypotheses only."""
+    weights = {'first_pass_row_uncertainty': 5, 'original_name_contract_disagreement': 4,
+               'amount_missing_from_quote': 4, 'name_missing_from_quote': 3,
+               'quantity_price_disagreement': 3, 'name_not_supported_by_ocr': 2,
+               'low_ocr_confidence': 2, 'low_model_confidence': 1}
+    candidates = [dict(target_row=i, ocr_box=risk['ocr_box'],
+                       priority=sum(weights.get(r, 0) for r in risk['reasons']),
+                       risk_score=risk['score'], reason=risk['reasons'])
+                  for i, risk in enumerate(risks) if risk['score'] < REVIEW_THRESHOLD and risk['ocr_box']]
+    missing = []
+    if expected_fees:
+        for line in lines:
+            name, box = compact(line.get('text', '')), line.get('bbox')
+            if (not box or len(box) != 4 or not re.search(r'[\u4e00-\u9fff]{2}', name)
+                    or re.search(r'合计|小计|总计|名称|金额|医院|清单|姓名|医保|支付|自费|自付', name)):
+                continue
+            if any(name in compact(row['detailName']) or compact(row['detailName']) in name for row in rows):
+                continue
+            # A nearby numeric OCR cell is evidence of a possible row, not proof.
+            axis = 0 if rotation in (90, 270) else 1
+            center = (box[axis] + box[axis+2]) / 2
+            height = box[axis+2] - box[axis]
+            nearby = [other for other in lines if other.get('bbox') and
+                      abs((other['bbox'][axis] + other['bbox'][axis+2])/2 - center) <= max(.006, height*.6)]
+            if not any(re.search(r'(?<!\d)\d+\.\d{2}(?!\d)', other.get('text', '')) for other in nearby):
+                continue
+            missing.append(dict(target_row=None, ocr_box=box, priority=4,
+                                risk_score=0, reason=['possible_unrepresented_ocr_row'],
+                                ocr_text=line['text']))
+    # Reserve two of four image slots for coverage hypotheses, then conflicts.
+    chosen = sorted(missing, key=lambda c: tuple(c['ocr_box']))[:2]
+    candidates.sort(key=lambda c: (-c['priority'], c['risk_score'], c['target_row']))
+    for candidate in candidates + missing:
+        if len(chosen) >= 4:
+            break
+        if candidate not in chosen:
+            chosen.append(candidate)
+    return chosen
+
+
+def review_extraction(result, text, image_bytes, rotation, lines, layout, call_stage, fee_type, regional=False):
     from .document_fields import image_content, document_image_views
     rows = [r for b in result.fields.get('blocks', []) for r in b.get('costDetailList', [])]
     risks = [row_risk(row, lines or []) for row in rows]
@@ -136,7 +177,7 @@ def review_extraction(result, text, image_bytes, rotation, lines, layout, call_s
     audit = {'threshold': REVIEW_THRESHOLD, 'confidence_method': 'heuristic_uncalibrated_not_probability',
              'skills': list(SKILL_NAMES), 'row_risks': risks, 'target_fields': sorted(fields),
              'max_semantic_review_rounds': 1, 'corrections': [], 'additions': [],
-             'field_corrections': [], 'unresolved': []}
+             'field_corrections': [], 'unresolved': [], 'regional_review_enabled': regional}
     if not image_bytes or not (expected_fees or targets or fields):
         return {**audit, 'status': 'not_needed' if image_bytes else 'unavailable_no_image'}
     system = '\n'.join(instruction(name) for name in SKILL_NAMES)
@@ -157,16 +198,24 @@ def review_extraction(result, text, image_bytes, rotation, lines, layout, call_s
     # Original-image strips include neighboring rows and all columns. Rotating
     # after cropping keeps the source coordinate convention explicit.
     with Image.open(io.BytesIO(image_bytes)) as source:
-        for i in sorted(targets, key=lambda n: risks[n]['score'])[:4]:
-            box = risks[i]['ocr_box']
-            if not box or len(box) != 4:
+        selected = (regional_targets(rows, risks, lines or [], expected_fees, rotation) if regional else
+                    [dict(target_row=i, ocr_box=risks[i]['ocr_box'])
+                     for i in sorted(targets, key=lambda n: risks[n]['score'])[:4]])
+        audit['selected_regions'] = selected
+        for region in selected:
+            box = region['ocr_box']
+            if (not box or len(box) != 4 or
+                    not 0 <= box[0] < box[2] <= 1 or not 0 <= box[1] < box[3] <= 1):
                 continue
             b = [0, max(0, box[1]-.018), 1, min(1, box[3]+.018)] if rotation in (0, 180) else [max(0, box[0]-.018), 0, min(1, box[2]+.018), 1]
             crop = source.crop(tuple(round(v*(source.width if n%2 == 0 else source.height)) for n,v in enumerate(b))).convert('RGB')
             crop = crop.rotate(rotation, expand=True)
             crop.thumbnail((2400, 2400))
             output = io.BytesIO(); crop.save(output, format='JPEG', quality=95)
-            content += [{'type': 'text', 'text': json.dumps({'target_row': i, 'original_source_box': b})}, image_content(output.getvalue())]
+            content += [{'type': 'text', 'text': json.dumps({**region, 'original_source_box': b})}, image_content(output.getvalue())]
+    if regional:
+        system += ('局部区域的possible_unrepresented_ocr_row仅为漏行候选，必须在原图确认项目和行金额及所属列。'
+                   '复核区域优先于无关字段；保持原顺序。不能把表头、续行、规格、支付项补成项目，不能因候选存在就补行。')
     try:
         payload, raw = call_stage('skill_evidence_review', [{'role': 'system', 'content': system}, {'role': 'user', 'content': content}])
         decision = ReviewDecision.model_validate_json(raw)
