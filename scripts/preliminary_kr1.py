@@ -303,6 +303,8 @@ def main():
     parser.add_argument('--config', help='private server configuration; never copied into outputs')
     parser.add_argument('--limit', type=int)
     parser.add_argument('--workers', type=int, default=4)
+    parser.add_argument('--experiment', choices=['A', 'B', 'C'], default='A',
+                        help='A: current baseline; B: specialized routing; C: B plus regional risk review')
     parser.add_argument('--ocr-layout', choices=['plain', 'bbox'], default='plain')
     parser.add_argument('--vision', action='store_true', help='read original image with OCR as optional context')
     parser.add_argument('--retry-partial', action='store_true', help='explicitly rerun partial documents under identical frozen settings')
@@ -354,6 +356,8 @@ def main():
         previous = {}
         if destination.exists():
             previous = load(destination)
+            if previous.get('extraction_experiment', 'A') != args.experiment:
+                raise ValueError('experiment changed; use a new predictions directory')
             if previous.get('prompt_version') != PROMPT_VERSION or previous.get('model_id') != provider.model_id:
                 raise ValueError('use a new predictions directory for a new model or prompt')
             if previous.get('implementation_sha256') != implementation_hashes:
@@ -379,6 +383,7 @@ def main():
         run.update(model_id=provider.model_id, prompt_version=PROMPT_VERSION, code_revision=revision,
                    extraction_mode='mock' if provider.provider == 'mock' else 'live', ocr_mode='replay', vision=args.vision,
                    implementation_sha256=implementation_hashes)
+        run['extraction_experiment'] = args.experiment
         run['image_rotation_degrees'] = row.get('image_rotation_degrees', 0)
         run['orientation_method'] = row.get('orientation_method', 'original_orientation')
         run['direct_fee_rows_enabled'] = os.environ.get('ZHONGAN_DIRECT_FEE_ROWS') == '1'
@@ -412,7 +417,7 @@ def main():
             run['result'] = extract_document(provider, layout_text(cache) if args.ocr_layout == 'bbox' else cache['text'],
                 image_bytes, image_rotation_degrees=row.get('image_rotation_degrees', 0),
                 table_context=cache.get('tables'), on_progress=checkpoint, ocr_lines=cache.get('lines'),
-                material_layout=cache.get('material_layout'))
+                material_layout=cache.get('material_layout'), experiment=args.experiment)
             run['status'] = ('partial' if run['result'].get('fee_extraction', {}).get('status') == 'partial'
                              else 'completed')
         except Exception as exc:
@@ -441,6 +446,7 @@ def main():
             if sum(counts.values()) % 10 == 0:
                 print(json.dumps({'done': sum(counts.values()), 'total': len(rows), **dict(counts)}), flush=True)
     write(args.output, {'model_id': provider.model_id, 'prompt_version': PROMPT_VERSION,
+                        'extraction_experiment': args.experiment,
                         'counts': dict(counts), 'manifest_sha256': sha(args.manifest)})
     print(json.dumps(dict(counts)), flush=True)
 
