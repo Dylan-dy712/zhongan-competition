@@ -23,21 +23,22 @@ PP 文本 OCR 没有原生单元格绑定证明，因此可能触发大量费用
 
 ## 冻结全量协议
 
-全量固定为 `document-manifest-revised-gold-v3-frozen-full728.json` 的 **70 个病例、728 页、9124 个评分原子**，全部按原顺序保留。代码冻结于 `1e7540e`，提示词为 `document-fields-evidence-v59-four-skills-unverified-bindings`。不校验原图哈希，不改修订金标 v3，不改 `document-fee-taxonomy-exact-v5` 评分函数，不编写或主动运行测试。
+全量固定为 `document-manifest-revised-gold-v3-frozen-full728.json` 的 **70 个病例、728 页、9124 个评分原子**，全部按原顺序保留。最终代码冻结于 `75380e6`，提示词为 `document-fields-evidence-v60-independent-review-acceptance`。不校验原图哈希，不改修订金标 v3，不改 `document-fee-taxonomy-exact-v5` 评分函数，不编写或主动运行测试。
 
-先导 v58 暴露 RPM 限流，保留其布局、OCR、预测与失败记录。在最终统计前修正未验证绑定的风险触发，以及观察行数冲突标志，形成 v59。**最终全部 728 页重新生成 v59 预测，不混合 v58 预测。** 前置布局和 PP-OCRv6 medium GPU960 的真实输出继续冻结复用；不声称四个 Skill 或这两处修正的独立贡献已经被消融证明。
+先导 v58 暴露 RPM 限流，保留其布局、OCR、预测与失败记录。修正未验证绑定的风险触发及行数冲突标志后形成 v59；运行审计发现候选接纳错误地复用了调度风险，导致未验证绑定的扣分始终阻止费用更正。修复时将新候选的置信度和引用支持检查与调度风险分开，形成 v60，并记录完整复核提案以便审计。v58/v59 均未作为正式全量完成结果。
+
+**最终全部 728 页重新生成 v60 预测，不混合 v58/v59 预测。** 前置布局和 PP-OCRv6 medium GPU960 的真实输出继续冻结复用；不声称四个 Skill 的独立贡献已经被消融证明。
 
 布局前置共 728 份记录，694 份有效，34 份失败回退；失败记录保留，不移除页面。前置布局与原生 OCR 分批衔接，最终 GLM-5.3-Flash 在受限并发下运行。原图、参考答案、配置、预测和日志均留在仓库外 `../preliminary-private/`。
 
 主要产物：
 
-- `skills-v59-full728-fixed.json`：版本与输入清单。
+- `skills-v60-full728-frozen.json`：最终版本、完整输入清单和 OCR 内容指纹。
 - `skills-v58-full728-plans/`、`skills-v58-full728-ocr/`：冻结的真实布局和原生 OCR。
-- `skills-v59-full728-batchNN-frozen.json`：各批次 OCR 路径与内容指纹。
-- `skills-v59-full728-predictions/`：全部最终预测，各页记录版本、模型和 Skill 文件指纹。
-- `skills-v59-full728-frozen.json`、`skills-v59-full728-metrics.json`：完整新 OCR 清单与全量指标。
-- `skills-v59-full728-pipeline.log`、`skills-v59-full728-batchNN-infer.log`：分批进度及调用记录。
-- `skills-v58-rate-limit-first-attempts/`：先导传输失败留档，不作为 v59 最终结果混用。
+- `skills-v60-full728-predictions/`：全部最终预测，各页记录版本、模型和 Skill 文件指纹。
+- `skills-v60-full728-run.json`、`skills-v60-full728-metrics.json`：最终运行状态与全量指标。
+- `skills-v60-full728-inference.log`：最终调用进度。
+- `skills-v58-rate-limit-first-attempts/`、`skills-v59-interruption-failures/`：先导传输与内存失败留档，不作为 v60 最终结果混用。
 
 全量按所有标注原子计算 micro F1。空白参考字段属于未标注，不构成已验证阴性；当前数据也没有完整独立标注全部五类 KR1 字段，因此本指标不自动等于官方 KR1 已达标。整字段组缺失率不等于逐行漏项率。
 
