@@ -9,6 +9,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from decimal import Decimal, InvalidOperation
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -158,11 +159,47 @@ def layout_text(cache):
     lines = cache.get('lines', [])
     if not lines or any(not isinstance(line.get('bbox'), list) or len(line['bbox']) != 4 for line in lines):
         return cache.get('text', '')
+    rotation = cache.get('image_rotation_degrees', 0)
+    if rotation not in (0, 90, 180, 270):
+        raise ValueError('OCR layout rotation must be a cardinal angle')
+    # Providers store evidence boxes in original-image coordinates. Read them in
+    # the same upright orientation as the image sent to the extraction model.
+    upright = []
+    for line in lines:
+        x1, y1, x2, y2 = line['bbox']
+        box = {0: [x1, y1, x2, y2], 90: [y1, 1-x2, y2, 1-x1],
+               180: [1-x2, 1-y2, 1-x1, 1-y1], 270: [1-y2, x1, 1-y1, x2]}[rotation]
+        upright.append({**line, 'bbox': box})
+    lines = upright
+    names = [line for line in lines if normalize(line['text']) in
+             {'名称', '项目名称', '费用名称', '收费名称', '药品名称'}]
+    slopes = []
+    if len(names) == 1:
+        box = names[0]['bbox']
+        nx, ny = (box[0]+box[2])/2, (box[1]+box[3])/2
+        for line in lines:
+            if normalize(line['text']) not in {'规格', '单位', '单价', '数量', '医保类别', '金额', '总金额', '费用金额'}:
+                continue
+            box = line['bbox']
+            x, y = (box[0]+box[2])/2, (box[1]+box[3])/2
+            if x > nx+.08 and abs(y-ny) < .035:
+                slopes.append((y-ny)/(x-nx))
+    slope = median(slopes) if len(slopes) >= 2 else 0
+    width, height = cache.get('image_size', [1, 1])
+    if rotation in (90, 270):
+        width, height = height, width
+    if abs(math.degrees(math.atan2(slope*height, width))) > 8:
+        slope = 0
+    # Project onto the header baseline so a tilted amount stays with its name.
+    # Preserve the original boxes and all text; this changes reading order only.
+    def row_y(line):
+        x1, y1, x2, y2 = line['bbox']
+        return (y1+y2)/2-slope*(x1+x2)/2
     heights = [line['bbox'][3] - line['bbox'][1] for line in lines if line['bbox'][3] > line['bbox'][1]]
     tolerance = median(heights) * .45 if heights else .005
     rows = []
-    for line in sorted(lines, key=lambda l: (l['bbox'][1] + l['bbox'][3]) / 2):
-        y = (line['bbox'][1] + line['bbox'][3]) / 2
+    for line in sorted(lines, key=row_y):
+        y = row_y(line)
         if rows and abs(rows[-1][0] - y) <= tolerance:
             rows[-1][1].append(line)
         else:
@@ -266,6 +303,8 @@ def main():
     parser.add_argument('--config', help='private server configuration; never copied into outputs')
     parser.add_argument('--limit', type=int)
     parser.add_argument('--workers', type=int, default=4)
+    parser.add_argument('--experiment', choices=['A', 'B', 'C'], default='C',
+                        help='A: current baseline; B: specialized routing; C: B plus regional risk review')
     parser.add_argument('--ocr-layout', choices=['plain', 'bbox'], default='plain')
     parser.add_argument('--vision', action='store_true', help='read original image with OCR as optional context')
     parser.add_argument('--retry-partial', action='store_true', help='explicitly rerun partial documents under identical frozen settings')
@@ -305,6 +344,10 @@ def main():
                              'provider': sha(repo/'services/api/app/llm_extractor.py'),
                              'workload': sha(repo/'services/api/app/model_workloads.py'),
                              'routing': sha(repo/'services/api/app/material_routing.py'),
+                             'layout': sha(repo/'services/api/app/material_layout.py'),
+                             'skill_runtime': sha(repo/'services/api/app/extraction_skills.py'),
+                             **{'skill_' + path.parent.name: sha(path)
+                                for path in sorted((repo/'skills').glob('extraction-*/SKILL.md'))},
                              'fee_binding': sha(repo/'services/api/app/fee_binding.py'),
                              'fee_evidence': sha(repo/'services/api/app/fee_evidence.py')}
     rows = manifest['documents']
@@ -313,6 +356,8 @@ def main():
         previous = {}
         if destination.exists():
             previous = load(destination)
+            if previous.get('extraction_experiment', 'A') != args.experiment:
+                raise ValueError('experiment changed; use a new predictions directory')
             if previous.get('prompt_version') != PROMPT_VERSION or previous.get('model_id') != provider.model_id:
                 raise ValueError('use a new predictions directory for a new model or prompt')
             if previous.get('implementation_sha256') != implementation_hashes:
@@ -338,6 +383,7 @@ def main():
         run.update(model_id=provider.model_id, prompt_version=PROMPT_VERSION, code_revision=revision,
                    extraction_mode='mock' if provider.provider == 'mock' else 'live', ocr_mode='replay', vision=args.vision,
                    implementation_sha256=implementation_hashes)
+        run['extraction_experiment'] = args.experiment
         run['image_rotation_degrees'] = row.get('image_rotation_degrees', 0)
         run['orientation_method'] = row.get('orientation_method', 'original_orientation')
         run['direct_fee_rows_enabled'] = os.environ.get('ZHONGAN_DIRECT_FEE_ROWS') == '1'
@@ -370,7 +416,8 @@ def main():
                 image_bytes = Path(row['image']).read_bytes()
             run['result'] = extract_document(provider, layout_text(cache) if args.ocr_layout == 'bbox' else cache['text'],
                 image_bytes, image_rotation_degrees=row.get('image_rotation_degrees', 0),
-                table_context=cache.get('tables'), on_progress=checkpoint, ocr_lines=cache.get('lines'))
+                table_context=cache.get('tables'), on_progress=checkpoint, ocr_lines=cache.get('lines'),
+                material_layout=cache.get('material_layout'), experiment=args.experiment)
             run['status'] = ('partial' if run['result'].get('fee_extraction', {}).get('status') == 'partial'
                              else 'completed')
         except Exception as exc:
@@ -399,6 +446,7 @@ def main():
             if sum(counts.values()) % 10 == 0:
                 print(json.dumps({'done': sum(counts.values()), 'total': len(rows), **dict(counts)}), flush=True)
     write(args.output, {'model_id': provider.model_id, 'prompt_version': PROMPT_VERSION,
+                        'extraction_experiment': args.experiment,
                         'counts': dict(counts), 'manifest_sha256': sha(args.manifest)})
     print(json.dumps(dict(counts)), flush=True)
 

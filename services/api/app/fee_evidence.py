@@ -9,6 +9,8 @@ def bind_fee_evidence(blocks, text, has_image, tables=None):
     audit = {'accepted_rows': 0, 'rejected_rows': [], 'visual_only_rows': 0}
     output, used_lines, used_cells = [], set(), set()
     source_lines = text.splitlines()
+    billing_code_context = any(label in compact(text) for label in ('医保编码', '收费项目编码', '收费项目代码'))
+    billing_suffix = re.compile(r'\s*[\[【（(]\s*(\d{12,}(?:-\d{5,})?)\s*[\]】）)]\s*$')
     for block_index, block in enumerate(blocks):
         kept = []
         for index, original in enumerate(block.get('costDetailList', [])):
@@ -87,6 +89,17 @@ def bind_fee_evidence(blocks, text, has_image, tables=None):
                 continue
             if quote:
                 row['evidence_quote'] = quote
+            # A separately labeled billing identifier can be printed inside the
+            # name cell. Preserve its raw evidence, but keep it out of the name.
+            # Short numbers, specifications and alphanumeric models stay intact.
+            code = billing_suffix.search(row['detailName']) if billing_code_context else None
+            if code and code.group(1) in compact(text) and row['detailName'][:code.start()].strip():
+                row.update(raw_detail_name=row['detailName'],
+                           normalized_detail_name=row['detailName'][:code.start()].rstrip(),
+                           source_billing_codes=[code.group(1)],
+                           name_normalization_method='separate_labeled_billing_identifier_v1')
+                verification += '_billing_identifier_separated'
+                audit['separated_billing_code_rows'] = audit.get('separated_billing_code_rows', 0) + 1
             row['evidence_verification'] = verification
             kept.append(row)
             audit['accepted_rows'] += 1
