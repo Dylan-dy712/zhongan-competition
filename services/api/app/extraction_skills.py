@@ -26,6 +26,19 @@ def compact(value):
     return ''.join(unicodedata.normalize('NFKC', str(value)).split())
 
 
+def quote_supports_amount(row):
+    values = re.findall(r'(?<![\d.])-?\d+(?:,\d{3})*(?:\.\d+)?(?![\d.])', compact(row.get('evidence_quote', '')))
+    return any(float(v.replace(',', '')) == row['feeAmount'] for v in values)
+
+
+def supported_candidate(row):
+    # The risk that triggered review must not itself veto a visual correction.
+    # Acceptance checks the new candidate, rather than rerunning the scheduler.
+    return (min(row['confidence'].values()) >= .9
+            and compact(row['detailName']) in compact(row['evidence_quote'])
+            and quote_supports_amount(row))
+
+
 class ReviewRow(BaseModel):
     model_config = ConfigDict(extra='forbid')
     index: int = Field(ge=-1, le=199)
@@ -96,8 +109,7 @@ def row_risk(row, lines):
     if name not in quote:
         score = min(score, .6)
         reasons.append('name_missing_from_quote')
-    values = re.findall(r'(?<![\d.])-?\d+(?:,\d{3})*(?:\.\d+)?(?![\d.])', quote)
-    if not any(float(v.replace(',', '')) == row['feeAmount'] for v in values):
+    if not quote_supports_amount(row):
         score = min(score, .6)
         reasons.append('amount_missing_from_quote')
     if row.get('binding_status', 'unverified') not in ('verified_cells', 'verified_amount_visual_name'):
@@ -156,6 +168,7 @@ def review_extraction(result, text, image_bytes, rotation, lines, layout, call_s
         payload, raw = call_stage('skill_evidence_review', [{'role': 'system', 'content': system}, {'role': 'user', 'content': content}])
         decision = ReviewDecision.model_validate_json(raw)
         audit.update(status='completed', usage=payload.get('usage', {}),
+                     proposals=decision.model_dump(mode='json'),
                      coverage_complete_self_report=decision.coverage_complete,
                      visible_item_rows_self_report=decision.visible_item_rows, unresolved=decision.unresolved)
         seen = set()
@@ -165,7 +178,7 @@ def review_extraction(result, text, image_bytes, rotation, lines, layout, call_s
                 continue
             seen.add(change.index)
             candidate = fee_type.model_validate(change.row).model_dump(mode='json', exclude_none=True)
-            if row_risk(candidate, [])['score'] < .9:
+            if not supported_candidate(candidate):
                 audit['unresolved'].append('correction_insufficient_evidence')
                 continue
             audit['corrections'].append({'index': change.index, 'before': rows[change.index],
@@ -177,7 +190,7 @@ def review_extraction(result, text, image_bytes, rotation, lines, layout, call_s
                 audit['unresolved'].append('invalid_addition_position')
                 continue
             candidate = fee_type.model_validate(change.row).model_dump(mode='json', exclude_none=True)
-            if (row_risk(candidate, [])['score'] < .9 or
+            if (not supported_candidate(candidate) or
                 any(compact(r['detailName']) == compact(candidate['detailName']) and r['feeAmount'] == candidate['feeAmount'] for r in rows + [a[1] for a in additions])):
                 audit['unresolved'].append('addition_ambiguous_or_insufficient_evidence')
                 continue

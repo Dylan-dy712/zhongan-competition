@@ -19,7 +19,7 @@ from .extraction_skills import instruction, review_extraction
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
-PROMPT_VERSION = 'document-fields-evidence-v59-four-skills-unverified-bindings'
+PROMPT_VERSION = 'document-fields-evidence-v60-independent-review-acceptance'
 SCHEMA_VERSION = 'document-fields-v6-visual-name-evidence'
 FEE_TAXONOMY = {
     'inspectionFee': '检查费', 'westernMedicineFee': '西药费', 'materialFee': '材料费',
