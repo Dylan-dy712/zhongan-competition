@@ -281,7 +281,7 @@ def image_content(data):
     with Image.open(io.BytesIO(data)) as opened:
         mime = Image.MIME.get(opened.format, 'image/jpeg')
     return {'type': 'image_url', 'image_url': {'url': 'data:' + mime + ';base64,' +
-            base64.b64encode(data).decode('ascii'), 'detail': 'original'}}
+            base64.b64encode(data).decode('ascii'), 'detail': 'high'}}
 
 
 def document_image_views(image_bytes, single_image=False, rotation_degrees=0):
