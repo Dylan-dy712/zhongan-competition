@@ -47,6 +47,8 @@ def main():
         destination = output / row['case_id'] / (image.stem + '.json')
         if destination.exists():
             previous = load(destination)
+            if previous.get('material_layout') != row.get('material_layout'):
+                raise ValueError('material layout changed; use a new OCR output directory')
             if (previous['ocr_status'] == 'ok' and previous.get('parser_version') == parser_version
                     and previous.get('image_rotation_degrees', 0) == (row.get('image_rotation_degrees', 0) if args.provider == 'paddle' else 0)
                     and previous.get('table_routing', {}).get('status') != 'unavailable'):
@@ -83,6 +85,8 @@ def main():
                      'error_code':type(exc).__name__, 'text':'', 'lines':[]}
             if str(exc) in {'PADDLE_OCR_NATIVE_TIMEOUT', 'PADDLE_OCR_SERVICE_UNAVAILABLE'}:
                 cache['provider_error'] = str(exc)
+        if row.get('material_layout'):
+            cache['material_layout'] = row['material_layout']
         write(destination, cache)
         return cache['ocr_status']
     counts = {}

@@ -95,7 +95,7 @@ def bind_fee_evidence(blocks, text, has_image, tables=None):
             code = billing_suffix.search(row['detailName']) if billing_code_context else None
             if code and code.group(1) in compact(text) and row['detailName'][:code.start()].strip():
                 row.update(raw_detail_name=row['detailName'],
-                           detailName=row['detailName'][:code.start()].rstrip(),
+                           normalized_detail_name=row['detailName'][:code.start()].rstrip(),
                            source_billing_codes=[code.group(1)],
                            name_normalization_method='separate_labeled_billing_identifier_v1')
                 verification += '_billing_identifier_separated'

@@ -43,7 +43,7 @@ def workload_options(base_url, model_id, workload):
         return options
     if is_qianfan(base_url) and model_id in {'glm-5.3', 'glm-5.3-flash'}:
         options = {'thinking': {'type': 'enabled'},
-                   'max_tokens': 2048 if workload == 'citation_repair' else 32768}
+                   'max_tokens': 2048 if workload == 'citation_repair' else 4096 if workload == 'material_layout' else 32768}
         if model_id == 'glm-5.3-flash':
             options['reasoning_effort'] = 'low'
         return options
