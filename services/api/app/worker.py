@@ -429,7 +429,11 @@ def recognition_profile(pipeline_version):
     fingerprint=payload_digest({'cache':'parsed-pages-v1','pipeline':pipeline_version,
         'text':TEXT_PARSER_VERSION,'pdf':PDF_PARSER_VERSION,'router':ROUTING_VERSION,
         'ocr_provider':provider,'ocr_version':ocr_version,
-        'document_extraction':product_extraction.VERSION if product_extraction.enabled() else None})
+        'document_extraction':({'version':product_extraction.VERSION,
+            'prompt':product_extraction.PROMPT_VERSION,'schema':product_extraction.SCHEMA_VERSION,
+            'provider':os.getenv('ZHONGAN_DOCUMENT_LLM_PROVIDER'),
+            'model':os.getenv('ZHONGAN_DOCUMENT_LLM_MODEL_ID'),
+            'base':os.getenv('ZHONGAN_DOCUMENT_LLM_BASE_URL')} if product_extraction.enabled() else None)})
     return fingerprint,{TEXT_PARSER_VERSION,PDF_PARSER_VERSION,ocr_version}
 
 
