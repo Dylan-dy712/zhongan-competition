@@ -18,6 +18,7 @@ def session(previous=None,action='start',mode='benefit',fields=None,question='',
   fields=[{'key':k,'value':v} for k,v in fields.items()])
  return manage_session(args,previous,list(fields.values())+[question],question)
 bc=session();br=session(bc,'update',fields={'participant':'我本人','city':'上海市','preferred_time':'下周六上午'})
+sw=session(bc,'switch',mode='doctor',department='general')
 bb=session(br,'confirm',question='确认模拟预约')
 dc=session(mode='doctor',department='gastroenterology');dr=session(dc,'update',fields={'symptoms':'胃胀','duration':'两周',
  'current_status':'轻微，没有加重','diagnosis_history':'以前诊断过慢性胃炎','doctor_preference':'消化内科，无特别偏好'})
@@ -31,7 +32,7 @@ for disease in ['慢性咽炎','痛经','小儿腹泻','湿疹','腰肌劳损','
  variants[disease]={'ready':ready,'active':active,'ended':session(active,'end')}
 print(json.dumps({'available':recommend_services(a,['上海市浦东新区']),'missing':recommend_services(b,[]),
  'oncology':recommend_services(c,['上海市']),'clinical':recommend_services(d,[]),
- 'sessions':{'collect':bc,'ready':br,'booked':bb,'doctor_collect':dc,'doctor_ready':dr,'doctor_active':da,'ended':de},'variants':variants},ensure_ascii=True))`],{cwd:new URL('../../../',import.meta.url),encoding:'utf8'}));
+ 'sessions':{'collect':bc,'switched':sw,'ready':br,'booked':bb,'doctor_collect':dc,'doctor_ready':dr,'doctor_active':da,'ended':de},'variants':variants},ensure_ascii=True))`],{cwd:new URL('../../../',import.meta.url),encoding:'utf8'}));
 const dom=new JSDOM('<div id="root"></div>',{url:'http://localhost/#/chat'});
 for(const key of ['window','document','sessionStorage','localStorage','HTMLElement'])globalThis[key]=dom.window[key];
 globalThis.IS_REACT_ACT_ENVIRONMENT=true;
@@ -45,7 +46,7 @@ const base={text:'合成材料已整理，复查时可以带上已有报告。',
  suggested_questions:['我想了解中高端保单里有哪些医疗增值权益适合我。']};
 const initial={turn_id:'synthetic-report',request_id:'synthetic-analysis',question:'解读材料',input_kind:'analysis_ready',status:'completed',attachments:[],tool_events:[],answer:base,created_at:'2026-10-16',error_code:null};
 const snapshot={conversation,turns:[initial],analysis:{status:'completed',run_id:'synthetic-run'},report:{status:'not_released'}};
-const sent=[];let response=values.available,sessionResponse=null,fail=false,release,hold=null;
+const sent=[];let response=values.available,sessionResponse=null,sessionEvent=true,fail=false,release,hold=null;
 globalThis.fetch=async(url,options={})=>{
  const path=new URL(url,'http://localhost').pathname;
  if(path==='/judge/sample')return Response.json({}, {status:403});
@@ -54,7 +55,7 @@ globalThis.fetch=async(url,options={})=>{
  if(path==='/v1/conversations')return Response.json([conversation]);
  if(path===`/v1/conversations/${conversation.conversation_id}/messages`){
   const body=JSON.parse(options.body);sent.push(body);if(fail)return Response.json({message:'合成重试'},{status:503});if(hold)await hold;
-  snapshot.turns.push({...initial,turn_id:'synthetic-service-'+sent.length,input_kind:'user',question:body.message,request_id:body.request_id,answer:{text:sessionResponse?.speaker==='doctor_simulation'?`这里是${sessionResponse.doctor_profile.label}咨询模拟，请补充目前最想了解的问题。`:'可以，我们先按这次需求看服务和就医地区。',evidence_refs:[],history_refs:[],...(sessionResponse?{service_session:sessionResponse,service_speaker:sessionResponse.speaker}:{medical_services:response})}});
+  snapshot.turns.push({...initial,turn_id:'synthetic-service-'+sent.length,input_kind:'user',question:body.message,request_id:body.request_id,answer:{text:sessionResponse?.speaker==='doctor_simulation'?`这里是${sessionResponse.doctor_profile.label}咨询模拟，请补充目前最想了解的问题。`:'可以，我们先按这次需求看服务和就医地区。',evidence_refs:[],history_refs:[],...(sessionResponse?{service_session:sessionResponse,service_speaker:sessionResponse.speaker,service_session_event:sessionEvent}:{medical_services:response})}});
   return Response.json({answer:snapshot.turns.at(-1).answer});
  }
  if(path===`/v1/conversations/${conversation.conversation_id}`)return Response.json(snapshot);
@@ -114,9 +115,19 @@ try{
  sessionResponse=values.sessions.collect;await say('想预约体检');
  assert.ok(document.querySelector('.chat-turn:last-child .service-session-collecting'));
  assert.equal(document.querySelector('.chat-turn:last-child .service-session-actions button:not(.service-session-return)'),null);
+ sessionEvent=false;await say('先解释一下这个流程');
+ assert.ok(document.querySelector('.chat-turn:last-child .service-session-collecting'),'Latest active service stays visible without a new tool event');
+ assert.ok(document.querySelector('.chat-turn:last-child .service-session-return'),'Latest service remains actionable');
+ sessionEvent=true;sessionResponse=values.sessions.switched;await say('先暂停体检，接入互联网医院咨询');
+ assert.match(document.querySelector('.chat-turn:last-child .service-session').textContent,/已暂停并保留.*健康管理体检/);
+ assert.match(document.querySelector('.chat-turn:last-child .service-session').textContent,/主要症状或咨询问题/);
+ assert.doesNotMatch(document.querySelector('.chat-turn:last-child .service-session-missing').textContent,/期望日期/);
  sessionResponse=values.sessions.ready;await say('我本人，在上海市，下周六上午');
  assert.match(document.querySelector('.chat-turn:last-child .service-session').textContent,/下周六上午/);
  assert.doesNotMatch(document.querySelector('.chat-turn:last-child').textContent,/DEMO-/);
+ sessionEvent=false;await say('好的');
+ assert.ok(document.querySelector('.chat-turn:last-child .service-session-actions button:not(.service-session-return)'),'Confirmation remains available after an ordinary reply');
+ sessionEvent=true;
  const previousCount=sent.length;sessionResponse=values.sessions.booked;
  hold=new Promise(resolve=>{release=resolve;});await click('.chat-turn:last-child .service-session-actions button');
  assert.ok([...document.querySelectorAll('.service-session-actions button')].every(button=>button.disabled));

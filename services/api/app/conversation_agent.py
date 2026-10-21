@@ -36,7 +36,7 @@ from .chat_reply import CHAT_REPLY_INSTRUCTION, decode_chat_reply
 from .web_knowledge import WebKnowledge, chat_concepts, CONCEPTS, COST_TOPICS
 
 
-PROMPT_VERSION = 'conversation-agent-v14-contextual-service-completion'
+PROMPT_VERSION = 'conversation-agent-v15-service-state-progression'
 ANALYSIS_PROMPT_VERSION = 'patient-analysis-narrative-v19-judge-paragraphs'
 ANALYSIS_INSTRUCTION = """
 本轮是暖暖看完资料后，对用户讲清这次就医情况。遵循上面的对话语气，读起来要像人在耐心讲解。
@@ -281,9 +281,12 @@ class AgentModel:
     def plan_service_session(self,messages):
         from .medical_services import catalog
         choices=[{key:item[key] for key in ('id','title','need','eligibility')} for item in catalog()['benefits']]
-        instruction=('上一条承诺在当前聊天预约或接入医生，但尚未执行服务工具。只返回JSON对象'
+        instruction=('根据用户最新消息和当前服务状态规划本轮实际推进动作。只返回JSON对象'
             '{"session_request":参数对象或null}，不能返回段落、计划或口头承诺。'
-            '按当前用户意图和已整理信息选择start/update/confirm/reply/end。已有状态延续；信息不足也可start并保留缺项，工具返回后补问。'
+            '按当前用户意图和已整理信息选择start/switch/update/confirm/reply/end。已有状态延续；信息不足也可start并保留缺项，工具返回后补问。'
+            'collecting或awaiting_confirmation期间，补充信息、回答偏好（包括“都可以”）必须update并摘录原话。'
+            '用户改办另一项服务或同意上文的另一项服务建议时必须switch，不能继续旧服务或要求先完成旧服务。'
+            '“好的”不是已预约或已接入：缺项先update补齐，已有完整摘要则confirm，由工具校验确认。'
             '使用互联网医院、线上咨询和找医生必须选择mode=doctor，按咨询问题、持续时间、严重度等收集，不按体检预约收集城市/时间。'
             '只有用户并未要求开始/继续服务或需先判断急症时才返回null。临床信息仍需如实填写，未知不猜。'
             '已查询的服务或以下公开目录均可用于选择service_id，不代表真实保单已核验：'+json.dumps(choices,ensure_ascii=False)+
@@ -464,7 +467,7 @@ class CareTools:
             if self.medical_services and self.medical_services['status']=='urgent' and args.action!='end':
                 args=args.model_copy(update={'clinical':MedicalServiceArgs(routes=['online'],needs=['consultation'],clinical_priority='urgent')})
             state=manage_session(args,self.service_session,self.service_user_messages,self.service_current_question)
-            if state.get('session_id'):
+            if state.get('session_id') and state.get('status')!='active_service_conflict':
                 self.service_session_called=True
                 self.service_session=state
                 self.service_speaker=state.get('speaker','assistant')
@@ -730,6 +733,8 @@ def run_agent(history, question, attachments, tools, model=None, on_event=None, 
         messages.append({'role': 'user', 'content': json.dumps({'message_attachment_text': attachment_materials}, ensure_ascii=False)})
     events = [{'tool': 'read_chat_attachments', 'status': attachment_materials['status']}] if attachment_materials else []
     budget = 6
+    service_planning_calls = 0
+    session_plan_seconds = 0
     if not analysis_mode and isinstance(tools,CareTools) and tools.service_session:
         state=tools.service_session;action=None
         if state.get('phase')=='awaiting_confirmation' and question.strip()==state.get('confirmation_text'):
@@ -745,17 +750,36 @@ def run_agent(history, question, attachments, tools, model=None, on_event=None, 
             events.append({'tool':'manage_service_session','status':str(found.get('phase',found.get('status','completed')))})
             if on_event:on_event(events)
             messages.append({'role':'tool','tool_call_id':call_id,'content':json.dumps(found,ensure_ascii=False)})
+        elif (state.get('phase') in {'collecting','awaiting_confirmation','doctor_active'}
+                and getattr(type(model),'plan_service_session',None) is not None):
+            # Ongoing services advance from the user's message, not from whether
+            # the narrative happens to contain a recognized promise phrase.
+            if getattr(tools,'memory_snapshot',None) is not None:
+                tools.validate_runtime();tools.conn.commit()
+            plan_started=time.monotonic()
+            args=model.plan_service_session(messages)
+            session_plan_seconds=time.monotonic()-plan_started
+            service_planning_calls+=1
+            if args is not None:
+                arguments=args.model_dump_json();call_id='service-state-progression'
+                messages.append({'role':'assistant','content':None,'tool_calls':[{'id':call_id,'type':'function',
+                    'function':{'name':'manage_service_session','arguments':arguments}}]})
+                found=tools.execute('manage_service_session',arguments);budget-=1
+                events.append({'tool':'manage_service_session','status':str(found.get('phase',found.get('status','completed')))})
+                if on_event:on_event(events)
+                messages.append({'role':'tool','tool_call_id':call_id,'content':json.dumps(found,ensure_ascii=False)})
+            else:
+                messages.append({'role':'user','content':'当前消息未推进服务状态。可以直接回答一般问题，但不能声称已记录新字段、已确认安排或已开启另一项服务；有办理动作必须实际调用工具。'})
     repaired = False
     completion_repaired = False
     history_completion_repaired = False
     service_completion_repaired = False
     inline_service_repaired = False
     offline_boundary_repaired = False
-    service_planning_calls = 0
     analysis_has_evidence = False
     aliases = {}
     knowledge_pages = []
-    model_seconds = 0
+    model_seconds = session_plan_seconds
     partial_delivery = False
     review_calls = 0
     review_seconds = 0

@@ -32,6 +32,7 @@ def pending_session_command(state,question):
 
 SESSION_INSTRUCTION='''
 服务在当前聊天完成，不再让用户去弹窗或跳转。用户表达想预约权益、找医生咨询，或继续填写服务需求时，调用manage_service_session。
+已有collecting/awaiting_confirmation服务时，用户补充信息或偏好也必须update，不得只口头记下。用户要办理另一项服务（例如体检中改为医生咨询）用switch，暂停保留旧需求后开始新服务，不要求先完成旧流程。继续此前保留的权益也用switch选择对应service_id。
 该工具仅演示，不核验真实保单、不产生真实预约、不接入真人。不要索取手机号、身份证或付款资料。查权益仍先用recommend_medical_services取得目录，再用目录内service_id启动benefit流程。
 用户要使用互联网医院、线上咨询或对接医生时使用mode=doctor，先收集咨询问题和病情；不能当成体检预约去问城市和期望日期。目录中的图文咨询权益开始办理时也进入doctor流程，不能在benefit流程里预约一个“咨询入口”。
 benefit收集就诊人称呼/关系、就医城市、期望日期时段；用户指定机构时用facility_preference记录，未指定可由暖暖在模拟中安排示例服务点，明确不是实际机构。doctor收集症状、持续时间、当前严重程度/是否加重、既往诊断、医生偏好（可明确无偏好）。每轮只追问一两个缺项，已有信息不要重复问。fields的value逐字摘录用户本对话的表述，不把模型总结当成用户原话；疾病/科室判断用clinical和department表达。根据本次部位、症状、年龄、既往诊断及用户偏好选择目录中的科室或咨询方向，不默认消化方向，不承诺真实医生姓名、职称或号源。方向未知先全科分诊，儿童问题先考虑儿科，妇科和中医需求分别核对相应服务范围。
@@ -80,7 +81,7 @@ def grounded_field(value,messages):
 
 class ServiceSessionArgs(BaseModel):
     model_config=ConfigDict(extra='forbid')
-    action:Literal['start','update','confirm','reply','end']
+    action:Literal['start','switch','update','confirm','reply','end']
     mode:Literal['benefit','doctor']='benefit'
     service_id:str=Field(default='',max_length=100)
     department:OnlineDepartment|None=None
@@ -121,7 +122,7 @@ def restore_session(history):
 
 def manage_session(args,previous,user_messages,current_question):
     """Only catalog services and quoted user fields can enter persisted state."""
-    if args.action=='start' and args.mode=='benefit':
+    if args.action in {'start','switch'} and args.mode=='benefit':
         benefit=next((item for item in catalog()['benefits'] if item['id']==args.service_id),None)
         if benefit and benefit['need']=='consultation':
             args=args.model_copy(update={'mode':'doctor','service_id':''})
@@ -131,9 +132,18 @@ def manage_session(args,previous,user_messages,current_question):
         if not state:return {'status':'no_session','notice':'当前没有正在进行的模拟服务。'}
         state.update(phase='ended',speaker='assistant',notice='本次模拟服务已结束，可以继续和暖暖聊。')
         return state
-    if args.action=='start':
-        if state and state['phase'] not in {'ended','blocked','booked'}:
-            return {**state,'notice':'请先继续或结束当前模拟服务，再开始另一项服务。'}
+    if args.action in {'start','switch'}:
+        if args.action=='start' and state and state['phase'] not in {'ended','blocked','booked'}:
+            return {**state,'status':'active_service_conflict','notice':'当前仍有其他服务。用户要改办本次服务时，请用switch暂停保留旧需求并开始新流程。'}
+        paused=deepcopy((state or {}).get('paused_sessions',[]))
+        resumed=None
+        if args.action=='switch':
+            if args.mode=='benefit':
+                resumed=next((item for item in paused if item['mode']=='benefit' and item['service_id']==args.service_id),None)
+                if resumed:paused.remove(resumed)
+            if state and state['phase'] in {'collecting','awaiting_confirmation','doctor_active'}:
+                saved={key:deepcopy(value) for key,value in state.items() if key not in {'paused_sessions','status'}}
+                paused=[item for item in paused if item['session_id']!=saved['session_id']]+[saved]
         if args.mode=='benefit':
             item=next((x for x in catalog()['benefits'] if x['id']==args.service_id),None)
             if not item:return {'status':'invalid_service','notice':'请先选择公开目录中可核对的权益服务。'}
@@ -147,6 +157,8 @@ def manage_session(args,previous,user_messages,current_question):
             'title':title,'department':args.department or 'general','fields':{},'need':need,'speaker':'assistant',
             'notice':'仅模拟演示，不产生真实预约；无真人医生接入。'}
         if args.mode=='doctor':state.update(department=profile['id'],doctor_profile=profile)
+        if resumed:state['fields']=deepcopy(resumed['fields'])
+        if paused:state['paused_sessions']=paused[-3:]
     elif not state or state['phase']=='ended':
         return {'status':'no_session','notice':'请先在当前聊天开始一项模拟服务。'}
     if args.clinical is None:
@@ -155,7 +167,7 @@ def manage_session(args,previous,user_messages,current_question):
         profile=select_doctor_profile(args.department or state['department'],args.condition_name,user_messages)
         if profile is None:return {'status':'ungrounded_condition','notice':'请核对本次疾病原话，不能把推测当作诊断。'}
         changed_department=profile['id']!=state['department']
-        if args.action=='start' or changed_department or args.condition_name or not state.get('doctor_profile'):
+        if args.action in {'start','switch'} or changed_department or args.condition_name or not state.get('doctor_profile'):
             state.update(department=profile['id'],doctor_profile=profile,title=profile['label']+'医生咨询')
     clinical=args.clinical.model_copy(update={'routes':['online'] if state['mode']=='doctor' else ['benefits'],
         'needs':[state['need']]})
@@ -224,7 +236,7 @@ def manage_session(args,previous,user_messages,current_question):
             state.update(phase='doctor_active',speaker='doctor_simulation',
                 notice='AI模拟医生已进入当前聊天，无真人接入；可以继续在下方输入问题。')
         return state
-    if args.action=='update' or args.action=='start':
+    if args.action in {'update','start','switch'}:
         state['phase']='collecting' if state['missing_fields'] else 'awaiting_confirmation'
         state['notice']='请继续补充需求。' if state['missing_fields'] else '需求已整理，请核对后在当前聊天确认模拟安排。'
     return state
