@@ -100,7 +100,6 @@ export default function AnalysisFlow({open,snapshot,upload,submitting,error,onCl
     {(processing || view.percent!==null) && <section className="analysis-status-card" aria-label="材料分析进度与阶段">
       <div className="analysis-percent">{estimated!==null?<strong>{estimated}<small>%</small></strong>:<strong className="analysis-syncing">同步中</strong>}<span>{view.kind==='upload'?'上传进度':processing?'预估进度':'分析完成'}</span></div>
       {processing&&<p className="analysis-step-summary">已完成 {completedSteps} / {steps.length} 步{view.index>=0?` · 当前第 ${view.index+1} 步`:''}</p>}
-      {processing&&Number(snapshot?.analysis.stage_results?.parse?.reused_pages)>0&&<p className="analysis-reuse-note">已直接使用 {snapshot?.analysis.stage_results?.parse?.reused_pages} 页已识别内容</p>}
       <div className={`analysis-progress-track ${processing || view.kind==='upload'?'active':''} ${progressValue===undefined?'indeterminate':''}`}>
         <progress max={progressMax} value={progressValue} aria-label={view.kind==='upload'?'材料上传进度':'材料分析进度'} aria-valuetext={processing?`${estimated!==null?`预估进度 ${estimated}%，`:''}已完成 ${completedSteps} / ${steps.length} 步，${view.index>=0?`当前正在${steps[view.index][1]}`:'等待处理状态'}`:undefined}/>
         <span className="analysis-progress-fill" style={progressValue===undefined?undefined:{width:`${progressValue/progressMax*100}%`}} aria-hidden="true"/>
