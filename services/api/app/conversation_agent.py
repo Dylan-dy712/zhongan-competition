@@ -272,6 +272,7 @@ class AgentModel:
         if content.startswith('```'):
             content=content.split('\n',1)[-1].rsplit('```',1)[0].strip()
         data=json.loads(content)
+        if isinstance(data,dict) and 'routes' in data:return MedicalServiceArgs.model_validate(data)
         if not isinstance(data,dict) or 'service_request' not in data:raise ValueError('INVALID_SERVICE_PLAN')
         return None if data['service_request'] is None else MedicalServiceArgs.model_validate(data['service_request'])
 

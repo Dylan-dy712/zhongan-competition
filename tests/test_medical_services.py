@@ -23,6 +23,7 @@ class MedicalServicesTests(unittest.TestCase):
         self.assertTrue(pending_service_reply('我把中高端服务参考里的体检相关内容调出来给你看。'))
         self.assertTrue(pending_service_reply('我先把互联网医院的入口和参考信息调出来给你。'))
         self.assertTrue(pending_service_reply('我帮你调一下上海市肿瘤专科的线下就医参考，你可以看看有哪些方向可选。'))
+        self.assertTrue(pending_service_reply('我帮你调一下中高端服务参考里的线下肿瘤就医协助，看看有哪些候选安排。'))
         self.assertFalse(pending_service_reply('医院的普通部和特需部如何区分，要看医院公开说明。'))
         self.assertFalse(pending_service_reply('你担心复查结果，我会陪你一起梳理想问医生的问题。'))
 
