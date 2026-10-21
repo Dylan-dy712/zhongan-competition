@@ -162,6 +162,14 @@ class PdfPagePreviewApiTests(unittest.TestCase):
         self.assertEqual(json.loads(response.headers['x-evidence-regions']),boxes)
         locate.assert_called_once_with(unittest.mock.ANY,self.item.evidence_id,self.item.text_span.text)
 
+    def test_unresolved_whole_page_citations_do_not_pretend_all_page_boxes_are_precise(self):
+        self.item.extraction_method='reviewed-sample-page-v1'
+        with patch.object(api,'get_evidence',return_value=self.item),patch.object(api,'get_document',return_value=self.document()),patch.object(api,'evidence_ocr_regions') as locate:
+            response=self.client.get(self.url)
+        self.assertEqual(response.status_code,200)
+        self.assertEqual(json.loads(response.headers['x-evidence-regions']),[])
+        locate.assert_not_called()
+
     def test_unauthorized_evidence_or_revoked_document_never_renders(self):
         with patch.object(api, 'get_evidence', return_value=None), \
              patch.object(api, 'get_document') as document, patch.object(api, 'render_evidence_page') as render:
