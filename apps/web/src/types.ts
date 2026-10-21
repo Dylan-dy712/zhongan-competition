@@ -95,6 +95,7 @@ export interface ServiceSession {
   service_id:string;title:string;department:string;notice:string;summary?:{label:string;value:string}[];
   missing_fields?:string[];confirmation_text?:string;booking_reference?:string;
   appointment?:{venue:string;city:string;time:string;participant:string};
+  paused_sessions?:{session_id:string;mode:'benefit'|'doctor';service_id:string;title:string}[];
   doctor_profile?:{id:string;label:string;parent_department:string;support_level:string;scope_note:string;
     live_roster_verified:false;verified_on:string;
     sources:{title:string;url:string;pages:string;product_scope:string}[];

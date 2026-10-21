@@ -196,6 +196,86 @@ class ServiceSessionTests(unittest.TestCase):
         duplicate=self.call(state,'start',fields=self.benefit_fields)
         self.assertEqual(duplicate['session_id'],state['session_id'])
         self.assertEqual(duplicate['mode'],'doctor')
+        self.assertEqual(duplicate['status'],'active_service_conflict')
+
+    def test_switch_pauses_checkup_and_can_restore_it_without_booking(self):
+        original=self.call(fields=self.benefit_fields)
+        doctor=self.call(original,'switch',mode='doctor',question='先用互联网医院咨询医生')
+        self.assertEqual(doctor['mode'],'doctor')
+        self.assertEqual(doctor['phase'],'collecting')
+        self.assertEqual(doctor['paused_sessions'][0]['fields'],original['fields'])
+        self.assertNotIn('paused_sessions',doctor['paused_sessions'][0])
+        restored=self.call(doctor,'switch',question='继续之前的体检预约')
+        self.assertEqual(restored['mode'],'benefit')
+        self.assertEqual(restored['fields'],original['fields'])
+        self.assertEqual(restored['phase'],'awaiting_confirmation')
+        self.assertNotIn('booking_reference',restored)
+        self.assertEqual(restored['paused_sessions'][0]['mode'],'doctor')
+
+    def test_active_conflict_does_not_mark_an_unperformed_start_as_executed(self):
+        tools=CareTools(MagicMock(),'actor','conversation');tools.service_session=self.call()
+        with patch('services.api.app.conversation_agent.require_conversation',return_value={'case_id':'case'}):
+            result=tools.execute('manage_service_session',ServiceSessionArgs(action='start',mode='doctor',clinical=self.clinical).model_dump_json())
+        self.assertEqual(result['status'],'active_service_conflict')
+        self.assertFalse(tools.service_session_called)
+        self.assertEqual(tools.service_session['mode'],'benefit')
+
+    def test_blocked_doctor_switch_shows_actual_offline_routing(self):
+        class Model:
+            def plan_service_session(self,messages):return ServiceSessionArgs(action='switch',mode='doctor',
+                clinical=MedicalServiceArgs(routes=['online'],needs=['consultation'],visit_stage='first_visit'))
+            def complete(self,messages,**kwargs):return {'content':json.dumps({'text':'告诉我城市，我就帮你安排线上医生。'})}
+        tools=CareTools(MagicMock(),'actor','conversation');tools.validate_reply=MagicMock()
+        history=[{'question':'先约体检','status':'completed','answer':{'text':'请补充信息。','service_session':self.call()}}]
+        with patch('services.api.app.conversation_agent.require_conversation',return_value={'case_id':'case'}):
+            answer,events=run_agent(history,'现在先处理新出现的头痛，找医生咨询',[],tools,model=Model())
+        self.assertEqual(answer['service_session']['phase'],'blocked')
+        self.assertEqual(answer['service_speaker'],'assistant')
+        self.assertIn('线下评估',answer['text'])
+        self.assertNotIn('安排线上医生',answer['text'])
+        self.assertEqual(answer['medical_services']['status'],'needs_location')
+        self.assertNotIn('routing_result',answer['service_session'])
+
+    def test_collecting_turns_advance_even_when_narrative_has_no_promise_phrase(self):
+        class Model:
+            def __init__(self,args,text):self.args=args;self.text=text
+            def plan_service_session(self,messages):return self.args
+            def complete(self,messages,**kwargs):return {'content':json.dumps({'text':self.text})}
+        state=self.call()
+        history=[{'question':'帮我约体检','status':'completed','input_kind':'user','answer':{'text':'请补充信息。','service_session':state}}]
+        def advance(question,args,text):
+            tools=CareTools(MagicMock(),'actor','conversation');tools.validate_reply=MagicMock()
+            with patch('services.api.app.conversation_agent.require_conversation',return_value={'case_id':'case'}):
+                answer,events=run_agent(history,question,[],tools,model=Model(args,text))
+            history.append({'question':question,'status':'completed','input_kind':'user','answer':answer})
+            self.assertTrue(answer['service_session_event'])
+            self.assertTrue(any(event['tool']=='manage_service_session' for event in events))
+            return answer['service_session']
+        ready=advance('；'.join(self.benefit_fields.values()),ServiceSessionArgs(action='update',clinical=self.clinical,
+            fields=[{'key':key,'value':value} for key,value in self.benefit_fields.items()]),'信息已补充，请核对摘要。')
+        self.assertEqual(ready['phase'],'awaiting_confirmation')
+        doctor=advance('需要互联网医院医生',ServiceSessionArgs(action='switch',mode='doctor',clinical=self.clinical),
+            '请告诉我这次的咨询问题。')
+        self.assertEqual(doctor['mode'],'doctor')
+        self.assertEqual(doctor['paused_sessions'][0]['mode'],'benefit')
+        partial={key:value for key,value in self.doctor_fields.items() if key!='doctor_preference'}
+        collecting=advance('；'.join(partial.values()),ServiceSessionArgs(action='update',mode='doctor',department='gastroenterology',
+            clinical=self.clinical,fields=[{'key':key,'value':value} for key,value in partial.items()]),'还想问一下医生偏好。')
+        self.assertEqual(collecting['phase'],'collecting')
+        ready=advance('都可以',ServiceSessionArgs(action='update',mode='doctor',clinical=self.clinical,
+            fields=[{'key':'doctor_preference','value':'都可以'}]),'需求已整理，请核对接入摘要。')
+        self.assertEqual(ready['phase'],'awaiting_confirmation')
+        active=advance('确认接入模拟医生',ServiceSessionArgs(action='reply',mode='doctor',clinical=self.clinical),
+            '这里是对应方向的模拟医生，可以继续咨询。')
+        self.assertEqual(active['phase'],'doctor_active')
+        self.assertEqual(active['speaker'],'doctor_simulation')
+        ended=advance('结束当前模拟服务，回到暖暖继续聊。',ServiceSessionArgs(action='end'),
+            '医生咨询结束，体检需求仍保留。')
+        self.assertEqual(ended['phase'],'ended')
+        resumed=advance('继续之前的体检预约',ServiceSessionArgs(action='switch',mode='benefit',service_id=self.benefit,clinical=self.clinical),
+            '已恢复体检需求，请核对摘要。')
+        self.assertEqual(resumed['mode'],'benefit')
+        self.assertEqual(resumed['phase'],'awaiting_confirmation')
 
     def test_agent_restores_server_state_and_labels_doctor_response(self):
         state=self.ready_doctor()

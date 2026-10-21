@@ -13,6 +13,7 @@ export default function ServiceSession({session,onAsk,disabled=false,interactive
       session.phase==='ended'?'已回到暖暖':session.phase==='blocked'?'先确认适合的就医方式':session.title}</strong>
       <span>模拟演示{session.mode==='doctor'?' · 无真人接入':''}</span></header>
     <p>{session.notice}</p>
+    {!!session.paused_sessions?.length&&<p>已暂停并保留：{session.paused_sessions.map(item=>item.title).join('、')}。想继续时直接在聊天里告诉我。</p>}
     {session.mode==='doctor'&&session.doctor_profile&&<details className="service-doctor-scope"><summary>科室匹配与服务范围</summary>
       <p>{session.doctor_profile.scope_note}</p>
       {session.doctor_profile.condition_match&&<p>本次提到：{session.doctor_profile.condition_match.name}。
