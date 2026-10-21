@@ -10,7 +10,8 @@ from uuid import uuid4
 
 import requests
 from pypdf import PdfWriter
-from services.api.app.judge_sample_cache import read_sample_pages,write_sample_pages,reviewed_document_pages
+from services.api.app.judge_sample_cache import (read_sample_pages,write_sample_pages,reviewed_document_pages,
+    publish_prepared_library,published_sample_pages,published_path)
 from services.api.app.worker import route_document,evidence_for_page
 from services.api.app.analysis_review import source_verdict
 
@@ -96,6 +97,62 @@ class ReviewedSampleCacheTests(unittest.TestCase):
         self.assertEqual([e['text'] for e in evidence_for_page(self.document,cached)],['合成材料，需门诊复诊。'])
         changed=copy.deepcopy(page);changed['text']+='\n不可靠金额999'
         self.assertEqual(write_sample_pages(self.manifest,self.item,self.fingerprint,[changed],self.versions),0)
+
+    def publish(self):
+        page=recognized();page['parser_version']='volcengine-ocr-2020-08-26-normal-v1'
+        versions={page['parser_version']}
+        write_sample_pages(self.manifest,self.item,self.fingerprint,[page],versions)
+        publish_prepared_library(self.manifest,self.fingerprint,versions)
+        return page
+
+    def test_published_ocr_survives_provider_change_without_forging_provenance(self):
+        original=self.publish()
+        first=reviewed_document_pages(self.connection(),self.document,'d'*64,{'paddle-ocr-v5-server-cpu-960-v1'})
+        with patch('services.api.app.worker.create_ocr',side_effect=AssertionError('Live OCR must not run')):
+            pages=route_document(self.document,self.path,'document-parser-v1',cached=first)
+        self.assertEqual(pages,[original])
+        self.assertEqual(pages[0]['parser_version'],'volcengine-ocr-2020-08-26-normal-v1')
+        a=evidence_for_page(self.document,pages[0])
+        b=evidence_for_page({**self.document,'document_id':uuid4()},pages[0])
+        self.assertNotEqual(a[0]['evidence_id'],b[0]['evidence_id'])
+        self.assertEqual(a[0]['bbox'],original['blocks'][0]['bbox'])
+        self.assertEqual(reviewed_document_pages(self.connection(judge=False),self.document,'d'*64,set()),{})
+
+    def test_publication_rejects_changed_sample_version_payload_and_extraction_config(self):
+        self.publish()
+        self.assertTrue(published_sample_pages(self.manifest,self.item))
+        self.assertEqual(published_sample_pages({**self.manifest,'version':'changed'},self.item),{})
+        with patch.dict(os.environ,{'ZHONGAN_DOCUMENT_EXTRACTION':'C'}):
+            self.assertEqual(published_sample_pages(self.manifest,self.item),{})
+        index=json.loads(published_path().read_text());index['documents'][0]['artifact_sha256']='0'*64
+        published_path().write_text(json.dumps(index))
+        self.assertEqual(published_sample_pages(self.manifest,self.item),{})
+
+    def test_publication_rejects_incomplete_library_and_unknown_parser(self):
+        self.prepare()
+        with self.assertRaisesRegex(ValueError,'SAMPLE_PREPARATION_INCOMPLETE'):
+            publish_prepared_library(self.manifest,self.fingerprint,self.versions)
+        self.publish()
+        incomplete={**self.manifest,'documents':[{**self.item,'page_count':2}]}
+        with self.assertRaisesRegex(ValueError,'SAMPLE_PREPARATION_INCOMPLETE'):
+            publish_prepared_library(incomplete,self.fingerprint,{'volcengine-ocr-2020-08-26-normal-v1'})
+
+    def test_product_preparation_keeps_partial_and_rejects_incomplete_extraction(self):
+        from services.api.app import product_extraction as product
+        page=recognized();page['parser_version']='volcengine-ocr-2020-08-26-normal-v1'
+        versions={page['parser_version']}
+        config={'ZHONGAN_DOCUMENT_EXTRACTION':'C','ZHONGAN_DOCUMENT_LLM_PROVIDER':'synthetic',
+                'ZHONGAN_DOCUMENT_LLM_MODEL_ID':'synthetic-model'}
+        with patch.dict(os.environ,config):
+            write_sample_pages(self.manifest,self.item,self.fingerprint,[page],versions)
+            with self.assertRaises(ValueError):publish_prepared_library(self.manifest,self.fingerprint,versions)
+            page['metadata']['document_extraction']={'version':product.VERSION,'prompt_version':product.PROMPT_VERSION,
+                'schema_version':product.SCHEMA_VERSION,'provider':'synthetic','model_id':'synthetic-model',
+                'status':'partial','prediction':{'requires_review':True}}
+            write_sample_pages(self.manifest,self.item,self.fingerprint,[page],versions)
+            publish_prepared_library(self.manifest,self.fingerprint,versions)
+            prepared=reviewed_document_pages(self.connection(),self.document,'d'*64,{'new-live-parser'})
+            self.assertEqual(prepared[0]['metadata']['document_extraction']['status'],'partial')
 
 
 class FidelityTransportTests(unittest.TestCase):
