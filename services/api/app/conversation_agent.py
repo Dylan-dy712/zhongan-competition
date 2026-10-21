@@ -622,7 +622,10 @@ def run_agent(history, question, attachments, tools, model=None, on_event=None, 
     started = time.monotonic()
     model = model or (AgentModel(analysis_mode=True) if analysis_mode else AgentModel())
     allow_suggestions = False
-    paragraph_analysis=(analysis_mode and getattr(tools,'deferred_patient_analysis',False) is True
+    # Every fresh narrative, including replacements for a rejected shared draft,
+    # derives anchors from its paragraphs. Requiring the model to copy prose
+    # again into quote metadata made ordinary (non-deferred) retries fail late.
+    paragraph_analysis=(analysis_mode
                         and is_qianfan(getattr(getattr(model,'config',None),'base_url',None)))
     analysis_instruction=ANALYSIS_INSTRUCTION + GUIDANCE_INSTRUCTION
     if paragraph_analysis:

@@ -41,6 +41,15 @@ class AnalysisParagraphTests(unittest.TestCase):
                 {'text':'重复的事实。','source_refs':['S1']}]}),{'S1':str(uuid4())})
 
     def test_full_final_body_is_generated_once_then_independently_reviewed(self):
+        self.check_final_body(deferred=True)
+
+    def test_replacement_for_non_deferred_report_uses_paragraphs_and_source_review(self):
+        self.check_final_body(deferred=False)
+
+    def test_legacy_anchor_failure_repairs_into_paragraphs_without_reanalyzing_materials(self):
+        self.check_final_body(deferred=False, legacy_first=True)
+
+    def check_final_body(self, deferred, legacy_first=False):
         body='合成记录中的安排还需要核对，保留已有材料，向诊疗团队确认本次具体情况。'*20
         class Model:
             supports_inline_citations=True
@@ -50,6 +59,11 @@ class AnalysisParagraphTests(unittest.TestCase):
                 self.calls+=1
                 assert '本轮最终JSON采用段落格式' in messages[0]['content']
                 assert '另返回citations数组' not in messages[0]['content']
+                if legacy_first and self.calls==1:
+                    return {'content':json.dumps({'text':body,'evidence_refs':['S1'],
+                        'citations':[{'quote':'模型误抄的引用句不在正文中。','source_refs':['S1']}]})}
+                if legacy_first:
+                    assert '不重写成text/citations格式' in messages[-1]['content']
                 return {'content':json.dumps({'paragraphs':[{'text':body,'source_refs':['S1']}]})}
             def review_analysis(self,pages,text,**kwargs):
                 self.reviews+=1
@@ -59,11 +73,11 @@ class AnalysisParagraphTests(unittest.TestCase):
             def review_guidance(self,*args):
                 self.quality+=1
                 return GuidanceQuality(**{k:True for k in GuidanceQuality.model_fields if k not in {'issues','explanations'}})
-        model=Model();tools=MagicMock();tools.deferred_patient_analysis=True
+        model=Model();tools=MagicMock();tools.deferred_patient_analysis=deferred
         tools.execute.return_value={'status':'available','next_offset':None,
             'evidence':[{'evidence_id':str(uuid4()),'text':'合成记录中的安排还需要核对。'}]}
         reply,_=run_agent([],'完整解读',[],tools,model=model,analysis_mode=True)
         self.assertEqual(reply['text'],body)
         self.assertGreaterEqual(len(body),650)
-        self.assertEqual((model.calls,model.reviews,model.quality),(1,1,1))
+        self.assertEqual((model.calls,model.reviews,model.quality),(2 if legacy_first else 1,1,1))
         self.assertEqual(len(reply['citations']),1)
