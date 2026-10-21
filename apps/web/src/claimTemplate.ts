@@ -1,6 +1,6 @@
 import homeChat from '../../../output_dir/product-design/assets/home-chat.webp';
 import documentArt from '../../../output_dir/product-design/assets/onboard-document.webp';
-export type ClaimFile={id:string;name:string;size:number;category:string;sample:boolean;url:string|null;file:File};
+export type ClaimFile={id:string;name:string;size:number;category:string;sample:boolean;sampleDocumentId?:string;url:string|null;file:File};
 export const initialClaimForm=()=>({kind:'住院医疗',cause:'疾病',diagnosis:'',start:'',end:'',incident:'',description:'',total:'',social:'否',other:'否'});
 export type ClaimForm=Record<keyof ReturnType<typeof initialClaimForm>,string>;
 const escape=(value:unknown)=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!));

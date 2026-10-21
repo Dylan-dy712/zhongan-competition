@@ -146,6 +146,12 @@ class AnalysisRequest(ChatMessage):
     force_new: bool = False
 
 
+class JudgeSampleDocument(Contract):
+    sample_id: str = Field(min_length=1,max_length=64)
+    version: str = Field(min_length=1,max_length=64)
+    sample_document_id: str = Field(min_length=1,max_length=64)
+
+
 class ChatAttachment(Contract):
     attachment_id: UUID
     name: str
@@ -875,6 +881,28 @@ async def chat_upload(conversation_id: UUID, response: Response, file: Annotated
     name = (file.filename or '上传材料').replace('\\', '/').rsplit('/', 1)[-1][:200]
     return await post_document(case_id=conversation['case_id'], response=response, file=file,
         source_ref=name, document_type=None, actor_id=actor_id, conn=conn, storage_root=storage_root)
+
+
+@app.post('/v1/conversations/{conversation_id}/sample-documents',response_model=Document,status_code=201)
+async def attach_judge_sample_document(conversation_id:UUID,body:JudgeSampleDocument,response:Response,
+    actor_id:UUID=Depends(current_actor),conn=Depends(database),storage_root:Path=Depends(document_storage_root)):
+    from services.judge_demo.app import judge_upload_allowed,sample_manifest
+    from starlette.datastructures import Headers
+    conversation=chats.require_conversation(conn,actor_id,conversation_id)
+    case=get_case(conn,actor_id=actor_id,case_id=conversation['case_id'])
+    if not case or not judge_upload_allowed(conn,actor_id,case):raise HTTPException(403,'该材料入口仅供当前评委样例使用。')
+    context=case.user_context or {}
+    if (body.sample_id,body.version)!=(context.get('sample_id'),context.get('sample_version')):
+        raise HTTPException(409,'示例资料版本已变化，请重新选择。')
+    directory,manifest=sample_manifest(body.version,body.sample_id)
+    entry=next((d for d in manifest['documents'] if d['id']==body.sample_document_id),None)
+    if not entry:raise HTTPException(404,'示例资料不存在。')
+    # Reuse the normal upload signature, hash, authorization and idempotency checks.
+    # post_document writes its own temporary copy; canonical sample bytes stay intact.
+    with (directory/entry['file']).open('rb') as source:
+        file=UploadFile(file=source,filename=entry['name'],headers=Headers({'content-type':entry['media_type']}))
+        return await post_document(case_id=case.case_id,response=response,file=file,source_ref=entry['name'],
+            document_type=entry['document_type'],actor_id=actor_id,conn=conn,storage_root=storage_root)
 
 
 @app.post('/v1/conversations/{conversation_id}/documents/{document_id}/replacement', response_model=Document, status_code=201)
