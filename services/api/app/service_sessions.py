@@ -41,6 +41,36 @@ class SessionField(BaseModel):
     model_config=ConfigDict(extra='forbid')
     key:Literal['participant','city','preferred_time','facility_preference','symptoms','duration','current_status','diagnosis_history','doctor_preference']
     value:str=Field(min_length=1,max_length=200)
+    source_quote:str=Field(default='',max_length=400,description='值经过简写时，提供用户消息中完整连续的原话；最终显示这段原话')
+
+
+def grounded_field(value,messages):
+    """Align punctuation-separated excerpts; retain omitted source conjunctions.
+
+    This never accepts a paraphrase or drops source negations/clinical words.
+    """
+    for message in messages:
+        start=message.find(value)
+        if start>=0:
+            prefix=message[max(0,start-2):start]
+            if not any(prefix.endswith(x) for x in ('不','没','未','无','没有','否认','并非','不是')):
+                return value
+        parts=[x for x in re.split(r'[，,、；;。\s]+',value) if x]
+        if len(parts)<2 or any(len(part)<2 for part in parts):continue
+        position=0;first=None;extra='';found=True
+        for part in parts:
+            index=message.find(part,position)
+            if index<0:found=False;break
+            if first is None:first=index
+            else:extra+=message[position:index]
+            position=index+len(part)
+        if not found or first is None:continue
+        prefix=message[max(0,first-2):first]
+        if any(prefix.endswith(x) for x in ('不','没','未','无','没有','否认','并非','不是')):continue
+        additions=re.sub(r'[，,、；;。\s]','',extra)
+        if len(additions)<=4 and all(char in '也且和及并又仍' for char in additions):
+            return message[first:position]
+    return None
 
 
 class ServiceSessionArgs(BaseModel):
@@ -129,12 +159,13 @@ def manage_session(args,previous,user_messages,current_question):
         state['fields']={}
         state.pop('age_years',None)
     for field in args.fields:
-        if not any(field.value in message for message in user_messages):
+        value=grounded_field(field.value,user_messages) or (grounded_field(field.source_quote,user_messages) if field.source_quote else None)
+        if value is None:
             return {'status':'ungrounded_field','rejected_field':field.key,'rejected_value':field.value,
                 'notice':'该字段不是用户逐字原话。请直接从用户消息摘录连续文字后重新调用工具，不拼接、不总结；确实未知才留空补问。'}
         if field.key not in [*REQUIRED[state['mode']],*(['facility_preference'] if state['mode']=='benefit' else [])]:continue
-        if state['fields'].get(field.key)!=field.value:
-            state['fields'][field.key]=field.value;changed=True
+        if state['fields'].get(field.key)!=value:
+            state['fields'][field.key]=value;changed=True
     state['summary']=[{'label':LABELS[k],'value':v} for k,v in state['fields'].items()]
     state['missing_fields']=[LABELS[k] for k in REQUIRED[state['mode']] if not state['fields'].get(k)]
     if state['mode']=='doctor' and clinical.age_years is not None:

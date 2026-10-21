@@ -3,7 +3,7 @@ import unittest
 from unittest.mock import MagicMock,patch
 
 from services.api.app.medical_services import MedicalServiceArgs,catalog
-from services.api.app.service_sessions import ServiceSessionArgs,manage_session,restore_session,pending_inline_service_reply,pending_session_command
+from services.api.app.service_sessions import ServiceSessionArgs,manage_session,restore_session,pending_inline_service_reply,pending_session_command,grounded_field
 from services.api.app.conversation_agent import CareTools,run_agent,history_answer
 
 
@@ -69,6 +69,13 @@ class ServiceSessionTests(unittest.TestCase):
             'action':'start','mode':'doctor','department':'gynecology','clinical':self.clinical}})})
         args=model.plan_service_session([])
         self.assertEqual(args.department,'gynecology')
+
+    def test_source_alignment_keeps_negation_and_only_recovers_short_conjunctions(self):
+        original='和以往一样稳定、没有加重，也没有怀孕或异常出血'
+        self.assertEqual(grounded_field('和以往一样稳定、没有加重，没有怀孕或异常出血',[original]),original)
+        self.assertIsNone(grounded_field('有加重',['没有加重']))
+        self.assertIsNone(grounded_field('稳定，已经确诊',['稳定，但是未明确诊断，已经确诊其他疾病']))
+        self.assertIsNone(grounded_field('无特别偏好',['无特别医生偏好']))
 
     def test_cannot_confirm_missing_fields_or_invented_assent(self):
         state=self.call()
