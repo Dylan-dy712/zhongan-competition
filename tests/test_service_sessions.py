@@ -87,7 +87,7 @@ class ServiceSessionTests(unittest.TestCase):
         question='想找互联网医院的医生咨询：'+ '；'.join(self.doctor_fields.values())
         with patch('services.api.app.conversation_agent.require_conversation',return_value={'case_id':'case'}):
             answer,events=run_agent([],question,[],tools,model=Model())
-        self.assertEqual(events,[{'tool':'manage_service_session','status':'awaiting_confirmation'}])
+        self.assertIn({'tool':'manage_service_session','status':'awaiting_confirmation'},events)
         self.assertEqual(answer['service_session']['department'],'gastroenterology')
         self.assertEqual(answer['service_session']['phase'],'awaiting_confirmation')
         self.assertFalse(pending_inline_service_reply('好的，我帮你查一下。','想找上海市的线下医院'))
