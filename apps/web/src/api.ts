@@ -7,7 +7,7 @@ import {conversationTitle} from './claimChatPresentation';
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
 
-export type JudgeSample = {sample_id:string;version:string;title:string;summary:string;notice:string;data_origin:'official_deidentified';file_count:number;page_count:number;claim_info:Partial<import('./claimTemplate').ClaimForm>;documents:{id:string;name:string;page_count:number;document_type:string;sha256:string}[]};
+export type JudgeSample = {sample_id:string;version:string;title:string;summary:string;notice:string;data_origin:'official_deidentified';file_count:number;page_count:number;claim_info:Partial<import('./claimTemplate').ClaimForm>;documents:{id:string;name:string;page_count:number;document_type:string;sha256:string;media_type?:string}[]};
 export type JudgeSampleFile = {file:File;category:'record'|'invoice'};
 export async function getJudgeSample(token:string):Promise<JudgeSample|null> {
   const response=await apiFetch(`${API_BASE}/judge/sample`,{headers:{Authorization:`Bearer ${token}`}});
@@ -26,9 +26,11 @@ export async function chooseJudgeSampleFiles(token:string,sample:JudgeSample,onP
       if((error instanceof Error||error instanceof DOMException)&&['TimeoutError','AbortError'].includes(error.name))throw new Error('示例资料载入超时，请检查网络后重新选择。');
       throw error;
     });
-    if(!data.byteLength || data.byteLength>10*1024*1024 || String.fromCharCode(...new Uint8Array(data).slice(0,5))!=='%PDF-')throw new Error('示例文件暂时不可用，请重新选择。');
+    const type=item.media_type||'application/pdf',bytes=new Uint8Array(data);
+    const valid=type==='application/pdf'?String.fromCharCode(...bytes.slice(0,5))==='%PDF-':type==='image/png'?[137,80,78,71,13,10,26,10].every((v,i)=>bytes[i]===v):type==='image/jpeg'&&bytes[0]===255&&bytes[1]===216&&bytes[2]===255;
+    if(!data.byteLength || data.byteLength>10*1024*1024 || !valid)throw new Error('示例文件暂时不可用，请重新选择。');
     onProgress?.(++completed,sample.documents.length);
-    return {file:new File([data],item.name,{type:'application/pdf'}),category:['费用清单','医保结算单','医疗发票'].includes(item.document_type)?'invoice':'record'};
+    return {file:new File([data],item.name,{type}),category:['费用清单','医保结算单','医疗发票'].includes(item.document_type)?'invoice':'record'};
   }));
 }
 export async function createJudgeSampleUploadCase(token:string,subjectId:string,sample:JudgeSample,key:string) {
@@ -188,12 +190,10 @@ export const getKnowledgeSource=(token:string,id:string)=>chatRequest<import('./
 export const listQualitySnapshots=(token:string)=>chatRequest<{snapshot_id:string}[]>('/v1/quality/snapshots',token);
 export const getQualitySnapshot=(token:string,id:string)=>chatRequest<import('./types').QualitySnapshot>(`/v1/quality/snapshots/${encodeURIComponent(id)}`,token);
 export async function getEvidenceImage(token:string,evidence:import('./types').Evidence){
-  const pdf=evidence.media_type==='application/pdf';
-  const path=pdf?`/v1/evidence/${encodeURIComponent(evidence.evidence_id)}/page-image`
-    :`/v1/cases/${encodeURIComponent(evidence.case_id!)}/documents/${encodeURIComponent(evidence.document_id)}/content?version=${evidence.document_version}`;
+  const path=`/v1/evidence/${encodeURIComponent(evidence.evidence_id)}/page-image`;
   const response=await apiFetch(`${API_BASE}${path}`,{headers:{Authorization:`Bearer ${token}`}});
   if(!response.ok)throw new ApiError('原图暂不可用',response.status);
-  const candidates:unknown=pdf?JSON.parse(response.headers.get('X-Evidence-Regions')||'[]'):(evidence.bbox?[evidence.bbox]:[]);
+  const candidates:unknown=JSON.parse(response.headers.get('X-Evidence-Regions')||'[]');
   const regions:Array<[number,number,number,number]>=Array.isArray(candidates)?candidates.filter((box):box is [number,number,number,number]=>
     Array.isArray(box)&&box.length===4&&box.every(value=>typeof value==='number'&&Number.isFinite(value)&&value>=0&&value<=1)
     &&box[0]<box[2]&&box[1]<box[3]):[];

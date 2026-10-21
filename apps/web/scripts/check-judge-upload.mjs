@@ -16,7 +16,7 @@ const {createRoot}=await import('react-dom/client');
 const modules=await loadTestModules();const {App}=modules;
 const sample={sample_id:'synthetic-01',version:'v1',data_origin:'official_deidentified',title:'合成病例流程测试',summary:'测试',notice:'合成测试，非患者资料',file_count:4,page_count:13,
   claim_info:{kind:'住院医疗',cause:'待确认',diagnosis:'合成肩部损伤样例',start:'2026-09-20',end:'2026-09-25',total:'1200.00',social:'待确认',other:'待确认'},
-  documents:[{id:'discharge',name:'合成出院记录.pdf',document_type:'出院记录',page_count:2},{id:'diagnosis',name:'合成诊断证明.pdf',document_type:'诊断证明',page_count:1},{id:'costs',name:'合成费用清单.pdf',document_type:'费用清单',page_count:5},{id:'outpatient',name:'合成复诊病历.pdf',document_type:'门诊病历',page_count:5}]};
+  documents:[{id:'discharge',name:'合成出院记录.pdf',document_type:'出院记录',page_count:2},{id:'diagnosis',name:'合成诊断证明.png',media_type:'image/png',document_type:'诊断证明',page_count:1},{id:'costs',name:'合成费用清单.pdf',document_type:'费用清单',page_count:5},{id:'outpatient',name:'合成复诊病历.pdf',document_type:'门诊病历',page_count:5}]};
 const legacyTitle='这是一组主办方比赛样例的脱敏体验资料，不代表账号使用者本人病史。'.slice(0,30);
 const calls=[];let uploadCount=0,failSecond=true,failSelection=true,holdPreparation=true,releaseFailed,releaseHeld,conversation,turns=[];
 globalThis.fetch=async(url,options={})=>{
@@ -33,7 +33,7 @@ globalThis.fetch=async(url,options={})=>{
     assert.equal(new URL(url,'http://localhost').searchParams.get('sample_id'),'synthetic-01');
     if(failSelection){failSelection=false;return {ok:true,arrayBuffer:async()=>{await new Promise(resolve=>releaseFailed=resolve);throw new DOMException('The user aborted a request.','AbortError');}};}
     if(holdPreparation&&p.endsWith('/diagnosis'))await new Promise(resolve=>releaseHeld=resolve);
-    return new Response('%PDF-1.4\nSynthetic '+p,{headers:{'Content-Type':'application/pdf'}});
+    return p.endsWith('/diagnosis')?new Response(new Uint8Array([137,80,78,71,13,10,26,10,0]),{headers:{'Content-Type':'image/png'}}):new Response('%PDF-1.4\nSynthetic '+p,{headers:{'Content-Type':'application/pdf'}});
   }
   if(p==='/v1/me/consents')return Response.json({status:'active',consent_id:'synthetic-consent'});
   if(p==='/v1/cases')return Response.json({case_id:'synthetic-case'});
@@ -103,6 +103,8 @@ try{
   assert.equal(calls.filter(call=>call.method==='POST').length,0,'Sample selection must stay in the browser');
   await click('查看合成出院记录.pdf');assert.ok(document.querySelector('iframe.claim-pdf-preview'));
   await click('关闭图片预览');
+  await click('查看合成诊断证明.png');assert.ok(document.querySelector('.claim-preview-dialog img'),'Prepared images show the original instead of a PDF iframe');
+  await click('关闭图片预览');
   await click('下一步，核对申请');
   assert.equal(button('确认提交材料').disabled,true,'Confirmation is required before real upload');
   await act(async()=>document.querySelector('.claim-consent input').click());
@@ -114,7 +116,8 @@ try{
   assert.equal(created.data_origin,'official_deidentified');assert.equal(created.user_context.judge_demo,true);
   assert.equal(created.user_context.notice,sample.notice,'Backend source metadata remains intact');
   const uploads=calls.filter(call=>call.path.endsWith('/documents'));
-  assert.deepEqual(uploads.map(call=>call.body.get('file').name),['合成出院记录.pdf','合成诊断证明.pdf','合成诊断证明.pdf','合成费用清单.pdf','合成复诊病历.pdf']);
+  assert.deepEqual(uploads.map(call=>call.body.get('file').name),['合成出院记录.pdf','合成诊断证明.png','合成诊断证明.png','合成费用清单.pdf','合成复诊病历.pdf']);
+  assert.equal(uploads[1].body.get('file').type,'image/png');
   assert.equal(calls.filter(call=>call.path.endsWith('/analyses')).length,0,'Successful upload must precede analysis');
   await click('查看就医关怀');
   assert.equal(document.querySelectorAll('[aria-label="已上传材料"] li').length,4);

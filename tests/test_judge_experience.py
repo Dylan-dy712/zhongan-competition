@@ -44,6 +44,15 @@ class JudgeExperienceTests(unittest.TestCase):
             self.assertFalse(eligible_context(c,q,m,p,allowed))
         self.assertIsNone(prepared_answer(MagicMock(),None))
 
+    def test_image_report_versions_remain_separate_from_existing_pdf_versions(self):
+        publish_bundle(self.manifest,['分析固定示例'],self.rows,self.variants())
+        original=artifact_path().read_bytes();images={**self.manifest,'version':'images-v1'}
+        publish_bundle(images,['分析图片示例'],self.rows,self.variants(),versioned=True)
+        self.assertEqual(artifact_path().read_bytes(),original)
+        self.assertEqual(read_bundle(images)['sample_version'],'images-v1')
+        self.assertEqual(read_bundle()['sample_version'],'v1')
+        self.assertIsNone(read_bundle({**images,'version':'unknown'}))
+
     def test_unverified_variants_and_tampered_bundle_never_publish_or_load(self):
         reply=copy.deepcopy(self.reply);reply['performance']['review_calls']=0
         with self.assertRaises(ValueError):prepare_variant(reply,self.rows,self.report,self.insights,'bad',[])

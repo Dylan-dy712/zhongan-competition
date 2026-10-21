@@ -121,7 +121,7 @@ export default function ClaimIntake({token,subject,visible,onOpen,onAuthorize,on
     setPreviewFile(null);preview.current?.close();source.current?.close();setReviewPhotos(false);
     setProgressOpen(false);setProgress(undefined);
     chooseJudgeSampleFiles(token,sample,completed=>{if(active)setSampleProgress(completed);}).then(selected=>{
-      if(active)setFiles(selected.map(entry=>({id:uuid(),name:entry.file.name,size:entry.file.size,category:entry.category,sample:true,url:null,file:entry.file})));
+      if(active)setFiles(selected.map(entry=>({id:uuid(),name:entry.file.name,size:entry.file.size,category:entry.category,sample:true,url:entry.file.type.startsWith('image/')?URL.createObjectURL(entry.file):null,file:entry.file})));
     }).catch(e=>{if(active)setSampleError(e instanceof Error?e.message:'示例资料准备中断，请重试。');})
       .finally(()=>{if(active)setSampleLoading(false);});
     return()=>{active=false;};
@@ -131,7 +131,7 @@ export default function ClaimIntake({token,subject,visible,onOpen,onAuthorize,on
     const invalid=validateClaimInfo(form.current);if(invalid){setError(invalid);setStep(0);return;}
     const missing=claimTemplate(form.current,files,step).groups.filter(g=>g.required&&!files.some(f=>f.category===g.id));
     if(missing.length){setError('请补充：'+missing.map(g=>g.title).join('、'));setStep(1);return;}
-    if(!checkedFiles&&!pending.current&&files.some(entry=>entry.url)){setReviewPhotos(true);return;}
+    if(!checkedFiles&&!pending.current&&files.some(entry=>entry.url&&!entry.sample)){setReviewPhotos(true);return;}
     const selectedFiles=checkedFiles||files;
     running.current=true;
     setBusy(true);setError('');setLocked(true);

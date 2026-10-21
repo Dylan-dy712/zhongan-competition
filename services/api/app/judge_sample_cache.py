@@ -42,11 +42,15 @@ def prepared_page_compatible(page):
         and record.get('status') in {'completed','partial'})
 
 
-def published_path():
-    return Path(os.getenv('ZHONGAN_JUDGE_RECOGNITION_ROOT','/home/ubuntu/zhongan-data/judge-recognition'))/'prepared-library.json'
+def published_path(manifest=None,*,versioned=False):
+    root=Path(os.getenv('ZHONGAN_JUDGE_RECOGNITION_ROOT','/home/ubuntu/zhongan-data/judge-recognition'))
+    if manifest:
+        scoped=root/('prepared-library-'+payload_digest({k:manifest[k] for k in ('sample_id','version')})+'.json')
+        if versioned or scoped.exists():return scoped
+    return root/'prepared-library.json'
 
 
-def publish_prepared_library(manifest,profile,versions):
+def publish_prepared_library(manifest,profile,versions,*,versioned=False):
     """Publish only a complete, verified fixed library; never copy account evidence IDs."""
     entries=[]
     for item in manifest['documents']:
@@ -59,7 +63,7 @@ def publish_prepared_library(manifest,profile,versions):
             'artifact_sha256':hashlib.sha256(target.read_bytes()).hexdigest()})
     data={'format':PUBLISHED_FORMAT,'sample_id':manifest['sample_id'],'version':manifest['version'],
         'extraction_identity':extraction_identity(),'documents':entries}
-    path=published_path();temporary=path.with_suffix('.tmp-'+uuid4().hex)
+    path=published_path(manifest,versioned=versioned);temporary=path.with_suffix('.tmp-'+uuid4().hex)
     try:
         with temporary.open('x',encoding='utf-8') as stream:
             os.chmod(temporary,0o600);json.dump(data,stream,separators=(',',':'))
@@ -72,7 +76,7 @@ def publish_prepared_library(manifest,profile,versions):
 def published_sample_pages(manifest,item):
     """A reviewed library survives unrelated live OCR outages and provider switches."""
     try:
-        path=published_path()
+        path=published_path(manifest)
         if path.is_symlink() or path.stat().st_size>65536:return {}
         data=json.loads(path.read_text(encoding='utf-8'))
         expected={'format':PUBLISHED_FORMAT,'sample_id':manifest['sample_id'],'version':manifest['version'],
