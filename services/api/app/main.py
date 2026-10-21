@@ -45,7 +45,7 @@ from . import accounts
 from .document_quality import inspect_photo
 from .ocr import create_ocr
 from . import medical_records
-from .document_preview import render_evidence_page
+from .document_preview import render_evidence_page,render_source_image,evidence_ocr_regions
 
 app = FastAPI(title="众安·暖愈智护", version="0.1.0")
 
@@ -488,26 +488,31 @@ def read_evidence(evidence_id: UUID, actor_id: UUID = Depends(current_actor),
 def read_evidence_page_image(evidence_id: UUID, actor_id: UUID = Depends(current_actor),
                              conn=Depends(database), storage_root: Path = Depends(document_storage_root)):
     item = get_evidence(conn, actor_id=actor_id, evidence_id=evidence_id)
-    if item is None or item.media_type != 'application/pdf' or item.page_index is None:
+    if item is None or item.media_type not in {'application/pdf','image/png','image/jpeg'} or item.page_index is None:
         raise HTTPException(status_code=404, detail='Evidence page not found')
     found = get_document(conn, actor_id=actor_id, case_id=item.case_id,
                          document_id=item.document_id, version=item.document_version)
     if found is None:
         raise HTTPException(status_code=404, detail='Document not found')
     document, storage_ref = found
-    if document.media_type != 'application/pdf':
-        raise HTTPException(status_code=404, detail='PDF page not found')
+    if document.media_type != item.media_type:
+        raise HTTPException(status_code=404, detail='Source page not found')
     path = Path(storage_ref).resolve()
     if not path.is_relative_to(storage_root.resolve()) or not path.is_file():
         raise HTTPException(status_code=503, detail='Document content is unavailable')
     try:
-        image, regions = render_evidence_page(path, item.page_index,
-            quote=item.text_span.text if item.text_span else '', bbox=item.bbox)
+        quote=item.text_span.text if item.text_span else ''
+        if item.media_type=='application/pdf':
+            image,regions=render_evidence_page(path,item.page_index,quote=quote,bbox=item.bbox)
+        else:
+            if item.page_index!=0:raise IndexError('Image page not found')
+            image=render_source_image(path);regions=[list(item.bbox)] if item.bbox else []
+        if not regions:regions=evidence_ocr_regions(conn,evidence_id,quote)
     except IndexError:
-        raise HTTPException(status_code=404, detail='PDF page not found') from None
+        raise HTTPException(status_code=404, detail='Source page not found') from None
     except Exception:
-        # Do not return PDF contents or server storage paths in rendering errors.
-        raise HTTPException(status_code=503, detail='PDF page preview is unavailable') from None
+        # Do not return material contents or server storage paths in rendering errors.
+        raise HTTPException(status_code=503, detail='Source page preview is unavailable') from None
     return Response(image, media_type='image/png', headers={
         'X-Evidence-Regions': json.dumps(regions, separators=(',', ':')),
         'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff',

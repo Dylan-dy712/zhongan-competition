@@ -14,7 +14,7 @@ def question_key(text):
     return payload_digest(text.strip().removesuffix('（重新分析当前材料）').strip())
 
 
-def version_identity():
+def version_identity(manifest=None):
     from .conversation_agent import SYSTEM,ANALYSIS_INSTRUCTION,ANALYSIS_PROMPT_VERSION
     from .report_llm import PROMPT_VERSION
     from .report_builder import POLICY_VERSION
@@ -23,13 +23,17 @@ def version_identity():
     return payload_digest({'format':FORMAT,'instructions':[SYSTEM,ANALYSIS_INSTRUCTION],
         'analysis':ANALYSIS_PROMPT_VERSION,'report':PROMPT_VERSION,'policy':POLICY_VERSION,
         'knowledge':KnowledgeAssembler().knowledge_version,'extraction':extraction_identity(),
-        'prepared_materials':hashlib.sha256(published_path().read_bytes()).hexdigest(),
+        'prepared_materials':hashlib.sha256(published_path(manifest).read_bytes()).hexdigest(),
         'provider':os.getenv('LLM_PROVIDER'),'model':os.getenv('LLM_MODEL_ID'),
         'base':os.getenv('LLM_BASE_URL')})
 
 
-def artifact_path():
-    return Path(os.getenv('ZHONGAN_JUDGE_RECOGNITION_ROOT','/home/ubuntu/zhongan-data/judge-recognition'))/'report-experience.json'
+def artifact_path(manifest=None,*,versioned=False):
+    root=Path(os.getenv('ZHONGAN_JUDGE_RECOGNITION_ROOT','/home/ubuntu/zhongan-data/judge-recognition'))
+    if manifest:
+        scoped=root/('report-experience-'+payload_digest({k:manifest[k] for k in ('sample_id','version')})+'.json')
+        if versioned or scoped.exists():return scoped
+    return root/'report-experience.json'
 
 
 def eligible_context(context,questions,memory,patient_context,allowed):
@@ -40,13 +44,14 @@ def eligible_context(context,questions,memory,patient_context,allowed):
         and not memory and not patient_context)
 
 
-def read_bundle():
+def read_bundle(manifest=None):
     try:
-        path=artifact_path()
+        path=artifact_path(manifest)
         if path.is_symlink() or path.stat().st_size>4*1024*1024:return None
         payload=json.loads(path.read_text(encoding='utf8'))
-        if payload.get('format')!=FORMAT or payload.get('identity')!=version_identity():return None
+        if payload.get('format')!=FORMAT or payload.get('identity')!=version_identity(manifest):return None
         data=payload['data']
+        if manifest and (data.get('sample_id'),data.get('sample_version'))!=(manifest['sample_id'],manifest['version']):return None
         if payload_digest(data)!=payload['payload_sha256'] or not 2<=len(data['variants'])<=5:return None
         if any(v.get('preparation_review')!={'source_review_passed':True,'quality_passed':True} for v in data['variants']):return None
         return data
@@ -103,7 +108,11 @@ def resolve_knowledge(variant,rows):
 
 def read_worker_models(conn,run,parsed_documents,narrative_sources):
     try:
-        bundle=read_bundle()
+        from services.judge_demo.app import sample_manifest
+        context=(run.get('context_snapshot') or {}).get('case_user_context') or {}
+        if context.get('judge_demo') is not True:return None
+        _,manifest=sample_manifest(context.get('sample_version'),context.get('sample_id'))
+        bundle=read_bundle(manifest)
         if not bundle:return None
         rows=[{'source_hash':d['source_hash'],'page_index':p['page_index'],'parser_version':p['parser_version'],
             'text_value':narrative_sources[(d['document_id'],d['document_version'],p['page_index'])][0]['text']}
@@ -136,12 +145,16 @@ def bind_draft(variant,rows):
 def prepared_answer(tools,run_id):
     if run_id is None:return None
     try:
-        bundle=read_bundle()
-        if not bundle:return None
         from .material_report import get_material_report
         report=get_material_report(tools.conn,tools.actor_id,tools.conversation_id)
         if report.get('status')!='available' or report.get('run_id')!=str(run_id):return None
         run=tools.conn.execute('SELECT * FROM analysis_runs WHERE run_id=%s',(run_id,)).fetchone()
+        from services.judge_demo.app import sample_manifest
+        context=(run.get('context_snapshot') or {}).get('case_user_context') or {}
+        if context.get('judge_demo') is not True:return None
+        _,manifest=sample_manifest(context.get('sample_version'),context.get('sample_id'))
+        bundle=read_bundle(manifest)
+        if not bundle:return None
         if not (run['stage_results'].get('performance') or {}).get('judge_experience'):return None
         from .page_sources import VERSION
         rows=tools.conn.execute('SELECT evidence_id,source_hash,page_index,text_value,parser_version FROM evidence WHERE run_id=%s AND case_id=%s AND extraction_method=%s',
@@ -193,17 +206,17 @@ def prepare_variant(reply,rows,report,insights,variant_id,knowledge_sources):
         'knowledge_versions':{r:sources[r]['version'] for r in refs},'preparation_review':{'source_review_passed':True,'quality_passed':True}}
 
 
-def publish_bundle(manifest,questions,rows,variants):
+def publish_bundle(manifest,questions,rows,variants,*,versioned=False):
     if len({v['id'] for v in variants})!=len(variants) or not 2<=len(variants)<=5:raise ValueError('EXPERIENCE_VARIANT_COUNT')
     if any(v.get('preparation_review')!={'source_review_passed':True,'quality_passed':True} for v in variants):raise ValueError('UNVERIFIED_EXPERIENCE_VARIANT')
     data={'sample_id':manifest['sample_id'],'sample_version':manifest['version'],
         'source_hashes':sorted(d['sha256'] for d in manifest['documents']),
         'page_keys':sorted(source_key(r) for r in rows),'question_keys':sorted({question_key(q) for q in questions}),
         'variants':variants}
-    target=artifact_path();temp=target.with_suffix('.tmp-'+uuid4().hex)
+    target=artifact_path(manifest,versioned=versioned);temp=target.with_suffix('.tmp-'+uuid4().hex)
     try:
         with temp.open('x',encoding='utf8') as stream:
-            os.chmod(temp,0o600);json.dump({'format':FORMAT,'identity':version_identity(),'data':data,'payload_sha256':payload_digest(data)},stream,ensure_ascii=False,separators=(',',':'))
+            os.chmod(temp,0o600);json.dump({'format':FORMAT,'identity':version_identity(manifest),'data':data,'payload_sha256':payload_digest(data)},stream,ensure_ascii=False,separators=(',',':'))
             stream.flush();os.fsync(stream.fileno())
         os.replace(temp,target)
     finally:

@@ -109,13 +109,15 @@ def read_sample_manifest(directory):
         for key in ('sample_id','version'):
             if not re.fullmatch(r'[a-zA-Z0-9_.-]{1,64}',manifest[key]):raise ValueError('Invalid identity')
         documents=manifest['documents']
-        if not 1<=len(documents)<=10 or manifest['file_count']!=len(documents):raise ValueError('Invalid count')
+        if not 1<=len(documents)<=30 or manifest['file_count']!=len(documents):raise ValueError('Invalid count')
         if len({item['id'] for item in documents})!=len(documents):raise ValueError('Duplicate document')
         for item in documents:
-            if not re.fullmatch(r'[a-z0-9-]{1,64}\.pdf',item['file']):raise ValueError('Invalid file')
+            if not re.fullmatch(r'[a-z0-9-]{1,64}\.(pdf|png|jpg|jpeg)',item['file']):raise ValueError('Invalid file')
             path=directory/item['file']
             if path.is_symlink() or not path.resolve().is_relative_to(directory) or not path.is_file():raise ValueError('Escaped file')
-            if item['media_type']!='application/pdf' or not 0<path.stat().st_size<=10*1024*1024:raise ValueError('Invalid media')
+            media={'.pdf':'application/pdf','.png':'image/png','.jpg':'image/jpeg','.jpeg':'image/jpeg'}
+            if item['media_type']!=media[path.suffix] or not 0<path.stat().st_size<=10*1024*1024:raise ValueError('Invalid media')
+            if item['media_type'].startswith('image/') and item['page_count']!=1:raise ValueError('Invalid image pages')
             if not re.fullmatch(r'[0-9a-f]{64}',item['sha256']) or not 1<=item['page_count']<=10:raise ValueError('Invalid metadata')
             if not isinstance(item['name'],str) or not 1<=len(item['name'])<=200:raise ValueError('Invalid name')
         if manifest['page_count']!=sum(item['page_count'] for item in documents):raise ValueError('Invalid pages')
@@ -145,7 +147,7 @@ def sample_manifest(version=None,sample_id=None):
 def sample_info():
     _,manifest=sample_manifest()
     return {key:manifest[key] for key in ('sample_id','version','title','summary','notice','data_origin','file_count','page_count','claim_info')} | {
-        'documents':[{key:item[key] for key in ('id','name','page_count','document_type','sha256')} for item in manifest['documents']]}
+        'documents':[{key:item[key] for key in ('id','name','page_count','document_type','sha256','media_type')} for item in manifest['documents']]}
 
 
 def sample_document(document_id,version=None,sample_id=None):
@@ -154,7 +156,10 @@ def sample_document(document_id,version=None,sample_id=None):
     if item is None:raise HTTPException(404,'示例资料不存在。')
     path=directory/item['file']
     with path.open('rb') as handle:
-        if handle.read(5)!=b'%PDF-':raise HTTPException(503,'示例资料校验未通过。')
+        signature=handle.read(8)
+        valid=(signature.startswith(b'%PDF-') if item['media_type']=='application/pdf' else
+               signature==b'\x89PNG\r\n\x1a\n' if item['media_type']=='image/png' else signature.startswith(b'\xff\xd8\xff'))
+        if not valid:raise HTTPException(503,'示例资料校验未通过。')
         handle.seek(0)
         if hashlib.file_digest(handle,'sha256').hexdigest()!=item['sha256']:
             raise HTTPException(503,'示例资料校验未通过。')

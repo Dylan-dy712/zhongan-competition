@@ -33,8 +33,9 @@ try{
   assert.match(document.querySelector('blockquote').textContent,/两周后复查/);
   assert.match(document.body.textContent,/第 2 页/);
 
-  await render({...evidence,evidence_id:'synthetic-photo',media_type:'image/jpeg',bbox:[.2,.4,.8,.6]});
-  assert.equal(requests.at(-1).url,'/v1/cases/synthetic-case/documents/synthetic-document/content?version=2');
+  respond=()=>new Response('synthetic-photo',{headers:{'X-Evidence-Regions':'[[0.2,0.4,0.8,0.6]]'}});
+  await render({...evidence,evidence_id:'synthetic-photo',media_type:'image/jpeg',bbox:null});
+  assert.equal(requests.at(-1).url,'/v1/evidence/synthetic-photo/page-image');
   assert.equal(document.querySelectorAll('[aria-label="原文所在区域"]').length,1);
   assert.equal(document.querySelector('[aria-label="原文所在区域"]').style.top,'40%');
   assert.ok(revoked.includes(created[0].url),'Replacing evidence releases the old page image');

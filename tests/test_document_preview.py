@@ -14,7 +14,7 @@ from pypdf.generic import DictionaryObject, NameObject, DecodedStreamObject
 
 from services.api.app import main as api
 from services.api.app.contracts.core import Evidence, TextSpan
-from services.api.app.document_preview import render_evidence_page
+from services.api.app.document_preview import render_evidence_page,ocr_regions
 
 
 def synthetic_pdf(path, rotation=0, crop=False):
@@ -39,6 +39,15 @@ def synthetic_pdf(path, rotation=0, crop=False):
 
 
 class PdfPagePreviewTests(unittest.TestCase):
+    def test_scanned_page_excerpt_uses_exact_ocr_regions_and_excludes_unreadable_lines(self):
+        blocks=[{'text_content':'合成第一行原文','bbox':[.1,.1,.8,.2],'metadata':{}},
+                {'text_content':'合成第二行原文','bbox':[.1,.3,.8,.4],'metadata':{}},
+                {'text_content':'模糊不可读文字','bbox':[.1,.5,.8,.6],'metadata':{'needs_clearer_photo':True}},
+                {'text_content':'模型页面转录','bbox':[0,0,1,1],'metadata':{'coordinate_precision':'page'}}]
+        self.assertEqual(ocr_regions('合成第一行原文\n合成第二行原文',blocks),[blocks[0]['bbox'],blocks[1]['bbox']])
+        self.assertEqual(ocr_regions('合成第二行原文',blocks),[blocks[1]['bbox']])
+        self.assertEqual(ocr_regions('不存在的引用以及模糊不可读文字',blocks),[])
+
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.path = Path(self.directory.name) / 'synthetic.pdf'
@@ -140,6 +149,18 @@ class PdfPagePreviewApiTests(unittest.TestCase):
         self.assertEqual(evidence.call_args.kwargs['actor_id'], self.actor)
         self.assertEqual(document.call_args.kwargs, dict(actor_id=self.actor, case_id=self.item.case_id,
             document_id=self.item.document_id, version=2))
+
+    def test_image_page_level_reference_loads_original_with_stored_ocr_highlights(self):
+        from types import SimpleNamespace
+        photo=self.root/'synthetic.png'
+        Image.new('RGB',(500,700),'white').save(photo)
+        self.item.media_type='image/png';self.item.page_index=0;self.item.bbox=None
+        boxes=[[.1,.2,.8,.3]]
+        with patch.object(api,'get_evidence',return_value=self.item),patch.object(api,'get_document',return_value=(SimpleNamespace(media_type='image/png'),str(photo))),patch.object(api,'evidence_ocr_regions',return_value=boxes) as locate:
+            response=self.client.get(self.url)
+        self.assertEqual(response.status_code,200)
+        self.assertEqual(json.loads(response.headers['x-evidence-regions']),boxes)
+        locate.assert_called_once_with(unittest.mock.ANY,self.item.evidence_id,self.item.text_span.text)
 
     def test_unauthorized_evidence_or_revoked_document_never_renders(self):
         with patch.object(api, 'get_evidence', return_value=None), \

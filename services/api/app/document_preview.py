@@ -15,6 +15,44 @@ MAX_EDGE = 2000
 MAX_TEXT_CHARS = 100_000
 
 
+def ocr_regions(quote, blocks):
+    """Locate exact OCR text in its stored geometry, never guess a paraphrase."""
+    target=compact(quote)
+    if not target:return []
+    usable=[b for b in blocks if b.get('bbox') and not (b.get('metadata') or {}).get('needs_clearer_photo')
+            and (b.get('metadata') or {}).get('coordinate_precision')!='page' and compact(b.get('text_content') or '')]
+    parts=[compact(b['text_content']) for b in usable];text=''.join(parts)
+    start=text.find(target);end=start+len(target);offset=0;regions=[]
+    for block,part in zip(usable,parts):
+        matched=(offset<end and offset+len(part)>start) if start>=0 else (len(part)>=4 and part in target)
+        offset+=len(part)
+        box=block['bbox']
+        if matched and len(box)==4 and all(isinstance(v,(int,float)) and math.isfinite(v) for v in box) and 0<=box[0]<box[2]<=1 and 0<=box[1]<box[3]<=1:
+            regions.append(list(box))
+    # Long page-level excerpts retain all matching lines in bounded reading bands.
+    size=max(1,math.ceil(len(regions)/32))
+    return [[min(b[0] for b in regions[i:i+size]),min(b[1] for b in regions[i:i+size]),
+             max(b[2] for b in regions[i:i+size]),max(b[3] for b in regions[i:i+size])] for i in range(0,len(regions),size)]
+
+
+def evidence_ocr_regions(conn,evidence_id,quote):
+    blocks=conn.execute('''SELECT b.text_content,b.bbox,b.metadata FROM evidence e JOIN page_blocks b
+        ON b.run_id=e.run_id AND b.case_id=e.case_id AND b.document_id=e.document_id
+        AND b.document_version=e.document_version AND b.page_index=e.page_index
+        AND b.source_hash=e.source_hash AND b.parser_version=e.parser_version
+        WHERE e.evidence_id=%s ORDER BY b.reading_order LIMIT 3000''',(evidence_id,)).fetchall()
+    return ocr_regions(quote,blocks)
+
+
+def render_source_image(path):
+    from PIL import Image,ImageOps
+    with Image.open(path) as original:
+        with ImageOps.exif_transpose(original) as image:
+            image.thumbnail((MAX_EDGE,MAX_EDGE))
+            output=io.BytesIO();image.convert('RGB').save(output,format='PNG')
+            return output.getvalue()
+
+
 def compact(value):
     return ''.join(char for char in unicodedata.normalize('NFKC', value)
                    if not char.isspace() and char != '\u00ad')

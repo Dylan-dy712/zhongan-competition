@@ -118,6 +118,16 @@ class ReviewedSampleCacheTests(unittest.TestCase):
         self.assertEqual(a[0]['bbox'],original['blocks'][0]['bbox'])
         self.assertEqual(reviewed_document_pages(self.connection(judge=False),self.document,'d'*64,set()),{})
 
+    def test_new_image_library_does_not_replace_existing_pdf_preparation(self):
+        page=self.publish();original=published_path().read_bytes()
+        images={**self.manifest,'version':'images-v1'}
+        versions={page['parser_version']}
+        write_sample_pages(images,self.item,self.fingerprint,[page],versions)
+        publish_prepared_library(images,self.fingerprint,versions,versioned=True)
+        self.assertEqual(published_path().read_bytes(),original)
+        self.assertTrue(published_sample_pages(images,self.item))
+        self.assertTrue(published_sample_pages(self.manifest,self.item))
+
     def test_publication_rejects_changed_sample_version_payload_and_extraction_config(self):
         self.publish()
         self.assertTrue(published_sample_pages(self.manifest,self.item))

@@ -29,6 +29,23 @@ spec.loader.exec_module(judge)
 
 
 class EntryContractTests(unittest.TestCase):
+    def test_library_accepts_thirteen_single_page_images_and_rejects_media_mismatch(self):
+        from PIL import Image
+        with tempfile.TemporaryDirectory(dir=ROOT) as folder:
+            directory=Path(folder).resolve();documents=[]
+            for index in range(13):
+                path=directory/f'page-{index}.png';Image.new('RGB',(50,80),'white').save(path)
+                documents.append({'id':f'page-{index}','file':path.name,'media_type':'image/png','sha256':hashlib.sha256(path.read_bytes()).hexdigest(),'page_count':1,'name':f'合成材料-{index}.png'})
+            manifest={'sample_id':'synthetic','version':'images-v1','data_origin':'official_deidentified','file_count':13,'page_count':13,'documents':documents}
+            (directory/'manifest.json').write_text(json.dumps(manifest))
+            self.assertEqual(len(judge.read_sample_manifest(directory)[1]['documents']),13)
+            response=judge.sample_document
+            with patch.object(judge,'sample_manifest',return_value=(directory,manifest)):
+                self.assertEqual(response('page-0').media_type,'image/png')
+            manifest['documents'][0]['media_type']='application/pdf'
+            (directory/'manifest.json').write_text(json.dumps(manifest))
+            with self.assertRaises(HTTPException):judge.read_sample_manifest(directory)
+
     def test_invitation_and_visitor_validation_fail_before_connecting(self):
         with patch.dict(os.environ, {'ZHONGAN_JUDGE_ENTRY_KEY': 'test-entry-' + 'x' * 40}):
             with patch.object(judge.psycopg, 'connect') as connect:
