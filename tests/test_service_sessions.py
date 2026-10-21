@@ -253,6 +253,13 @@ class ServiceSessionTests(unittest.TestCase):
             '这里是对应方向的模拟医生，可以继续咨询。')
         self.assertEqual(active['phase'],'doctor_active')
         self.assertEqual(active['speaker'],'doctor_simulation')
+        ended=advance('结束当前模拟服务，回到暖暖继续聊。',ServiceSessionArgs(action='end'),
+            '医生咨询结束，体检需求仍保留。')
+        self.assertEqual(ended['phase'],'ended')
+        resumed=advance('继续之前的体检预约',ServiceSessionArgs(action='switch',mode='benefit',service_id=self.benefit,clinical=self.clinical),
+            '已恢复体检需求，请核对摘要。')
+        self.assertEqual(resumed['mode'],'benefit')
+        self.assertEqual(resumed['phase'],'awaiting_confirmation')
 
     def test_agent_restores_server_state_and_labels_doctor_response(self):
         state=self.ready_doctor()

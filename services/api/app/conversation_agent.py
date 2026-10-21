@@ -750,7 +750,7 @@ def run_agent(history, question, attachments, tools, model=None, on_event=None, 
             events.append({'tool':'manage_service_session','status':str(found.get('phase',found.get('status','completed')))})
             if on_event:on_event(events)
             messages.append({'role':'tool','tool_call_id':call_id,'content':json.dumps(found,ensure_ascii=False)})
-        elif (state.get('phase') in {'collecting','awaiting_confirmation','doctor_active'}
+        elif ((state.get('phase') in {'collecting','awaiting_confirmation','doctor_active'} or state.get('paused_sessions'))
                 and getattr(type(model),'plan_service_session',None) is not None):
             # Ongoing services advance from the user's message, not from whether
             # the narrative happens to contain a recognized promise phrase.
