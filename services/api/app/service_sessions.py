@@ -33,6 +33,7 @@ def pending_session_command(state,question):
 SESSION_INSTRUCTION='''
 服务在当前聊天完成，不再让用户去弹窗或跳转。用户表达想预约权益、找医生咨询，或继续填写服务需求时，调用manage_service_session。
 该工具仅演示，不核验真实保单、不产生真实预约、不接入真人。不要索取手机号、身份证或付款资料。查权益仍先用recommend_medical_services取得目录，再用目录内service_id启动benefit流程。
+用户要使用互联网医院、线上咨询或对接医生时使用mode=doctor，先收集咨询问题和病情；不能当成体检预约去问城市和期望日期。目录中的图文咨询权益开始办理时也进入doctor流程，不能在benefit流程里预约一个“咨询入口”。
 benefit收集就诊人称呼/关系、就医城市、期望日期时段；用户指定机构时用facility_preference记录，未指定可由暖暖在模拟中安排示例服务点，明确不是实际机构。doctor收集症状、持续时间、当前严重程度/是否加重、既往诊断、医生偏好（可明确无偏好）。每轮只追问一两个缺项，已有信息不要重复问。fields的value逐字摘录用户本对话的表述，不把模型总结当成用户原话；疾病/科室判断用clinical和department表达。根据本次部位、症状、年龄、既往诊断及用户偏好选择目录中的科室或咨询方向，不默认消化方向，不承诺真实医生姓名、职称或号源。方向未知先全科分诊，儿童问题先考虑儿科，妇科和中医需求分别核对相应服务范围。
 每次处理服务都填写clinical，结合最新病情更新，不沿用过期的稳定判断。急症先急救；肿瘤、需线下评估等不能用模拟医生绕过分流。已知常见病/慢性病稳定复诊与健康咨询继续按原规则区分。
 工具phase=collecting时依据missing_fields继续提问；awaiting_confirmation时说明已经整理的模拟预约/接入摘要，用户在本聊天确认后再调用action=confirm。确认文本按工具confirmation_text，其他明确同意可请用户点击聊天内确认按钮。不得在确认前说已约好或医生已接入。病名在药费目录中出现时，只说明目录检索结果，不说该病已经确认属于线上接诊范围；匹配的是科室/咨询方向，具体仍由医生评估。
@@ -120,6 +121,10 @@ def restore_session(history):
 
 def manage_session(args,previous,user_messages,current_question):
     """Only catalog services and quoted user fields can enter persisted state."""
+    if args.action=='start' and args.mode=='benefit':
+        benefit=next((item for item in catalog()['benefits'] if item['id']==args.service_id),None)
+        if benefit and benefit['need']=='consultation':
+            args=args.model_copy(update={'mode':'doctor','service_id':''})
     state=deepcopy(previous) if previous else None
     changed_department=False
     if args.action=='end':

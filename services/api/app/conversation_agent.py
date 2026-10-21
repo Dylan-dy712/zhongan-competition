@@ -284,6 +284,7 @@ class AgentModel:
         instruction=('上一条承诺在当前聊天预约或接入医生，但尚未执行服务工具。只返回JSON对象'
             '{"session_request":参数对象或null}，不能返回段落、计划或口头承诺。'
             '按当前用户意图和已整理信息选择start/update/confirm/reply/end。已有状态延续；信息不足也可start并保留缺项，工具返回后补问。'
+            '使用互联网医院、线上咨询和找医生必须选择mode=doctor，按咨询问题、持续时间、严重度等收集，不按体检预约收集城市/时间。'
             '只有用户并未要求开始/继续服务或需先判断急症时才返回null。临床信息仍需如实填写，未知不猜。'
             '已查询的服务或以下公开目录均可用于选择service_id，不代表真实保单已核验：'+json.dumps(choices,ensure_ascii=False)+
             '参数JSON Schema：'+json.dumps(ServiceSessionArgs.model_json_schema(),ensure_ascii=False))

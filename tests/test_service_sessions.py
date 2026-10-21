@@ -37,6 +37,19 @@ class ServiceSessionTests(unittest.TestCase):
         self.assertIn('未占用真实',state['notice'])
         self.assertEqual(self.call(state,'confirm',question='确认模拟预约')['booking_reference'],state['booking_reference'])
 
+    def test_consultation_benefit_uses_doctor_intake_not_appointment_fields(self):
+        consultation=next(item for item in catalog()['benefits'] if item['need']=='consultation')
+        args=ServiceSessionArgs(action='start',mode='benefit',service_id=consultation['id'],clinical=self.clinical)
+        state=manage_session(args,None,['我想用你们的互联网医院'],'我想用你们的互联网医院')
+        self.assertEqual(state['mode'],'doctor')
+        self.assertEqual(state['phase'],'collecting')
+        self.assertIn('主要症状或咨询问题',state['missing_fields'])
+        self.assertNotIn('期望日期和时段',state['missing_fields'])
+        blocked=manage_session(args.model_copy(update={'clinical':MedicalServiceArgs(**self.clinical,condition='oncology')}),None,
+            ['已确诊肿瘤，想用互联网医院'],'已确诊肿瘤，想用互联网医院')
+        self.assertEqual(blocked['phase'],'blocked')
+        self.assertEqual(blocked['speaker'],'assistant')
+
     def test_unexecuted_inline_promise_requires_structured_tool_execution(self):
         args=ServiceSessionArgs(action='start',service_id=self.benefit,clinical=self.clinical,
             fields=[{'key':k,'value':v} for k,v in self.benefit_fields.items()])
