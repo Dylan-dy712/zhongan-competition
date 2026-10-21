@@ -3,7 +3,7 @@ import unittest
 from unittest.mock import MagicMock,patch
 
 from services.api.app.medical_services import MedicalServiceArgs,catalog
-from services.api.app.service_sessions import ServiceSessionArgs,manage_session,restore_session,pending_inline_service_reply
+from services.api.app.service_sessions import ServiceSessionArgs,manage_session,restore_session,pending_inline_service_reply,pending_session_command
 from services.api.app.conversation_agent import CareTools,run_agent,history_answer
 
 
@@ -55,7 +55,11 @@ class ServiceSessionTests(unittest.TestCase):
         self.assertEqual(result['service_session']['phase'],'awaiting_confirmation')
         self.assertEqual(events[0]['tool'],'manage_service_session')
         self.assertTrue(pending_inline_service_reply('我已经帮你完成模拟预约。'))
+        self.assertTrue(pending_inline_service_reply('模拟预约已完成。'))
         self.assertFalse(pending_inline_service_reply('这种情况不适合在线预约，应先急诊。'))
+        self.assertTrue(pending_session_command(result['service_session'],'确认模拟预约'))
+        self.assertTrue(pending_session_command(result['service_session'],'结束当前模拟服务，回到暖暖继续聊。'))
+        self.assertFalse(pending_session_command(result['service_session'],'不确认模拟预约'))
 
     def test_real_model_inline_planner_validates_json(self):
         from services.api.app.conversation_agent import AgentModel

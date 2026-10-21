@@ -31,7 +31,7 @@ from .model_workloads import is_qianfan
 from .contracts.knowledge import DiseaseCode
 from .patient_followup import FollowupPayload, FOLLOWUP_INSTRUCTION, source_patient_updates
 from .medical_services import MedicalServiceArgs, SERVICE_INSTRUCTION, SERVICE_INVITATION, recommend_services, pending_service_reply, separate_service_citations
-from .service_sessions import ServiceSessionArgs, SESSION_INSTRUCTION, manage_session, restore_session, pending_inline_service_reply
+from .service_sessions import ServiceSessionArgs, SESSION_INSTRUCTION, manage_session, restore_session, pending_inline_service_reply, pending_session_command
 from .chat_reply import CHAT_REPLY_INSTRUCTION, decode_chat_reply
 from .web_knowledge import WebKnowledge, chat_concepts, CONCEPTS, COST_TOPICS
 
@@ -937,7 +937,8 @@ def run_agent(history, question, attachments, tools, model=None, on_event=None, 
             ])
             continue
         if (not analysis_mode and isinstance(tools,CareTools) and not tools.service_session_called
-                and pending_inline_service_reply(reply.text) and getattr(type(model),'plan_service_session',None) is not None):
+                and (pending_inline_service_reply(reply.text) or pending_session_command(tools.service_session,question))
+                and getattr(type(model),'plan_service_session',None) is not None):
             if inline_service_repaired or round_index>=3 or not budget:
                 raise ValueError('AGENT_INCOMPLETE_INLINE_SERVICE_REPLY')
             inline_service_repaired=True
