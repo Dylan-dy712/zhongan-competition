@@ -1,0 +1,1436 @@
+{
+  "version": "2026-10-21-v1",
+  "verified_on": "2026-10-21",
+  "sources": {
+    "plus2026": {
+      "title": "众安中高端PLUS2026服务手册",
+      "url": "https://files2.huizecdn.com/file2/M00/F2/7C/rBYA3GqiQ1uAR1fgAEbZn2UiblA278.pdf",
+      "pages": "15-18",
+      "product_scope": "PLUS2026；按已购计划与加油包核验",
+      "local_verified_pdf_sha256": "d246cf3f046bec210b05daa4b83ad601aa03ceb3f7b73182090176e2e4a87523"
+    },
+    "text2024": {
+      "title": "众安百万医疗保险2024服务文件",
+      "url": "https://open-cdn.zhongan.com/i-dm/2023-12-28/ehtobotbkmt/bwyl20241228.pdf",
+      "pages": "11",
+      "product_scope": "2024产品图文问诊；不能推定适用当前保单"
+    },
+    "services2025": {
+      "title": "众安2025-09公开服务文件",
+      "url": "https://open-cdn.zhongan.com/i-dm-s/2025-9-22/x9r8vrl664r/qbhj9a9500b.pdf",
+      "pages": "1,6,67",
+      "product_scope": "指定互联网医院服务；具体产品权益分别核验"
+    },
+    "video": {
+      "title": "众安互联网医院视频问诊服务介绍",
+      "url": "https://cdn-open.zhongan.com/product/market/Uy5LCGs2L80aGcAdemxEYO8P.pdf",
+      "pages": "1",
+      "product_scope": "该版为全科视频服务，6-65周岁；不支持科室转诊，不套用于其他版本"
+    },
+    "procurement": {
+      "title": "人保健康线上问诊服务采购中标公告（2026-01-27）",
+      "url": "https://ec.picc.com/cms/default/webfile/ywgg5/20260127/1200827589082480640.html",
+      "pages": "",
+      "product_scope": "众安为入围供应商之一；不能证明众安面向本保单的皮肤科实时入口"
+    },
+    "cancer": {
+      "title": "众安肿瘤安康综合管理服务说明",
+      "url": "https://open-cdn.zhongan.com/i-dm-s/2025-4-7/eisvb6t9zzs/65slzwpav57.pdf",
+      "pages": "",
+      "product_scope": "肺癌/肠癌特定健康管理；需专项权益、初筛，不替代线下治疗"
+    }
+  },
+  "profiles": {
+    "general": {
+      "label": "全科分诊",
+      "parent_department": "全科",
+      "support_level": "triage_only",
+      "examples": [],
+      "source_ids": [
+        "video"
+      ],
+      "scope_note": "先了解问题并分诊；全科视频服务有单独年龄和版本条件，本演示不声称已核验该视频权益。"
+    },
+    "internal_medicine": {
+      "label": "内科",
+      "parent_department": "内科",
+      "support_level": "documented",
+      "examples": [
+        "病毒性感冒",
+        "消化不良",
+        "贫血"
+      ],
+      "source_ids": [
+        "plus2026"
+      ],
+      "scope_note": "产品手册明确列有内科；具体病种、复诊条件和接诊情况由医生评估。"
+    },
+    "gastroenterology": {
+      "label": "内科 · 消化方向",
+      "parent_department": "内科",
+      "support_level": "direction_only",
+      "examples": [
+        "慢性胃炎",
+        "功能性消化不良",
+        "胃-食管反流病",
+        "便秘",
+        "腹泻",
+        "胃肠功能紊乱",
+        "肠炎"
+      ],
+      "source_ids": [
+        "plus2026"
+      ],
+      "scope_note": "仅为内科下的问题咨询方向；未核实众安存在该独立细分科室或实时专家号源，不表示所列疾病均可线上处理。"
+    },
+    "respiratory": {
+      "label": "内科 · 呼吸方向",
+      "parent_department": "内科",
+      "support_level": "direction_only",
+      "examples": [
+        "慢性咽炎",
+        "哮喘",
+        "急性上呼吸道感染",
+        "急性支气管炎"
+      ],
+      "source_ids": [
+        "plus2026"
+      ],
+      "scope_note": "仅为内科下的问题咨询方向；未核实众安存在该独立细分科室或实时专家号源，不表示所列疾病均可线上处理。"
+    },
+    "cardiology": {
+      "label": "内科 · 心血管方向",
+      "parent_department": "内科",
+      "support_level": "direction_only",
+      "examples": [
+        "高血压",
+        "冠心病"
+      ],
+      "source_ids": [
+        "plus2026"
+      ],
+      "scope_note": "仅为内科下的问题咨询方向；未核实众安存在该独立细分科室或实时专家号源，不表示所列疾病均可线上处理。"
+    },
+    "endocrinology": {
+      "label": "内科 · 内分泌代谢方向",
+      "parent_department": "内科",
+      "support_level": "direction_only",
+      "examples": [
+        "糖尿病",
+        "甲状腺功能减退症"
+      ],
+      "source_ids": [
+        "plus2026"
+      ],
+      "scope_note": "仅为内科下的问题咨询方向；未核实众安存在该独立细分科室或实时专家号源，不表示所列疾病均可线上处理。"
+    },
+    "neurology": {
+      "label": "内科 · 神经方向",
+      "parent_department": "内科",
+      "support_level": "direction_only",
+      "examples": [
+        "偏头痛",
+        "紧张性头痛",
+        "丛集性头痛",
+        "眩晕"
+      ],
+      "source_ids": [
+        "plus2026"
+      ],
+      "scope_note": "仅为内科下的问题咨询方向；未核实众安存在该独立细分科室或实时专家号源，不表示所列疾病均可线上处理。"
+    },
+    "nephrology": {
+      "label": "内科 · 肾脏方向",
+      "parent_department": "内科",
+      "support_level": "direction_only",
+      "examples": [
+        "慢性肾脏病"
+      ],
+      "source_ids": [
+        "plus2026"
+      ],
+      "scope_note": "仅为内科下的问题咨询方向；未核实众安存在该独立细分科室或实时专家号源，不表示所列疾病均可线上处理。"
+    },
+    "surgery": {
+      "label": "外科咨询",
+      "parent_department": "外科",
+      "support_level": "other_product",
+      "examples": [
+        "痔疮",
+        "甲沟炎",
+        "软组织伤"
+      ],
+      "source_ids": [
+        "text2024"
+      ],
+      "scope_note": "2024产品文件明确列有外科，当前保单适用待确认；仅咨询和就医指导，检查、手术或伤口处置需线下。"
+    },
+    "orthopedics": {
+      "label": "外科 · 骨关节方向",
+      "parent_department": "外科",
+      "support_level": "other_product",
+      "examples": [
+        "腰肌劳损",
+        "关节痛",
+        "腱鞘炎",
+        "骨质疏松",
+        "扭伤"
+      ],
+      "source_ids": [
+        "text2024"
+      ],
+      "scope_note": "根据外科大科室作骨关节问题咨询模拟，独立骨科入口和当前保单适用未核实，不代替体格检查和影像。"
+    },
+    "urology": {
+      "label": "外科 · 泌尿方向",
+      "parent_department": "外科",
+      "support_level": "other_product",
+      "examples": [
+        "泌尿道感染",
+        "膀胱炎",
+        "特指尿道炎"
+      ],
+      "source_ids": [
+        "text2024"
+      ],
+      "scope_note": "外科下的咨询方向推断；未核实独立泌尿科接诊入口或当前保单适用。"
+    },
+    "gynecology": {
+      "label": "妇科",
+      "parent_department": "妇科",
+      "support_level": "documented",
+      "examples": [
+        "痛经",
+        "月经不调",
+        "更年期综合征",
+        "细菌性阴道炎",
+        "排卵期出血"
+      ],
+      "source_ids": [
+        "plus2026"
+      ],
+      "scope_note": "产品手册明确列有妇科；异常出血、孕期等情况仍须按病情决定线下就医，不能从目录推定均可线上诊疗。"
+    },
+    "pediatrics": {
+      "label": "儿科",
+      "parent_department": "儿科",
+      "support_level": "documented",
+      "examples": [
+        "小儿腹泻",
+        "小儿厌食",
+        "手足口病"
+      ],
+      "source_ids": [
+        "plus2026"
+      ],
+      "scope_note": "产品手册明确列有儿科；儿童需进一步核对年龄，处方年龄限制与一般咨询分别判断。"
+    },
+    "traditional_chinese_medicine": {
+      "label": "中医咨询方向",
+      "parent_department": "中医科",
+      "support_level": "other_product",
+      "examples": [
+        "风寒感冒",
+        "风热感冒",
+        "风湿感冒"
+      ],
+      "source_ids": [
+        "services2025"
+      ],
+      "scope_note": "部分众安产品文件列有指定互联网医院中医服务，不证明当前PLUS权益包含该入口；仅作咨询模拟，不自行生成中药处方。"
+    },
+    "dermatology": {
+      "label": "全科 · 皮肤问题分诊",
+      "parent_department": "全科",
+      "support_level": "triage_only",
+      "examples": [
+        "湿疹",
+        "痤疮",
+        "接触性皮炎",
+        "脂溢性皮炎",
+        "荨麻疹",
+        "急性荨麻疹",
+        "皮炎和湿疹",
+        "足癣"
+      ],
+      "source_ids": [
+        "plus2026",
+        "procurement"
+      ],
+      "scope_note": "药费目录含皮肤疾病，外部采购也列有皮肤咨询；两者均不能证明当前保单有独立皮肤科医生入口，先全科分诊。"
+    },
+    "ophthalmology": {
+      "label": "全科 · 眼部问题分诊",
+      "parent_department": "全科",
+      "support_level": "triage_only",
+      "examples": [
+        "干眼症",
+        "视疲劳",
+        "睑腺炎",
+        "病毒性结膜炎"
+      ],
+      "source_ids": [
+        "plus2026"
+      ],
+      "scope_note": "药费目录含眼部疾病，但未核实独立眼科接诊科室；先分诊，眼痛或视力变化按病情线下评估。"
+    },
+    "ent": {
+      "label": "全科 · 耳鼻喉问题分诊",
+      "parent_department": "全科",
+      "support_level": "triage_only",
+      "examples": [
+        "鼻炎",
+        "过敏性鼻炎",
+        "中耳炎",
+        "慢性咽炎"
+      ],
+      "source_ids": [
+        "plus2026"
+      ],
+      "scope_note": "药费目录含相关疾病，不能据此确认独立耳鼻喉科入口；仅作全科分诊。"
+    },
+    "dentistry": {
+      "label": "全科 · 口腔问题分诊",
+      "parent_department": "全科",
+      "support_level": "triage_only",
+      "examples": [
+        "口腔溃疡",
+        "牙龈炎",
+        "牙周炎",
+        "龋齿"
+      ],
+      "source_ids": [
+        "plus2026"
+      ],
+      "scope_note": "药费目录不等于已开设口腔科；需要口腔检查或操作的需求转线下。"
+    },
+    "oncology": {
+      "label": "肿瘤专科线下就医",
+      "parent_department": "肿瘤科",
+      "support_level": "offline",
+      "examples": [
+        "肺癌",
+        "肠癌",
+        "乳腺癌",
+        "胃癌"
+      ],
+      "source_ids": [
+        "cancer"
+      ],
+      "scope_note": "优先线下肿瘤专科。专项肺癌/肠癌健康管理另核验，不作为通用模拟医生的线上治疗入口。"
+    },
+    "psychiatry": {
+      "label": "精神心理专科线下就医",
+      "parent_department": "精神心理科",
+      "support_level": "offline",
+      "examples": [
+        "焦虑症",
+        "抑郁症"
+      ],
+      "source_ids": [
+        "plus2026"
+      ],
+      "scope_note": "三甲图文服务明确排除精神类或心理咨询；即使某疾病出现在药费目录，也不能覆盖此排除条件。"
+    }
+  },
+  "disease_list_scope": "182条仅为PLUS2026药费直赔目录条目，不是互联网医院全部接诊病种、独立科室清单或个人赔付保证；未列入也不等于医院不能咨询。",
+  "diseases": [
+    {
+      "row": 1,
+      "name": "手足口病",
+      "page": 16,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 2,
+      "name": "口腔粘膜溃疡",
+      "page": 16,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 3,
+      "name": "急性胃肠炎",
+      "page": 16,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 4,
+      "name": "急性咽炎",
+      "page": 17,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 5,
+      "name": "急性化脓性扁桃体炎",
+      "page": 17,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 6,
+      "name": "急性支气管炎",
+      "page": 17,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 7,
+      "name": "水痘",
+      "page": 17,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 8,
+      "name": "紧张性头痛",
+      "page": 17,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 9,
+      "name": "偏头痛",
+      "page": 17,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 10,
+      "name": "病毒性感冒",
+      "page": 17,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 11,
+      "name": "胃肠型感冒",
+      "page": 17,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 12,
+      "name": "流行性感冒",
+      "page": 17,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 13,
+      "name": "急性气管支气管炎",
+      "page": 17,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 14,
+      "name": "急性上呼吸道感染",
+      "page": 17,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 15,
+      "name": "疱疹性咽峡炎",
+      "page": 17,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 16,
+      "name": "急性鼻窦炎",
+      "page": 17,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 17,
+      "name": "急性咽喉炎",
+      "page": 17,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 18,
+      "name": "细菌性阴道炎",
+      "page": 17,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 19,
+      "name": "非特异性阴道炎",
+      "page": 17,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 20,
+      "name": "念珠菌性阴道炎",
+      "page": 17,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 21,
+      "name": "滴虫性阴道炎",
+      "page": 17,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 22,
+      "name": "痛经",
+      "page": 17,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 23,
+      "name": "便秘",
+      "page": 17,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 24,
+      "name": "腹泻",
+      "page": 17,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 25,
+      "name": "痱子",
+      "page": 17,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 26,
+      "name": "单纯疱疹",
+      "page": 17,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 27,
+      "name": "带状疱疹",
+      "page": 17,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 28,
+      "name": "急性荨麻疹",
+      "page": 17,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 29,
+      "name": "丘疹性荨麻疹",
+      "page": 17,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 30,
+      "name": "躯干皮肤感染",
+      "page": 17,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 31,
+      "name": "上肢皮肤感染",
+      "page": 17,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 32,
+      "name": "足皮肤感染",
+      "page": 17,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 33,
+      "name": "下肢皮肤感染",
+      "page": 18,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 34,
+      "name": "毛囊炎",
+      "page": 18,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 35,
+      "name": "股癣",
+      "page": 18,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 36,
+      "name": "接触性皮炎",
+      "page": 18,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 37,
+      "name": "病毒性结膜炎",
+      "page": 18,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 38,
+      "name": "变应性结膜炎",
+      "page": 18,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 39,
+      "name": "急性肠炎",
+      "page": 18,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 40,
+      "name": "急性胃炎",
+      "page": 18,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 41,
+      "name": "慢性咽炎",
+      "page": 18,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 42,
+      "name": "急性喉炎",
+      "page": 18,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 43,
+      "name": "支气管肺炎",
+      "page": 18,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 44,
+      "name": "疱疹性咽颊炎",
+      "page": 18,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 45,
+      "name": "小儿腹泻",
+      "page": 18,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 46,
+      "name": "维生素缺乏症",
+      "page": 18,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 47,
+      "name": "皮炎和湿疹",
+      "page": 18,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 48,
+      "name": "脱水",
+      "page": 18,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 49,
+      "name": "贫血",
+      "page": 18,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 50,
+      "name": "厌食症",
+      "page": 18,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 51,
+      "name": "消化不良",
+      "page": 18,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 52,
+      "name": "失眠",
+      "page": 18,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 53,
+      "name": "眩晕",
+      "page": 18,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 54,
+      "name": "焦虑症",
+      "page": 18,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 55,
+      "name": "丛集性头痛",
+      "page": 18,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 56,
+      "name": "急性病毒性咽炎",
+      "page": 18,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 57,
+      "name": "扁桃体炎",
+      "page": 18,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 58,
+      "name": "咽结膜热",
+      "page": 18,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 59,
+      "name": "哮喘",
+      "page": 18,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 60,
+      "name": "急性病毒性喉炎",
+      "page": 18,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 61,
+      "name": "中耳炎",
+      "page": 18,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 62,
+      "name": "耳道炎",
+      "page": 16,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 63,
+      "name": "鼻炎",
+      "page": 16,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 64,
+      "name": "过敏性鼻炎",
+      "page": 16,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 65,
+      "name": "避孕",
+      "page": 17,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 66,
+      "name": "更年期综合征",
+      "page": 17,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 67,
+      "name": "宫颈糜烂",
+      "page": 17,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 68,
+      "name": "老年性阴道炎",
+      "page": 17,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 69,
+      "name": "月经不调",
+      "page": 17,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 70,
+      "name": "肠炎",
+      "page": 17,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 71,
+      "name": "胃十二指肠溃疡",
+      "page": 17,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 72,
+      "name": "功能性消化不良",
+      "page": 17,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 73,
+      "name": "慢性胃炎",
+      "page": 17,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 74,
+      "name": "骨质疏松",
+      "page": 17,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 75,
+      "name": "唇炎",
+      "page": 17,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 76,
+      "name": "手足皲裂",
+      "page": 17,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 77,
+      "name": "脓包疮",
+      "page": 17,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 78,
+      "name": "花斑癣",
+      "page": 17,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 79,
+      "name": "体癣",
+      "page": 17,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 80,
+      "name": "痤疮",
+      "page": 17,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 81,
+      "name": "疖肿",
+      "page": 17,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 82,
+      "name": "湿疹",
+      "page": 17,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 83,
+      "name": "皮肤角质症",
+      "page": 17,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 84,
+      "name": "皮肤癣症",
+      "page": 17,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 85,
+      "name": "脂溢性皮炎",
+      "page": 17,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 86,
+      "name": "神经性皮炎",
+      "page": 17,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 87,
+      "name": "日光性皮炎",
+      "page": 17,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 88,
+      "name": "蚊虫叮咬",
+      "page": 17,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 89,
+      "name": "腋臭",
+      "page": 17,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 90,
+      "name": "足癣",
+      "page": 17,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 91,
+      "name": "关节痛",
+      "page": 17,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 92,
+      "name": "筋膜炎",
+      "page": 17,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 93,
+      "name": "腰肌劳损",
+      "page": 17,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 94,
+      "name": "扭伤",
+      "page": 18,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 95,
+      "name": "腱鞘炎",
+      "page": 18,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 96,
+      "name": "滑膜炎",
+      "page": 18,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 97,
+      "name": "烧伤",
+      "page": 18,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 98,
+      "name": "软组织伤",
+      "page": 18,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 99,
+      "name": "擦伤",
+      "page": 18,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 100,
+      "name": "外伤",
+      "page": 18,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 101,
+      "name": "痔疮",
+      "page": 18,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 102,
+      "name": "挫伤",
+      "page": 18,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 103,
+      "name": "干眼症",
+      "page": 18,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 104,
+      "name": "细菌性结膜炎",
+      "page": 18,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 105,
+      "name": "沙眼",
+      "page": 18,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 106,
+      "name": "麦粒肿",
+      "page": 18,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 107,
+      "name": "霰粒肿",
+      "page": 18,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 108,
+      "name": "视疲劳",
+      "page": 18,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 109,
+      "name": "肝气淤积",
+      "page": 18,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 110,
+      "name": "肾虚",
+      "page": 18,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 111,
+      "name": "风湿感冒",
+      "page": 18,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 112,
+      "name": "风热感冒",
+      "page": 18,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 113,
+      "name": "风寒感冒",
+      "page": 18,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 114,
+      "name": "小儿厌食",
+      "page": 18,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 115,
+      "name": "中暑",
+      "page": 18,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 116,
+      "name": "牙周炎",
+      "page": 18,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 117,
+      "name": "牙龈炎",
+      "page": 18,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 118,
+      "name": "根尖炎",
+      "page": 18,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 119,
+      "name": "龋齿",
+      "page": 18,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 120,
+      "name": "口腔溃疡",
+      "page": 18,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 121,
+      "name": "蛔虫病",
+      "page": 18,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 122,
+      "name": "维生素A缺乏症",
+      "page": 18,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 123,
+      "name": "饮食性锌缺乏",
+      "page": 16,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 124,
+      "name": "肠系膜淋巴结炎",
+      "page": 16,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 125,
+      "name": "非新生儿脐炎",
+      "page": 16,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 126,
+      "name": "饮食性钙缺乏",
+      "page": 17,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 127,
+      "name": "口腔疱疹",
+      "page": 17,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 128,
+      "name": "急性腮腺炎",
+      "page": 17,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 129,
+      "name": "急性分泌性中耳炎",
+      "page": 17,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 130,
+      "name": "外耳疖",
+      "page": 17,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 131,
+      "name": "咽鼓管疾患",
+      "page": 17,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 132,
+      "name": "急性扁桃体炎",
+      "page": 17,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 133,
+      "name": "鼻前庭炎",
+      "page": 17,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 134,
+      "name": "变应性鼻炎",
+      "page": 17,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 135,
+      "name": "周围性面神经麻痹",
+      "page": 17,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 136,
+      "name": "胃-食管反流病",
+      "page": 17,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 137,
+      "name": "肺炎支原体感染",
+      "page": 17,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 138,
+      "name": "病毒性咽炎",
+      "page": 17,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 139,
+      "name": "链球菌性扁桃体炎",
+      "page": 17,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 140,
+      "name": "眼睑皮炎",
+      "page": 17,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 141,
+      "name": "粘液脓性结膜炎",
+      "page": 17,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 142,
+      "name": "结膜出血",
+      "page": 17,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 143,
+      "name": "睑腺炎",
+      "page": 17,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 144,
+      "name": "擦烂红斑",
+      "page": 17,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 145,
+      "name": "皮肤疖",
+      "page": 17,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 146,
+      "name": "口角炎",
+      "page": 17,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 147,
+      "name": "压力性紫癜",
+      "page": 17,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 148,
+      "name": "疥疮",
+      "page": 17,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 149,
+      "name": "阴虱病",
+      "page": 17,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 150,
+      "name": "虱病",
+      "page": 17,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 151,
+      "name": "脚癣",
+      "page": 17,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 152,
+      "name": "头面颈部皮肤感染",
+      "page": 17,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 153,
+      "name": "冻疮",
+      "page": 17,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 154,
+      "name": "龟头炎",
+      "page": 17,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 155,
+      "name": "龟头包皮炎",
+      "page": 18,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 156,
+      "name": "特指尿道炎",
+      "page": 18,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 157,
+      "name": "阴囊湿疹",
+      "page": 18,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 158,
+      "name": "精囊炎",
+      "page": 18,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 159,
+      "name": "膀胱炎",
+      "page": 18,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 160,
+      "name": "阴囊炎",
+      "page": 18,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 161,
+      "name": "排卵期出血",
+      "page": 18,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 162,
+      "name": "外阴疖",
+      "page": 18,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 163,
+      "name": "泌乳抑制",
+      "page": 18,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 164,
+      "name": "乳汁过少",
+      "page": 18,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 165,
+      "name": "痛性痉挛和痉挛",
+      "page": 18,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 166,
+      "name": "肋骨软骨炎",
+      "page": 18,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 167,
+      "name": "踝关节扭伤",
+      "page": 18,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 168,
+      "name": "口腔阿弗他溃疡",
+      "page": 18,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 169,
+      "name": "胃肠功能紊乱",
+      "page": 18,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 170,
+      "name": "泌尿道感染",
+      "page": 18,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 171,
+      "name": "淋巴结炎",
+      "page": 18,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 172,
+      "name": "头皮浅表损伤",
+      "page": 18,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 173,
+      "name": "头皮挫伤",
+      "page": 18,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 174,
+      "name": "头皮擦伤",
+      "page": 18,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 175,
+      "name": "面部软组织挫伤",
+      "page": 18,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 176,
+      "name": "面部擦伤",
+      "page": 18,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 177,
+      "name": "乳房挫伤",
+      "page": 18,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 178,
+      "name": "乳房特指浅表损伤",
+      "page": 18,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 179,
+      "name": "乳房浅表损伤",
+      "page": 18,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 180,
+      "name": "乳头皲裂",
+      "page": 18,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 181,
+      "name": "乳头炎",
+      "page": 18,
+      "source_id": "plus2026"
+    },
+    {
+      "row": 182,
+      "name": "甲沟炎",
+      "page": 18,
+      "source_id": "plus2026"
+    }
+  ],
+  "limitations": [
+    "未登录众安小程序，未取得实时科室、医生、排班或完整许可病种表。",
+    "不同产品的图文咨询、医生图文问诊和全科视频不能合并服务时间、年龄或开方条件。",
+    "科室及咨询方向由模型按当前用户和已读材料选择，示例疾病用于目录检索及分流演示，不构成诊断或接诊保证。"
+  ]
+}

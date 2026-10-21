@@ -8,6 +8,7 @@ import AnalysisFlow,{analysisView,type UploadProgress} from './AnalysisFlow';
 import AnalysisNarrative,{currentNarrative} from './AnalysisNarrative';
 import ChatFollowups from './ChatFollowups';
 import MedicalServiceCards from './MedicalServices';
+import ServiceSession, {departmentLabel} from './ServiceSession';
 import type {ChatSnapshot, ChatSubject, ChatTurn, Conversation, Evidence, ToolEvent, DeliveryNotice, FeedbackType,ReportSection} from './types';
 import {CareReport,EvidencePanel,brand} from './CarePages';
 import {DemoHome,DemoIcon} from './DemoPages';
@@ -42,7 +43,7 @@ function requestId() {
   const hex = Array.from(bytes, x => x.toString(16).padStart(2, '0')).join('');
   return `${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20)}`;
 }
-const toolLabels: Record<string,string> = {recommend_medical_services:'整理医疗服务',list_materials:'查看上传材料',start_analysis:'提交材料分析',
+const toolLabels: Record<string,string> = {manage_service_session:'在聊天里安排模拟服务',recommend_medical_services:'整理医疗服务',list_materials:'查看上传材料',start_analysis:'提交材料分析',
   search_knowledge:'查阅医护与费用知识',search_web:'联网查阅权威资料',
   analysis_status:'查询分析进度',read_materials:'查阅原始依据',read_report:'读取分析报告',search_history:'查找以前的对话'};
 const statusLabels: Record<string,string> = {not_started:'尚未分析',queued:'材料已排队',running:'正在分析材料',
@@ -583,6 +584,8 @@ export default function App() {
   const savedTurns=[...older,...(snapshot?.turns || [])].filter((t,i,all)=>all.findIndex(x=>x.turn_id===t.turn_id)===i);
   const turns=[...savedTurns,...sentMessages.filter(item=>!savedTurns.some(t=>t.request_id===item.turn.request_id)).map(item=>item.turn)];
   const latestAnswered=[...turns].reverse().find(t=>t.status==='completed'&&t.answer)?.turn_id;
+  const activeService=[...turns].reverse().find(t=>t.status==='completed'&&t.answer?.service_session)?.answer?.service_session;
+  const doctorActive=activeService?.phase==='doctor_active';
   const narrative=currentNarrative(turns,snapshot?.analysis.run_id);
   const working=busy || uploading || loadingConversation || !!snapshot?.turns.some(t=>t.status==='running');
   const submit=(e:FormEvent)=>{e.preventDefault();void send();};
@@ -662,10 +665,11 @@ export default function App() {
           {turns.map(t=><div className="chat-turn" key={t.turn_id} id={`turn-${t.turn_id}`}>
             {t.input_kind==='analysis_ready' ? <p className="analysis-continuation">材料已整理 · 暖暖为你解读</p> : isClaimSubmission(t) ? <p className="analysis-continuation">材料已提交 · 暖暖为你整理</p> : <div className="message-row user"><div className="message-bubble"><p>{t.question}</p>
             {sentMessages.find(item=>item.turn.request_id===t.request_id)?.files.length ? <ChatSentAttachments files={sentMessages.find(item=>item.turn.request_id===t.request_id)!.files}/> : t.attachments.map(a=><span className="attachment" key={a.document_id}>▤ {a.name}</span>)}</div></div>}
-            <div className="message-row assistant"><span className="nuan-avatar" aria-hidden="true">✦</span><div className={`message-bubble ${t.input_kind==='analysis_ready'?'narrative-bubble':''}`}><div className="nuan-reply-label"><DemoIcon name="leaf"/>暖暖{t.input_kind==='analysis_ready' && <span>· 材料解读</span>}</div>{t.input_kind!=='analysis_ready' && <ToolActivity events={t.tool_events}/>}
+            <div className={`message-row assistant ${t.answer?.service_speaker==='doctor_simulation'?'doctor-simulation-row':''}`}><span className="nuan-avatar" aria-hidden="true">{t.answer?.service_speaker==='doctor_simulation'?'✚':'✦'}</span><div className={`message-bubble ${t.input_kind==='analysis_ready'?'narrative-bubble':''}`}><div className="nuan-reply-label"><DemoIcon name="leaf"/>{t.answer?.service_speaker==='doctor_simulation'?`${departmentLabel(t.answer.service_session)}医生 · AI模拟（无真人接入）`:'暖暖'}{t.input_kind==='analysis_ready' && <span>· 材料解读</span>}</div>{t.input_kind!=='analysis_ready' && <ToolActivity events={t.tool_events}/>}
               {t.answer ? <>{t.input_kind==='analysis_ready'?<AnalysisNarrative turn={t} onEvidence={id=>void showEvidence(id)} onServiceAsk={message=>send(undefined,message)} disabled={working}/>:<><p><CitedText text={t.answer.text} citations={t.answer.citations} sources={t.answer.knowledge_sources} onEvidence={id=>void showEvidence(id)}/></p></>}
 
                 {t.answer.medical_services&&<MedicalServiceCards services={t.answer.medical_services} onAsk={message=>send(undefined,message)} disabled={working} canAskForLocation={t.turn_id===latestAnswered}/>}
+                {t.answer.service_session&&t.answer.service_session_event!==false&&<ServiceSession session={t.answer.service_session} onAsk={message=>send(undefined,message)} disabled={working} interactive={t.turn_id===latestAnswered}/>}
                 {!!t.answer.patient_updates?.length&&<small className="patient-update-notice">已记录你的补充 · 作为用户自述供后续交流参考</small>}
                 {t.status==='completed'&&t.turn_id===latestAnswered&&<ChatFollowups answer={t.answer} report={t.input_kind==='analysis_ready'} disabled={working} onSend={message=>send(undefined,message)}/>}</>
                 : t.status==='failed' ? <><p>{t.turn_id.startsWith('local:')?'这次消息没有发送成功，可以重试。':'这次回答没有完成，你的消息已保存。'}</p><button disabled={working} onClick={()=>void send(t)}>重试这条消息</button></>
@@ -673,6 +677,7 @@ export default function App() {
             </div></div></div>)}
         </div><div ref={bottom}/></main>
         <footer className="chat-footer">
+          {doctorActive&&<div className="doctor-chat-status" role="status">正在与{departmentLabel(activeService)}医生进行AI模拟对话 · 无真人接入<button disabled={working} onClick={()=>void send(undefined,'结束当前模拟服务，回到暖暖继续聊。')}>回到暖暖</button></div>}
           <ChatDraftAttachments files={draftFiles} busy={working} onRemove={id=>{setDraftFiles(current=>current.filter(file=>file.id!==id));uploadedDrafts.current.delete(id);}}/>
           <form className="composer" onSubmit={submit}>
             <input ref={uploadInput} aria-label="选择文档文件" hidden type="file" multiple onChange={e=>void upload(e.target.files)}/>
@@ -685,7 +690,7 @@ export default function App() {
                 <small className="upload-panel-note"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" aria-hidden="true"><path d="M8 12v5a4 4 0 0 0 8 0V7a3 3 0 0 0-6 0v10a1 1 0 0 0 2 0V9"/></svg>支持多选 · 每份不超过 10MB</small>
               </div>
             </details>
-            <textarea aria-label="给暖暖的消息" value={input} disabled={working} onChange={e=>setInput(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.nativeEvent.isComposing){e.preventDefault();void send();}}} rows={1} placeholder={draftFiles.length?'补充你想问的问题，和附件一起发送':'有哪里不清楚？问问暖暖'}/>
+            <textarea aria-label={doctorActive?'给模拟医生的消息':'给暖暖的消息'} value={input} disabled={working} onChange={e=>setInput(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.nativeEvent.isComposing){e.preventDefault();void send();}}} rows={1} placeholder={doctorActive?'在这里继续描述情况，和模拟医生交流':draftFiles.length?'补充你想问的问题，和附件一起发送':'有哪里不清楚？问问暖暖'}/>
             <button className="send-button" aria-label="发送消息" disabled={working || (!input.trim()&&!draftFiles.length)}>{uploading?'…':busy?'…':<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6"/></svg>}</button>
           </form>
         </footer></>}
