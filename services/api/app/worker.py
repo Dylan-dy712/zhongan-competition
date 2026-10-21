@@ -37,6 +37,7 @@ from .ocr import OCR_METHOD, OCR_VERSION, Ocr, create_ocr, page_ocr_method, reco
 from .document_quality import classify_material
 from .material_routing import route_material
 from . import medical_records
+from . import product_extraction
 from .parse_cache import cached_pages,save_page,require_parse_scope,payload_digest
 from .volcengine_ocr import VolcengineOcr
 
@@ -102,7 +103,10 @@ def evidence_for_page(document,page):
         spans=[(*chunk,None) for chunk in text_chunks(page['text'])]
     return [{'evidence_id':uuid4(),'text':value,'document_id':document['document_id'],
              'document_version':document['document_version'],'page_index':page['page_index'],
-             'start':start,'end':end,'bbox':bbox} for start,end,value,bbox in spans]
+             'start':start,'end':end,'bbox':bbox,
+             'extraction_method':next((product_extraction.VERSION for block in page['blocks']
+                 if block.get('text') == value and block.get('metadata',{}).get('visual_transcription')),None)}
+            for start,end,value,bbox in spans]
 
 
 VISIT_RE = re.compile(r"(?:就诊|门诊|开单|开立|申请|检查)(?:时间|日期)\s*[:：]?\s*(" + DATE_TOKEN + r")")
@@ -219,8 +223,12 @@ def parse_controlled_text(document: dict, path: Path):
 
 
 def ocr_page(image_bytes: bytes, width: int, height: int, base: dict, ocr: Ocr):
-    result = recognize_routed(ocr, image_bytes, width, height,
-        enable_table=os.environ.get('ZHONGAN_TABLE_OCR', '0').lower() in {'1', 'true'})
+    plan = product_extraction.layout(image_bytes) if product_extraction.enabled() else None
+    if plan is not None and getattr(ocr, 'method', '') == 'paddle_ocr_v6_medium':
+        result = ocr.recognize(image_bytes, width, height, rotation_degrees=plan['adopted_rotation_degrees'])
+    else:
+        result = recognize_routed(ocr, image_bytes, width, height,
+            enable_table=os.environ.get('ZHONGAN_TABLE_OCR', '0').lower() in {'1', 'true'})
     kind, certainty = classify_material(result['text'])
     uncertain = 0
     for block in result['blocks']:
@@ -250,6 +258,9 @@ def ocr_page(image_bytes: bytes, width: int, height: int, base: dict, ocr: Ocr):
                               "needs_reupload":bool(uncertain or not text),"method":"ocr-line-triage-v1"},
         },
     })
+    if plan is not None:
+        base['metadata']['material_layout'] = plan
+        return product_extraction.extract_page(base, image_bytes, plan)
     return base
 
 
@@ -282,7 +293,7 @@ def parse_pdf(path: Path, ocr: Ocr | None = None, cached=None, checkpoint=None):
             "metadata": {"media_type": "application/pdf", "image_count": image_count,
                          "extracted_code_points": len(text)},
         }
-        if requires_ocr:
+        if requires_ocr or product_extraction.enabled():
             ocr = ocr or create_ocr()
             rendered_pdf = rendered_pdf or pdfium.PdfDocument(str(path))
             bitmap = rendered_pdf[page_index].render(scale=2.0)
@@ -328,7 +339,7 @@ def route_document(document: dict, path: Path, pipeline_version: str, ocr: Ocr |
 
 
 def analyze_models(material, knowledge_entries, user_context, source_refs, fact_inputs,
-                   encounter_dates, advance, knowledge_excluded=False, memory_context=None, defer_patient_analysis=False, preloaded_models=None):
+                   encounter_dates, advance, knowledge_excluded=False, memory_context=None, defer_patient_analysis=False, preloaded_models=None, document_models=None):
     """Overlap independent network calls; SQL and release checks stay on the caller."""
     started = time.monotonic()
     timings = {}
@@ -353,7 +364,16 @@ def analyze_models(material, knowledge_entries, user_context, source_refs, fact_
         if configured:
             extractor = OpenAiCompatibleExtractor()
             provider, model_id = extractor.provider, extractor.model_id
-            if preloaded_models:
+            if document_models:
+                fields=validate_evidence_quotes(document_models,material)
+                fields["candidates"]["documents"] = [
+                    {"document_id": d["document_id"], "page_index": d["page_index"], "status": d["status"],
+                     "fields": d["prediction"].get("fields", {}),
+                     "confidence": d["prediction"].get("confidence", {}),
+                     "evidence": d["prediction"].get("evidence", {}), "requires_review": True}
+                    for d in document_models["structured_documents"]]
+                timings["extract_seconds"]=0
+            elif preloaded_models:
                 fields=validate_evidence_quotes(preloaded_models[0],material);timings['extract_seconds']=0
             else:
                 fields_future = pool.submit(measured, 'extract_seconds', extractor.extract, material)
@@ -408,7 +428,12 @@ def recognition_profile(pipeline_version):
     ocr_version=provider_ocr_version(provider)
     fingerprint=payload_digest({'cache':'parsed-pages-v1','pipeline':pipeline_version,
         'text':TEXT_PARSER_VERSION,'pdf':PDF_PARSER_VERSION,'router':ROUTING_VERSION,
-        'ocr_provider':provider,'ocr_version':ocr_version})
+        'ocr_provider':provider,'ocr_version':ocr_version,
+        'document_extraction':({'version':product_extraction.VERSION,
+            'prompt':product_extraction.PROMPT_VERSION,'schema':product_extraction.SCHEMA_VERSION,
+            'provider':os.getenv('ZHONGAN_DOCUMENT_LLM_PROVIDER'),
+            'model':os.getenv('ZHONGAN_DOCUMENT_LLM_MODEL_ID'),
+            'base':os.getenv('ZHONGAN_DOCUMENT_LLM_BASE_URL')} if product_extraction.enabled() else None)})
     return fingerprint,{TEXT_PARSER_VERSION,PDF_PARSER_VERSION,ocr_version}
 
 
@@ -444,11 +469,13 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
             with conn.transaction():
                 require_parse_scope(conn,run)
                 cached=cached_pages(conn,document,fingerprint,accepted_versions,ROUTING_VERSION,run['pipeline_version'])
-                if run['pipeline_version']=='document-parser-v1':
+                if run['pipeline_version']=='document-parser-v1' and not product_extraction.enabled():
                     from .judge_sample_cache import reviewed_document_pages
                     prepared=reviewed_document_pages(conn,document,fingerprint,accepted_versions)
                     cached={**prepared,**cached}
                     prepared_sample_pages+=len(prepared)
+                if product_extraction.enabled():
+                    cached={i:p for i,p in cached.items() if p.get('metadata',{}).get('document_extraction',{}).get('version') == product_extraction.VERSION and p['metadata']['document_extraction'].get('status') == 'completed'}
             def checkpoint(page):
                 # Commit each successful page before another OCR/model request.
                 with conn.transaction():
@@ -511,7 +538,7 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
             (run["case_id"],),
         ).fetchone()
         preloaded_models=None
-        if fully_prepared and not knowledge_excluded:
+        if fully_prepared and not knowledge_excluded and not product_extraction.enabled():
             from .judge_model_cache import read_models
             preloaded_models=read_models(parsed_documents,knowledge_entries,fingerprint)
         parse_seconds = time.monotonic()-run_started
@@ -522,11 +549,16 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
             source_refs, fact_inputs, encounter_dates, advance, knowledge_excluded,
             memory_context=(run.get('context_snapshot') or {}).get('memory'),
             **({'defer_patient_analysis':True} if fully_prepared else {}),
-            **({'preloaded_models':preloaded_models} if preloaded_models else {}))
+            **({'preloaded_models':preloaded_models} if preloaded_models else {}),
+            document_models=product_extraction.case_extraction(parsed_documents) if product_extraction.enabled() else None)
         performance['parse_prepare_seconds'] = round(parse_seconds,3)
         performance['recognition_cache']={'reused_pages':reused_pages,'processed_pages':recognized_pages}
         performance['patient_analysis_mode']=report_model_result.get('usage_metadata',{}).get('patient_analysis_mode','shared')
 
+        field_provider, field_model_id = model_provider, model_id
+        if model_result.get('usage_metadata',{}).get('strategy') == 'C':
+            field_record = model_result['usage_metadata']['document_extractions'][0]
+            field_provider, field_model_id = field_record['provider'], field_record['model_id']
         advance('validate')
         evidence_ids = [str(row['evidence_id']) for row in fact_inputs]
         evidence_ids.extend(str(row['evidence_id']) for rows in narrative_sources.values() for row in rows)
@@ -605,7 +637,7 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
                              document["document_version"], page["page_index"], block["type"],
                              block["order"], block["text"], json.dumps(block.get("bbox")),
                              json.dumps(block["metadata"]),
-                             page_ocr_method(page) or
+                             (product_extraction.VERSION if block.get("metadata",{}).get("visual_transcription") else page_ocr_method(page)) or
                              ("pdf_text_layer" if document["media_type"] == "application/pdf" else "controlled_text"),
                              document["source_hash"], page["parser_version"]),
                         )
@@ -771,8 +803,9 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
                     repaired_output=excluded.repaired_output, candidates=excluded.candidates,
                     usage_metadata=excluded.usage_metadata, error_code=excluded.error_code,
                     personnel=excluded.personnel""",
-                (uuid4(), run["run_id"], run["case_id"], model_provider, model_id,
-                 PROMPT_VERSION, MODEL_SCHEMA_VERSION, model_result["status"],
+                (uuid4(), run["run_id"], run["case_id"], field_provider, field_model_id,
+                 product_extraction.PROMPT_VERSION if model_result.get("usage_metadata",{}).get("strategy") == "C" else PROMPT_VERSION,
+                 product_extraction.SCHEMA_VERSION if model_result.get("usage_metadata",{}).get("strategy") == "C" else MODEL_SCHEMA_VERSION, model_result["status"],
                  json.dumps(model_result.get("raw_output"), ensure_ascii=False),
                  json.dumps(model_result.get("repaired_output"), ensure_ascii=False),
                  json.dumps(model_result["candidates"].get("candidates", []), ensure_ascii=False),
@@ -823,8 +856,9 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
                 "status": "completed", "extractor_version": EXTRACTOR_VERSION,
                 "fact_count": len(facts),
                 "observed_count": sum(fact["status"] == "observed" for fact in facts),
-                "model_status": model_result["status"], "model_id": model_id,
-                "prompt_version": PROMPT_VERSION,
+                "model_status": model_result["status"], "model_id": field_model_id,
+                "prompt_version": product_extraction.PROMPT_VERSION if model_result.get("usage_metadata",{}).get("strategy") == "C" else PROMPT_VERSION,
+                "strategy": model_result.get("usage_metadata",{}).get("strategy", "legacy"),
             }, "reconcile": {
                 "status": "completed", "builder_version": BUILDER_VERSION,
                 "encounter_ids": sorted({str(value) for value in encounters.values()}),
@@ -876,6 +910,20 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
             )
 
 
+def renew_run_lease(dsn, run, stopped):
+    while not stopped.wait(30):
+        try:
+            with connect(dsn) as heartbeat:
+                heartbeat.autocommit = True
+                row = heartbeat.execute("""UPDATE analysis_runs SET lease_expires_at=now()+interval '5 minutes'
+                    WHERE run_id=%s AND lease_token=%s AND status='running' RETURNING run_id""",
+                    (run['run_id'], run['lease_token'])).fetchone()
+                if not row:
+                    return
+        except Exception:
+            logging.getLogger(__name__).warning('ANALYSIS_HEARTBEAT_UNAVAILABLE')
+
+
 def main() -> None:
     dsn = os.environ["ZHONGAN_DATABASE_URL"]
     storage_root = Path(os.environ["ZHONGAN_STORAGE_ROOT"]).resolve()
@@ -891,7 +939,13 @@ def main() -> None:
                 conn.autocommit = True
                 run = claim_run(conn)
                 if run is not None:
-                    process_run(conn, run, storage_root)
+                    heartbeat_stop = threading.Event()
+                    threading.Thread(target=renew_run_lease,args=(dsn,run,heartbeat_stop),
+                        name='analysis-lease',daemon=True).start()
+                    try:
+                        process_run(conn, run, storage_root)
+                    finally:
+                        heartbeat_stop.set()
                     continue
         except Exception:
             time.sleep(2)

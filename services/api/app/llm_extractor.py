@@ -86,11 +86,11 @@ def build_messages(material: str):
 
 
 class OpenAiCompatibleExtractor:
-    def __init__(self):
-        self.base_url = os.environ.get("LLM_BASE_URL", "").rstrip("/")
-        self.api_key = os.environ.get("LLM_API_KEY", "")
-        self.model_id = os.environ.get("LLM_MODEL_ID", "")
-        self.provider = os.environ.get("LLM_PROVIDER", "openai_compatible")
+    def __init__(self, *, config_prefix="LLM_"):
+        self.base_url = os.environ.get(config_prefix + "BASE_URL", "").rstrip("/")
+        self.api_key = os.environ.get(config_prefix + "API_KEY", "")
+        self.model_id = os.environ.get(config_prefix + "MODEL_ID", "")
+        self.provider = os.environ.get(config_prefix + "PROVIDER", "openai_compatible")
         if not self.base_url or not self.api_key or not self.model_id:
             raise RuntimeError("LLM_NOT_CONFIGURED")
         if self.provider == 'mock' and urlparse(self.base_url).hostname not in {'localhost', '127.0.0.1', '::1'}:
