@@ -366,7 +366,12 @@ def analyze_models(material, knowledge_entries, user_context, source_refs, fact_
             provider, model_id = extractor.provider, extractor.model_id
             if document_models:
                 fields=validate_evidence_quotes(document_models,material)
-                fields["candidates"]["documents"] = document_models["structured_documents"]
+                fields["candidates"]["documents"] = [
+                    {"document_id": d["document_id"], "page_index": d["page_index"], "status": d["status"],
+                     "fields": d["prediction"].get("fields", {}),
+                     "confidence": d["prediction"].get("confidence", {}),
+                     "evidence": d["prediction"].get("evidence", {}), "requires_review": True}
+                    for d in document_models["structured_documents"]]
                 timings["extract_seconds"]=0
             elif preloaded_models:
                 fields=validate_evidence_quotes(preloaded_models[0],material);timings['extract_seconds']=0

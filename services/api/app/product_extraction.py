@@ -32,16 +32,20 @@ def extract_page(page, image_bytes, plan):
     lines = [{'text': b['text'], 'bbox': b.get('bbox'), 'score': b.get('metadata', {}).get('confidence_score')}
              for b in page['blocks'] if b.get('text')]
     text = '\n'.join(b['text'] for b in page['blocks'] if b.get('text'))
+    latest = {}
+    def progress(result, stage):
+        latest.clear()
+        latest.update(result)
     try:
         prediction = extract_document(provider(), text, image_bytes,
             image_rotation_degrees=plan.get('adopted_rotation_degrees', 0),
             table_context=page['metadata'].get('tables'), ocr_lines=lines,
-            material_layout=plan, experiment='C')
+            material_layout=plan, experiment='C', on_progress=progress)
         status = 'partial' if prediction.get('fee_extraction', {}).get('status') == 'partial' else 'completed'
     except DocumentExtractionFailure as exc:
-        prediction = {'fields': {}, 'confidence': {}, 'evidence': {}, 'failed_stage': exc.stage,
+        prediction = {'fields': {}, 'confidence': {}, 'evidence': {}, **latest, 'failed_stage': exc.stage,
                       'error_code': exc.error_code, 'requires_review': True}
-        status = 'failed'
+        status = 'partial' if prediction.get('fields') else 'failed'
     page['metadata']['document_extraction'] = {'version': VERSION, 'status': status,
         'model_id': provider().model_id, 'provider': provider().provider,
         'prompt_version': PROMPT_VERSION, 'schema_version': SCHEMA_VERSION,
@@ -100,7 +104,7 @@ def case_extraction(parsed_documents):
     if not documents:
         return None
     failed = sum(d['status'] == 'failed' for d in documents)
-    return {'status': 'partial' if failed else 'completed', 'raw_output': None,
+    return {'status': 'partial' if any(d['status'] != 'completed' for d in documents) else 'completed', 'raw_output': None,
             'repaired_output': None, 'candidates': {'candidates': candidates, 'cost_lines': []},
             'personnel': [], 'usage_metadata': {'extraction_pipeline': VERSION, 'strategy': 'C',
                 'document_extractions': documents, 'failed_pages': failed}, 'error_code': None,
