@@ -966,7 +966,9 @@ def run_agent(history, question, attachments, tools, model=None, on_event=None, 
                  '）、history_refs（最多12个历史UUID字符串）、knowledge_refs（最多8个真实检索条目ID）、citations（逐条quote原句与source_refs数组，quote在正文中须唯一且不跨行）。只选择支持正文关键事实的少量直接来源，绝对不要复制整个材料编号集合；没有引用时用空数组。另保留clarification_questions（最多2项，field、question和options，每个选项含label和message）、suggested_questions（最多3条，每条最多200字符）和patient_updates（最多5项，field与逐字等于用户本条消息全文的statement）；无需补问或更新时用空数组。text可保留编号与**加粗**，保留citations中的逐条来源绑定，不要输出其他字段。'},
             ])
             continue
-        if (not analysis_mode and isinstance(tools,CareTools) and not tools.service_session_called
+        offline_service_cards=(tools.medical_services or {}).get('cards',[]) if isinstance(tools,CareTools) else []
+        offline_service_complete=bool(offline_service_cards) and all(card.get('kind')=='hospital' for card in offline_service_cards)
+        if (not analysis_mode and isinstance(tools,CareTools) and not tools.service_session_called and not offline_service_complete
                 and (pending_inline_service_reply(reply.text) or pending_session_command(tools.service_session,question))
                 and getattr(type(model),'plan_service_session',None) is not None):
             if inline_service_repaired or round_index>=3 or not budget:
@@ -986,7 +988,18 @@ def run_agent(history, question, attachments, tools, model=None, on_event=None, 
                 if on_event:on_event(events)
                 messages.append({'role':'tool','tool_call_id':call_id,'content':json.dumps(found,ensure_ascii=False)})
             else:
-                messages.append({'role':'user','content':'当前需要先澄清情况或仅解释服务。直接回答必要信息，不声称已预约、已接入或将替用户安排。'})
+                recommendation=model.plan_medical_services(messages) if tools.medical_services is None else None
+                service_planning_calls+=1
+                if recommendation is not None:
+                    arguments=recommendation.model_dump_json();call_id='inline-offline-service-repair'
+                    messages.append({'role':'assistant','content':None,'tool_calls':[{'id':call_id,'type':'function',
+                        'function':{'name':'recommend_medical_services','arguments':arguments}}]})
+                    found=tools.execute('recommend_medical_services',arguments);budget-=1
+                    events.append({'tool':'recommend_medical_services','status':str(found.get('status','completed'))})
+                    if on_event:on_event(events)
+                    messages.append({'role':'tool','tool_call_id':call_id,'content':json.dumps(found,ensure_ascii=False)})
+                else:
+                    messages.append({'role':'user','content':'当前需要先澄清情况或仅解释服务。直接回答必要信息，不声称已预约、已接入或将替用户安排。'})
             continue
         if (not analysis_mode and isinstance(tools,CareTools) and tools.medical_services is None and not tools.service_session_called
                 and pending_service_reply(reply.text)):

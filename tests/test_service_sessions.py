@@ -74,6 +74,17 @@ class ServiceSessionTests(unittest.TestCase):
         self.assertEqual(nested.condition_name,'慢性咽炎')
         self.assertNotIn('condition_name',nested.clinical.model_dump())
 
+    def test_offline_hospital_lookup_does_not_get_trapped_in_booking_planning(self):
+        class Model:
+            def complete(self,messages,**kwargs):return {'content':json.dumps({'text':'我帮你整理上海肿瘤专科参考，具体预约仍需确认。','evidence_refs':[],'history_refs':[]})}
+            def plan_service_session(self,messages):return None
+            def plan_medical_services(self,messages):return MedicalServiceArgs(routes=['offline'],needs=['consultation'],condition='oncology',location='上海市')
+        tools=CareTools(MagicMock(),'actor','conversation');tools.validate_reply=MagicMock();tools.validate_runtime=MagicMock()
+        with patch('services.api.app.conversation_agent.require_conversation',return_value={'case_id':'case'}):
+            result,events=run_agent([],'我在上海市想找肿瘤专科医院。',[],tools,model=Model())
+        self.assertTrue(result['medical_services']['cards'])
+        self.assertTrue(all(card['kind']=='hospital' for card in result['medical_services']['cards']))
+
     def test_source_alignment_keeps_negation_and_only_recovers_short_conjunctions(self):
         original='和以往一样稳定、没有加重，也没有怀孕或异常出血'
         self.assertEqual(grounded_field('和以往一样稳定、没有加重，没有怀孕或异常出血',[original]),original)
