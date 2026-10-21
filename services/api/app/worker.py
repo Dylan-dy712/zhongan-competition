@@ -469,13 +469,13 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
             with conn.transaction():
                 require_parse_scope(conn,run)
                 cached=cached_pages(conn,document,fingerprint,accepted_versions,ROUTING_VERSION,run['pipeline_version'])
-                if run['pipeline_version']=='document-parser-v1' and not product_extraction.enabled():
+                if product_extraction.enabled():
+                    cached={i:p for i,p in cached.items() if p.get('metadata',{}).get('document_extraction',{}).get('version') == product_extraction.VERSION and p['metadata']['document_extraction'].get('status') == 'completed'}
+                if run['pipeline_version']=='document-parser-v1':
                     from .judge_sample_cache import reviewed_document_pages
                     prepared=reviewed_document_pages(conn,document,fingerprint,accepted_versions)
                     cached={**prepared,**cached}
                     prepared_sample_pages+=len(prepared)
-                if product_extraction.enabled():
-                    cached={i:p for i,p in cached.items() if p.get('metadata',{}).get('document_extraction',{}).get('version') == product_extraction.VERSION and p['metadata']['document_extraction'].get('status') == 'completed'}
             def checkpoint(page):
                 # Commit each successful page before another OCR/model request.
                 with conn.transaction():
