@@ -36,7 +36,7 @@ from .chat_reply import CHAT_REPLY_INSTRUCTION, decode_chat_reply
 from .web_knowledge import WebKnowledge, chat_concepts, CONCEPTS, COST_TOPICS
 
 
-PROMPT_VERSION = 'conversation-agent-v13-inline-service-simulation'
+PROMPT_VERSION = 'conversation-agent-v14-contextual-service-completion'
 ANALYSIS_PROMPT_VERSION = 'patient-analysis-narrative-v19-judge-paragraphs'
 ANALYSIS_INSTRUCTION = """
 本轮是暖暖看完资料后，对用户讲清这次就医情况。遵循上面的对话语气，读起来要像人在耐心讲解。
@@ -260,6 +260,8 @@ class AgentModel:
             '{"service_request":参数对象或null}，不要输出段落、承诺或解释。'
             '根据当前用户问题及本对话选择推荐参数；location只摘录用户明确说出的地点，未知留空。'
             '复查不替代为体检；需要急诊用urgent，线下评估用offline_assessment；不适不明可返回null并留给后续澄清。'
+            '用户明确要线下医院或医疗资源候选时，即使尚未说明疾病也应查询offline，specialty用general、condition用unknown；'
+            '缺地点用空location由工具返回地区补问，不能因缺病名或地址而只作查询承诺或返回null。'
             '只有不涉及医疗服务或需要先澄清症状才返回null。参数必须符合以下JSON Schema：'+
             json.dumps(MedicalServiceArgs.model_json_schema(),ensure_ascii=False))
         message=self.complete(service_plan_messages(messages,instruction),allow_tools=False)
@@ -282,6 +284,7 @@ class AgentModel:
         instruction=('上一条承诺在当前聊天预约或接入医生，但尚未执行服务工具。只返回JSON对象'
             '{"session_request":参数对象或null}，不能返回段落、计划或口头承诺。'
             '按当前用户意图和已整理信息选择start/update/confirm/reply/end。已有状态延续；信息不足也可start并保留缺项，工具返回后补问。'
+            '使用互联网医院、线上咨询和找医生必须选择mode=doctor，按咨询问题、持续时间、严重度等收集，不按体检预约收集城市/时间。'
             '只有用户并未要求开始/继续服务或需先判断急症时才返回null。临床信息仍需如实填写，未知不猜。'
             '已查询的服务或以下公开目录均可用于选择service_id，不代表真实保单已核验：'+json.dumps(choices,ensure_ascii=False)+
             '参数JSON Schema：'+json.dumps(ServiceSessionArgs.model_json_schema(),ensure_ascii=False))
@@ -704,11 +707,13 @@ def run_agent(history, question, attachments, tools, model=None, on_event=None, 
     # Include a bounded recent context; older messages remain searchable in the DB.
     recent = []
     service_user_messages=[question]
+    service_reply_context=[question]
     for turn in bounded_history(history,analysis_mode):
         pair=[{'role':'user','content':turn['question']},
               {'role':'assistant','content':json.dumps(history_answer(turn,analysis_mode),ensure_ascii=False,default=str)}]
         recent.extend(pair)
         if turn.get('input_kind','user')=='user':service_user_messages.append(turn['question'])
+        service_reply_context.extend([turn['question'],history_answer(turn,analysis_mode).get('text','')])
     if isinstance(tools,CareTools):
         tools.service_user_messages=service_user_messages
         if not analysis_mode:
@@ -745,6 +750,7 @@ def run_agent(history, question, attachments, tools, model=None, on_event=None, 
     history_completion_repaired = False
     service_completion_repaired = False
     inline_service_repaired = False
+    offline_boundary_repaired = False
     service_planning_calls = 0
     analysis_has_evidence = False
     aliases = {}
@@ -972,8 +978,16 @@ def run_agent(history, question, attachments, tools, model=None, on_event=None, 
             continue
         offline_service_cards=(getattr(tools,'medical_services',None) or {}).get('cards',[]) if not analysis_mode and isinstance(tools,CareTools) else []
         offline_service_complete=bool(offline_service_cards) and all(card.get('kind')=='hospital' for card in offline_service_cards)
+        if (offline_service_complete and not tools.service_session_called
+                and re.search(r'我.{0,12}(?:可以|能|帮你|帮您|为你|为您).{0,12}(?:接入|对接|安排|联系).{0,12}(?:医生|咨询)',reply.text)):
+            if offline_boundary_repaired or round_index>=4:raise ValueError('AGENT_UNSUPPORTED_DOCTOR_OFFER')
+            offline_boundary_repaired=True
+            messages.extend([{'role':'assistant','content':content},{'role':'user','content':
+                '本轮工具仅返回线下医院候选，尚未确认可接入任何线上医生。请依据本轮实际结果解释线下路径，'
+                '删除声称可以接入或对接线上/模拟医生的承诺，不以普通在线咨询绕过就医分流。'}])
+            continue
         if (not analysis_mode and isinstance(tools,CareTools) and not tools.service_session_called and not offline_service_complete
-                and (pending_inline_service_reply(reply.text) or pending_session_command(tools.service_session,question))
+                and (pending_inline_service_reply(reply.text,'\n'.join([question,*service_reply_context[-4:]])) or pending_session_command(tools.service_session,question))
                 and getattr(type(model),'plan_service_session',None) is not None):
             if inline_service_repaired or round_index>=3 or not budget:
                 raise ValueError('AGENT_INCOMPLETE_INLINE_SERVICE_REPLY')
@@ -1006,7 +1020,7 @@ def run_agent(history, question, attachments, tools, model=None, on_event=None, 
                     messages.append({'role':'user','content':'当前需要先澄清情况或仅解释服务。直接回答必要信息，不声称已预约、已接入或将替用户安排。'})
             continue
         if (not analysis_mode and isinstance(tools,CareTools) and tools.medical_services is None and not tools.service_session_called
-                and pending_service_reply(reply.text)):
+                and pending_service_reply(reply.text,'\n'.join([question,*service_reply_context[-4:]]))):
             if service_completion_repaired or round_index>=3 or not budget:
                 raise ValueError('AGENT_INCOMPLETE_SERVICE_REPLY')
             service_completion_repaired=True

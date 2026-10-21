@@ -26,6 +26,8 @@ class MedicalServicesTests(unittest.TestCase):
         self.assertTrue(pending_service_reply('我帮你调一下中高端服务参考里的线下肿瘤就医协助，看看有哪些候选安排。'))
         self.assertFalse(pending_service_reply('医院的普通部和特需部如何区分，要看医院公开说明。'))
         self.assertFalse(pending_service_reply('你担心复查结果，我会陪你一起梳理想问医生的问题。'))
+        self.assertTrue(pending_service_reply('好，这次位置够具体了，我按上海市浦东新区，结合肿瘤专科就医的需求帮你查一下。','请接着刚才的需求看看附近医疗机构'))
+        self.assertTrue(pending_service_reply('好，你想用线上咨询，我结合你的情况查一下可用的入口。','我想用你们的互联网医院'))
 
     def test_promised_service_must_complete_a_real_tool_call_before_delivery(self):
         tools=CareTools(MagicMock(),'actor','conversation');tools.validate_reply=MagicMock()
@@ -40,6 +42,44 @@ class MedicalServicesTests(unittest.TestCase):
         self.assertEqual(model.complete.call_count,3)
         self.assertIn('体检',answer['medical_services']['cards'][0]['title'])
         self.assertEqual(events[0]['tool'],'recommend_medical_services')
+
+    def test_short_lookup_promise_uses_recent_service_context(self):
+        for text in ['好的，我帮你查一下。','稍等，我来找找。','我先帮您看看。']:
+            self.assertTrue(pending_service_reply(text,'请推荐一些线下医疗资源'))
+            self.assertFalse(pending_service_reply(text,'上次那张账单是多少？'))
+        for text in ['你可以自己查一下。','我无法查询实时号源。',
+                     '不用我帮你查一下，你可以直接联系医院。','请问希望在哪个城市就医？']:
+            self.assertFalse(pending_service_reply(text,'请推荐一些线下医疗资源'))
+
+    def test_contextual_offline_lookup_executes_before_delivery(self):
+        for history,question,location in [
+            ([], '请推荐一些上海市的线下医疗资源。', '上海市'),
+            ([], '请推荐一些线下医疗资源。', ''),
+            ([{'question':'帮我推荐线下医院','status':'completed','input_kind':'user',
+               'answer':{'text':'你希望在哪个城市就医？'}}], '上海市', '上海市')]:
+            with self.subTest(question=question):
+                class PlanningModel(AgentModel):
+                    def __init__(self):
+                        self.usage=[]
+                        self.complete=MagicMock(side_effect=[
+                            {'content':json.dumps({'text':'好的，我帮你查一下。'})},
+                            {'content':json.dumps({'service_request':{'routes':['offline'],
+                                'needs':['consultation'],'location':location}})},
+                            {'content':json.dumps({'text':'下面是同城就医参考，科室及号源请向医院核对。' if location else '你希望在哪个城市就医？'})}])
+                tools=CareTools(MagicMock(),'actor','conversation');tools.validate_reply=MagicMock()
+                updates=[];model=PlanningModel()
+                with patch('services.api.app.conversation_agent.require_conversation',return_value={'case_id':'case'}):
+                    answer,events=run_agent(history,question,[],tools,model=model,on_event=lambda value:updates.append(list(value)))
+                self.assertEqual(model.complete.call_count,3)
+                self.assertEqual(events,[{'tool':'recommend_medical_services','status':'available' if location else 'needs_location'}])
+                self.assertEqual(updates[-1],events)
+                self.assertNotIn('帮你查一下',answer['text'])
+                if location:
+                    self.assertTrue(answer['medical_services']['cards'])
+                    self.assertTrue(all(card['kind']=='hospital' for card in answer['medical_services']['cards']))
+                else:
+                    self.assertFalse(answer['medical_services']['cards'])
+                    self.assertTrue(answer['medical_services']['location_prompt'])
 
     def test_real_model_service_planner_validates_json_arguments(self):
         model=AgentModel.__new__(AgentModel)
@@ -113,8 +153,23 @@ class MedicalServicesTests(unittest.TestCase):
         self.assertTrue(any(x['kind']=='hospital' for x in result['cards']))
         self.assertFalse(any(x['kind']=='online' for x in result['cards']))
 
+    def test_offline_only_results_cannot_offer_unavailable_online_doctor(self):
+        tools=CareTools(MagicMock(),'actor','conversation');tools.validate_reply=MagicMock()
+        model=MagicMock();model.complete.side_effect=[
+            {'content':None,'tool_calls':[{'id':'offline','type':'function','function':{
+                'name':'recommend_medical_services','arguments':json.dumps({'routes':['online'],
+                    'needs':['consultation'],'condition':'oncology','location':'上海市'})}}]},
+            {'content':json.dumps({'text':'本次优先线下肿瘤专科。如果想先问问题，我可以帮你接入模拟医生咨询。'})},
+            {'content':json.dumps({'text':'本次优先线下肿瘤专科，以下候选的资格与号源还需核实。'})}]
+        with patch('services.api.app.conversation_agent.require_conversation',return_value={'case_id':'case'}):
+            answer,events=run_agent([],'我确诊肿瘤，想在上海市找专科治疗。',[],tools,model=model)
+        self.assertEqual(model.complete.call_count,3)
+        self.assertNotIn('接入模拟医生',answer['text'])
+        self.assertTrue(all(c['kind']=='hospital' for c in answer['medical_services']['cards']))
+        self.assertEqual(len(events),1)
+
     def test_oncology_does_not_turn_unknown_location_into_online_treatment(self):
-        result=self.recommend(routes=['online'],condition='oncology',location='',needs=['consultation'])
+        result=self.recommend(routes=['online'],condition='oncology',location='',needs=['consultation'],question='已确诊肿瘤，想通过线上完成治疗。')
         self.assertEqual(result['status'],'needs_location')
         self.assertEqual(result['cards'],[])
 
@@ -215,6 +270,19 @@ class MedicalServicesTests(unittest.TestCase):
         result=self.recommend(location='拉萨市',question='我想在拉萨市复查',routes=['offline'])
         self.assertIn(result['status'],['needs_location','no_local_matches'])
         self.assertFalse(result['cards'])
+
+    def test_explicit_current_city_resolves_stale_district_without_guessing(self):
+        current='我补充一下这次的就医信息：复查医院：这次就医就在上海市，请按上海市帮我查附近的肿瘤专科机构。'
+        result=recommend_services(MedicalServiceArgs(routes=['offline'],needs=['consultation'],
+            location='浦东新区',condition='oncology'),[current,'我在浦东新区'])
+        self.assertEqual(result['status'],'available')
+        self.assertEqual(result['location_query'],'上海市')
+        self.assertTrue(any('肿瘤' in card['title'] for card in result['cards']))
+        for text in ['我不想在上海市就医','不，请按上海市以外的地区找','我想在上海市以外就医',
+                     '我想在上海市或北京市就医，还没确定','之前上海市医院的报告，不表示这次就医地区']:
+            result=recommend_services(MedicalServiceArgs(routes=['offline'],needs=['consultation'],location='浦东新区'),
+                [text,'我在浦东新区'])
+            self.assertEqual(result['status'],'needs_location')
 
     def test_checkup_is_exclusive_and_not_a_followup_substitute(self):
         result=self.recommend(needs=['checkup'],routes=['benefits'])

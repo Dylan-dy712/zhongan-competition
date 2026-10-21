@@ -37,6 +37,19 @@ class ServiceSessionTests(unittest.TestCase):
         self.assertIn('未占用真实',state['notice'])
         self.assertEqual(self.call(state,'confirm',question='确认模拟预约')['booking_reference'],state['booking_reference'])
 
+    def test_consultation_benefit_uses_doctor_intake_not_appointment_fields(self):
+        consultation=next(item for item in catalog()['benefits'] if item['need']=='consultation')
+        args=ServiceSessionArgs(action='start',mode='benefit',service_id=consultation['id'],clinical=self.clinical)
+        state=manage_session(args,None,['我想用你们的互联网医院'],'我想用你们的互联网医院')
+        self.assertEqual(state['mode'],'doctor')
+        self.assertEqual(state['phase'],'collecting')
+        self.assertIn('主要症状或咨询问题',state['missing_fields'])
+        self.assertNotIn('期望日期和时段',state['missing_fields'])
+        blocked=manage_session(args.model_copy(update={'clinical':MedicalServiceArgs(**self.clinical,condition='oncology')}),None,
+            ['已确诊肿瘤，想用互联网医院'],'已确诊肿瘤，想用互联网医院')
+        self.assertEqual(blocked['phase'],'blocked')
+        self.assertEqual(blocked['speaker'],'assistant')
+
     def test_unexecuted_inline_promise_requires_structured_tool_execution(self):
         args=ServiceSessionArgs(action='start',service_id=self.benefit,clinical=self.clinical,
             fields=[{'key':k,'value':v} for k,v in self.benefit_fields.items()])
@@ -73,6 +86,25 @@ class ServiceSessionTests(unittest.TestCase):
         nested=ServiceSessionArgs(action='reply',clinical={**self.clinical,'condition_name':'慢性咽炎'})
         self.assertEqual(nested.condition_name,'慢性咽炎')
         self.assertNotIn('condition_name',nested.clinical.model_dump())
+
+    def test_omitted_object_doctor_promise_starts_intake_in_chat(self):
+        args=ServiceSessionArgs(action='start',mode='doctor',department='gastroenterology',clinical=self.clinical,
+            fields=[{'key':key,'value':value} for key,value in self.doctor_fields.items()])
+        class Model:
+            calls=0
+            def complete(self,messages,**kwargs):
+                self.calls+=1
+                return {'content':json.dumps({'text':'好的，我帮你查一下。' if self.calls==1 else '咨询需求已整理，请在当前聊天确认模拟接入。'})}
+            def plan_service_session(self,messages):return args
+        tools=CareTools(MagicMock(),'actor','conversation');tools.validate_reply=MagicMock()
+        question='想找互联网医院的医生咨询：'+ '；'.join(self.doctor_fields.values())
+        with patch('services.api.app.conversation_agent.require_conversation',return_value={'case_id':'case'}):
+            answer,events=run_agent([],question,[],tools,model=Model())
+        self.assertIn({'tool':'manage_service_session','status':'awaiting_confirmation'},events)
+        self.assertEqual(answer['service_session']['department'],'gastroenterology')
+        self.assertEqual(answer['service_session']['phase'],'awaiting_confirmation')
+        self.assertFalse(pending_inline_service_reply('好的，我帮你查一下。','想找上海市的线下医院'))
+        self.assertTrue(pending_inline_service_reply('好，你想用线上咨询，我结合你的情况查一下可用的入口。','我想用你们的互联网医院'))
 
     def test_offline_hospital_lookup_does_not_get_trapped_in_booking_planning(self):
         class Model:

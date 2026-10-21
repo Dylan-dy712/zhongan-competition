@@ -30,17 +30,24 @@ specialty依据本次用户需求和已经读取的材料选择；未知用gener
 工具status为needs_location/no_local_matches时，如实询问或说明同城名录缺口，不跨城凑数。urgent时只围绕急救承接。所有服务为模拟，不能说已真实预约、问诊、核验保单、支付或向医院发送资料；聊天内模拟预约只有服务工具返回booked后才能说模拟预约完成。
 '''
 
-def pending_service_reply(text):
+def pending_service_reply(text, context=''):
     """Detect an unfulfilled promise or nonexistent cards in the model draft.
 
-    This does not classify user intent or choose recommendation arguments.
+    Context only resolves the omitted object in short lookup promises. Clinical
+    intent and all recommendation arguments still come from the model planner.
     """
     if len(text)>600:return False
+    if re.search(r'(?:不用|不必|不需要)(?:我|帮你|帮您)',text):return False
+    if (len(text)<=240 and re.search(r'医院|医生|线下|医疗|就医|权益|体检|问诊|在线咨询',context)
+            and re.search(r'(?:我(?:先|来|这就|现在|可以|会|再|马上)?|帮你|帮您|为你|为您).{0,12}'
+                          r'(?:查一下|查一查|查查|查询一下|找一下|找找|看看|筛选一下|整理一下|匹配一下|联系一下|对接一下|转接一下)',text)
+            and not re.search(r'查到|找到|查过|找过|查不到|找不到|无法|不能|不(?:用|必|需要)|未(?:查|找)|没有(?:查|找)',text)):
+        return True
     if (re.search(r'(?:下[面方]|以下).{0,16}卡片|卡片.{0,16}(?:候选|机构|模拟入口)',text)
             and re.search(r'权益|中高端|医院|候选机构|公立|私立|在线咨询|体检',text)):
         return True
     if not re.search(r'我|为你|帮你',text):return False
-    if re.search(r'(?:帮你|为你|我).{0,14}(?:查|找|调|整理|筛选|匹配|推荐|安排|核对|看看).{0,45}(?:医院|专科|就医|权益|医疗服务|候选)',text):return True
+    if re.search(r'(?:帮你|帮您|为你|为您|我).{0,14}(?:查|找|调|整理|筛选|匹配|推荐|安排|核对|看看).{0,45}(?:医院|医生|专科|就医|权益|医疗|线下资源|候选)',text):return True
     return bool(re.search(
         r'(?:查一下|查一查|查询|筛选|匹配|推荐|调出|整理).{0,24}(?:权益|医疗服务|体检入口|互联网医院|附近.{0,8}医院|医院(?:名单|资源|选择|入口)|在线(?:咨询|问诊)(?:入口|服务))'
         r'|(?:权益|医疗服务|体检|互联网医院|医院(?:名单|资源|选择|入口)|在线(?:咨询|问诊)).{0,24}(?:入口.{0,6}调出|查一下|查一查|帮你查|调出来|推荐|匹配)',text))
@@ -196,6 +203,25 @@ def _clinical_routes(args,payload):
     return routes,needs,oncology,support
 
 
+def _grounded_location(location,user_messages,cities):
+    """Keep the model's location, recovering only an explicit current city.
+
+    A prior district must not hide the user's answer to the city clarification.
+    This does not infer the city of a district, address, hospital or record.
+    """
+    location=location.strip()
+    if location and not any(location in text for text in user_messages):location=''
+    if not user_messages or any(city.removesuffix('市') in location for city in cities):return location
+    pattern=(r'(?:我在|想在|希望在|请按|改到|换到|(?:这次|本次).{0,6}(?:就医|复查).{0,6}(?:在|到|去))'
+             r'(?P<city>'+ '|'.join(re.escape(city) for city in sorted(cities)) +r')')
+    current=user_messages[0]
+    if sum(city in current for city in cities)>1:return location
+    matches={match.group('city') for match in re.finditer(pattern,current)
+             if not re.search(r'不|没|未|别',current[max(0,match.start()-3):match.start()])
+             and not re.match(r'以外|之外',current[match.end():])}
+    return next(iter(matches)) if len(matches)==1 else location
+
+
 def recommend_services(args:MedicalServiceArgs,user_messages:list[str]):
     data=catalog()
     payload={'version':data['version'],'status':'available','policy_label':'中高端服务参考',
@@ -213,15 +239,13 @@ def recommend_services(args:MedicalServiceArgs,user_messages:list[str]):
             item=next((x for x in data['benefits'] if x['need']==need),None)
             if item:payload['cards'].append(_benefit_card(item,need))
             if len(payload['cards'])==2:break
-    location=args.location.strip()
-    # A model-proposed location must actually have appeared in a human message.
-    if location and not any(location in text for text in user_messages):location=''
+    cities={x['city'] for x in data['hospitals'] if x['city'].endswith('市')}
+    location=_grounded_location(args.location,user_messages,cities)
     if 'offline' in routes:
         if not location:
             payload.update(status='needs_location',location_prompt='这次你想在哪个城市、区或附近地标就医？不用提供完整家庭住址。')
         else:
             payload['location_query']=location
-            cities={x['city'] for x in data['hospitals'] if x['city'].endswith('市')}
             found=[city for city in cities if city.removesuffix('市') in location]
             # A district name alone can be ambiguous. Ask for its city instead of guessing.
             if len(found)!=1:
