@@ -1018,7 +1018,12 @@ def process_chat_message(conversation_id, body, actor_id, conn, input_kind='user
                 progress([{'tool': 'read_chat_attachments', 'status': 'running'}])
             tools.message_materials = read_attachments(conn, actor_id, conversation_id, attachment_ids, attachment_progress)
             progress([{'tool': 'read_chat_attachments', 'status': tools.message_materials['status']}])
-        answer, events = run_agent(history, question, turn['attachments'], tools, on_event=progress,
+        from .judge_experience import prepared_answer
+        experience=prepared_answer(tools,analysis_run_id) if input_kind=='analysis_ready' else None
+        if experience:
+            answer,events=experience
+        else:
+            answer, events = run_agent(history, question, turn['attachments'], tools, on_event=progress,
                                   analysis_mode=input_kind == 'analysis_ready',
                                   initial_analysis=tools.reusable_analysis() if input_kind == 'analysis_ready' else None,
                                   patient_context=chats.get_patient_context(conn, actor_id, conversation_id),

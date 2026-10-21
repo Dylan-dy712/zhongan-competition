@@ -12,7 +12,7 @@ export async function loadTestModules(){
     transform:{jsx:{runtime:'automatic'},define:{'import.meta.env':'{}'}},
     plugins:[{name:'test-assets',load(id){if(/\.(css|webp)$/.test(id))return {code:`export default ${JSON.stringify(id)};`,moduleType:'js'};}}],
     output:{dir:out,format:'esm',entryFileNames:'[name].mjs'}});
-  return {EvidencePanel:(await import(pathToFileURL(path.join(out,'EvidencePanel.mjs')).href)).EvidencePanel,EncounterOverview:(await import(pathToFileURL(path.join(out,'EncounterOverview.mjs')).href)).default,analysisView:(await import(pathToFileURL(path.join(out,'AnalysisFlow.mjs')).href)).analysisView,App:(await import(pathToFileURL(path.join(out,'App.mjs')).href)).default,
+  return {EvidencePanel:(await import(pathToFileURL(path.join(out,'EvidencePanel.mjs')).href)).EvidencePanel,EncounterOverview:(await import(pathToFileURL(path.join(out,'EncounterOverview.mjs')).href)).default,AnalysisFlow:(await import(pathToFileURL(path.join(out,'AnalysisFlow.mjs')).href)).default,analysisView:(await import(pathToFileURL(path.join(out,'AnalysisFlow.mjs')).href)).analysisView,App:(await import(pathToFileURL(path.join(out,'App.mjs')).href)).default,
     AccountPage:(await import(pathToFileURL(path.join(out,'AccountPage.mjs')).href)).default,
     api:await import(pathToFileURL(path.join(out,'api.mjs')).href),
     HomeReminders:(await import(pathToFileURL(path.join(out,'HomeReminders.mjs')).href)).default,

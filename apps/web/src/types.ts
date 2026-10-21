@@ -77,6 +77,7 @@ export interface ChatAnswer {text: string; evidence_refs: string[]; history_refs
   clarification_questions?:ClarificationQuestion[];suggested_questions?:string[];patient_updates?:PatientUpdate[];
   service_guide?:{text:string;policy_status:'demo_assumed_midhigh'};medical_services?:MedicalServices;
   sample_preload?:boolean;
+  judge_experience?:{mode:'prepared_sample';duration_ms:number};
   guidance_delivery?:{status:'passed'|'needs_improvement'|'unchecked';notice?:string};
   prompt_version?:string; analysis_run_id?:string; knowledge_refs?:string[]; knowledge_sources?:KnowledgeSource[]; citations?:InlineCitation[]}
 export interface MedicalServiceCard {
@@ -113,7 +114,7 @@ export interface ChatTurn {
 }
 export interface ChatSnapshot {
   conversation: Conversation; turns: ChatTurn[];
-  analysis: {status:string; run_id?:string; stage?:string; error?:unknown;stage_results?:{parse?:{reused_pages?:number;processed_pages?:number}}};
+  analysis: {status:string; run_id?:string; stage?:string; error?:unknown;stage_results?:{parse?:{reused_pages?:number;processed_pages?:number};performance?:{judge_experience?:{mode:'prepared_sample';duration_ms:number;variant?:string}}}};
   report: {status:string; report_id?:string; report_version?:number; sections?:ReportSection[]; actions?:CareAction[]};
   material_report?: MaterialReport;
 }
