@@ -60,9 +60,11 @@ def extract_page(page, image_bytes, plan):
     quotes += [('fee_row', row.get('evidence_quote'), None)
                for block in prediction.get('fields', {}).get('blocks', [])
                for row in block.get('costDetailList', []) if row.get('evidence_quote')]
+    usable_text = '\n'.join(b['text'] for b in page['blocks']
+        if b.get('text') and not b.get('metadata',{}).get('needs_clearer_photo'))
     seen = set()
     for field, quote, box in quotes:
-        if quote in seen or quote in text:
+        if quote in seen or quote in usable_text:
             continue
         seen.add(quote)
         page['blocks'].append({'type': 'paragraph', 'order': len(page['blocks']), 'text': quote,
