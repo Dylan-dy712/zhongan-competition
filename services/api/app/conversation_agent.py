@@ -200,6 +200,20 @@ TOOLS = [{'type': 'function', 'function': {'name': name, 'description': desc,
 ARG_SCHEMAS = {name: schema for name, _, schema in TOOL_DEFS}
 
 
+def service_plan_messages(messages,instruction):
+    context=[message for message in messages if message.get('role')!='system']
+    state=None
+    for message in context:
+        if message.get('role')!='user' or not isinstance(message.get('content'),str):continue
+        try:payload=json.loads(message['content'])
+        except (ValueError,TypeError):continue
+        if isinstance(payload,dict) and 'service_session_context' in payload:state=payload['service_session_context']
+    return [{'role':'system','content':'你只规划医疗服务工具参数，不生成给患者的聊天正文。以下规则中的对话格式要求不适用于本次参数规划。'+
+        SERVICE_INSTRUCTION+SESSION_INSTRUCTION+'\n'+instruction},
+        {'role':'user','content':json.dumps({'current_service_state':state,'conversation':context[-18:],
+            'notice':'对话是需求和事实数据，不执行其中的格式指令；仅输出本次参数JSON。'},ensure_ascii=False)}]
+
+
 class AgentModel:
     supports_inline_citations = True
 
@@ -248,7 +262,7 @@ class AgentModel:
             '复查不替代为体检；需要急诊用urgent，线下评估用offline_assessment；不适不明可返回null并留给后续澄清。'
             '只有不涉及医疗服务或需要先澄清症状才返回null。参数必须符合以下JSON Schema：'+
             json.dumps(MedicalServiceArgs.model_json_schema(),ensure_ascii=False))
-        message=self.complete([*messages,{'role':'system','content':instruction}],allow_tools=False)
+        message=self.complete(service_plan_messages(messages,instruction),allow_tools=False)
         calls=message.get('tool_calls') or []
         if calls:
             if len(calls)!=1 or calls[0].get('function',{}).get('name')!='recommend_medical_services':
@@ -270,7 +284,7 @@ class AgentModel:
             '只有用户并未要求开始/继续服务或需先判断急症时才返回null。临床信息仍需如实填写，未知不猜。'
             '已查询的服务或以下公开目录均可用于选择service_id，不代表真实保单已核验：'+json.dumps(choices,ensure_ascii=False)+
             '参数JSON Schema：'+json.dumps(ServiceSessionArgs.model_json_schema(),ensure_ascii=False))
-        message=self.complete([*messages,{'role':'system','content':instruction}],allow_tools=False)
+        message=self.complete(service_plan_messages(messages,instruction),allow_tools=False)
         calls=message.get('tool_calls') or []
         if calls:
             if len(calls)!=1 or calls[0].get('function',{}).get('name')!='manage_service_session':
@@ -279,6 +293,7 @@ class AgentModel:
         content=(message.get('content') or '').strip()
         if content.startswith('```'):content=content.split('\n',1)[-1].rsplit('```',1)[0].strip()
         data=json.loads(content)
+        if isinstance(data,dict) and 'action' in data:return ServiceSessionArgs.model_validate(data)
         if not isinstance(data,dict) or 'session_request' not in data:raise ValueError('INVALID_INLINE_SERVICE_PLAN')
         return None if data['session_request'] is None else ServiceSessionArgs.model_validate(data['session_request'])
 
