@@ -30,6 +30,7 @@ import {ChatDraftAttachments,ChatSentAttachments,ReportUploadDialog,type DraftAt
 import PhotoReview from './PhotoReview';
 import EncounterOverview from './EncounterOverview';
 import DemoShowcase from './DemoShowcase';
+import ServerNotice from './ServerNotice';
 import {SourceToken,CitedText} from './SourceCitations';
 import './chat.css';
 import './care.css';
@@ -608,6 +609,7 @@ export default function App() {
     </aside>;
 
   return <SourceToken.Provider value={token}><div className={`chat-shell ${panel==='chat'?'chat-view':''}`}>
+    {connected && !needsProfile && panel==='home' && <ServerNotice/>}
     {connected && panel==='chat' && (mobileHistory ? historyOpen && <dialog id="history-dialog" ref={historyDialog} className="history-drawer" aria-label="历史对话"
       onKeyDown={e=>{if(e.key!=='Tab')return;const buttons=Array.from(e.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)'));const first=buttons[0],last=buttons.at(-1);if(e.shiftKey&&document.activeElement===first){e.preventDefault();last?.focus();}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first?.focus();}}}
       onCancel={e=>{e.preventDefault();setHistoryOpen(false);}} onClick={e=>{if(e.target===e.currentTarget)setHistoryOpen(false);}}>{historyPanel}</dialog> : historyPanel)}
