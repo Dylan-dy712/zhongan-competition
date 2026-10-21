@@ -203,6 +203,25 @@ def _clinical_routes(args,payload):
     return routes,needs,oncology,support
 
 
+def _grounded_location(location,user_messages,cities):
+    """Keep the model's location, recovering only an explicit current city.
+
+    A prior district must not hide the user's answer to the city clarification.
+    This does not infer the city of a district, address, hospital or record.
+    """
+    location=location.strip()
+    if location and not any(location in text for text in user_messages):location=''
+    if not user_messages or any(city.removesuffix('市') in location for city in cities):return location
+    pattern=(r'(?:我在|想在|希望在|请按|改到|换到|(?:这次|本次).{0,6}(?:就医|复查).{0,6}(?:在|到|去))'
+             r'(?P<city>'+ '|'.join(re.escape(city) for city in sorted(cities)) +r')')
+    current=user_messages[0]
+    if sum(city in current for city in cities)>1:return location
+    matches={match.group('city') for match in re.finditer(pattern,current)
+             if not re.search(r'不|没|未|别',current[max(0,match.start()-3):match.start()])
+             and not re.match(r'以外|之外',current[match.end():])}
+    return next(iter(matches)) if len(matches)==1 else location
+
+
 def recommend_services(args:MedicalServiceArgs,user_messages:list[str]):
     data=catalog()
     payload={'version':data['version'],'status':'available','policy_label':'中高端服务参考',
@@ -220,15 +239,13 @@ def recommend_services(args:MedicalServiceArgs,user_messages:list[str]):
             item=next((x for x in data['benefits'] if x['need']==need),None)
             if item:payload['cards'].append(_benefit_card(item,need))
             if len(payload['cards'])==2:break
-    location=args.location.strip()
-    # A model-proposed location must actually have appeared in a human message.
-    if location and not any(location in text for text in user_messages):location=''
+    cities={x['city'] for x in data['hospitals'] if x['city'].endswith('市')}
+    location=_grounded_location(args.location,user_messages,cities)
     if 'offline' in routes:
         if not location:
             payload.update(status='needs_location',location_prompt='这次你想在哪个城市、区或附近地标就医？不用提供完整家庭住址。')
         else:
             payload['location_query']=location
-            cities={x['city'] for x in data['hospitals'] if x['city'].endswith('市')}
             found=[city for city in cities if city.removesuffix('市') in location]
             # A district name alone can be ambiguous. Ask for its city instead of guessing.
             if len(found)!=1:

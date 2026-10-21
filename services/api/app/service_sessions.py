@@ -15,7 +15,7 @@ OnlineDepartment=Literal[tuple(online_scope()['profiles'])]
 def pending_inline_service_reply(text, context=''):
     """Check a draft's unfulfilled service promise, never classify user intent."""
     if (pending_service_reply(text,context)
-            and re.search(r'(?:互联网医院|线上|在线).{0,16}(?:医生|咨询|问诊)|(?:找|对接|接入|联系).{0,12}医生|医生.{0,12}(?:对接|接入|咨询|问诊)',context)):
+            and re.search(r'互联网医院|(?:线上|在线).{0,16}(?:医生|咨询|问诊)|(?:找|对接|接入|联系).{0,12}医生|医生.{0,12}(?:对接|接入|咨询|问诊)',context)):
         return True
     if len(text)>600 or not re.search('预约|接入',text):return False
     return bool(re.search(r'我.{0,25}(?:先|帮|为|来)|(?:已|将|马上|接下来).{0,20}(?:预约|接入)|(?:先|帮你).{0,30}(?:预约|接入)|模拟预约.{0,8}(?:已完成|成功|已安排)',text))

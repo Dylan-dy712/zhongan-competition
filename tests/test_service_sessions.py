@@ -91,6 +91,7 @@ class ServiceSessionTests(unittest.TestCase):
         self.assertEqual(answer['service_session']['department'],'gastroenterology')
         self.assertEqual(answer['service_session']['phase'],'awaiting_confirmation')
         self.assertFalse(pending_inline_service_reply('好的，我帮你查一下。','想找上海市的线下医院'))
+        self.assertTrue(pending_inline_service_reply('好，你想用线上咨询，我结合你的情况查一下可用的入口。','我想用你们的互联网医院'))
 
     def test_offline_hospital_lookup_does_not_get_trapped_in_booking_planning(self):
         class Model:
