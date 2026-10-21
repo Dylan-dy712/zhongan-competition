@@ -61,7 +61,7 @@ def download_ci_artifact(ci_run,name,directory):
 
 def build_release(revision,ci_run,download_artifact=download_ci_artifact):
     """Package committed source and artifacts from one independently verified CI run."""
-    roots = ('services/', 'scripts/', 'deploy/', 'contracts/knowledge/', 'contracts/medical-services/', 'docs/medical/knowledge/')
+    roots = ('services/', 'scripts/', 'deploy/', 'skills/', 'contracts/knowledge/', 'contracts/medical-services/', 'docs/medical/knowledge/')
     committed = subprocess.check_output(['git','archive','--format=tar','HEAD',*roots])
     artifact = io.BytesIO()
     with tarfile.open(fileobj=artifact, mode='w:gz') as archive:

@@ -1,7 +1,5 @@
 """Connect evidence-bearing C page extraction to the existing case pipeline."""
-import json
 import os
-from decimal import Decimal
 
 from .document_fields import extract_document, DocumentExtractionFailure, PROMPT_VERSION, SCHEMA_VERSION
 from .fact_extractor import assertion_for

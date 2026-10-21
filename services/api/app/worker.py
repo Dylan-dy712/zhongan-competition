@@ -103,7 +103,10 @@ def evidence_for_page(document,page):
         spans=[(*chunk,None) for chunk in text_chunks(page['text'])]
     return [{'evidence_id':uuid4(),'text':value,'document_id':document['document_id'],
              'document_version':document['document_version'],'page_index':page['page_index'],
-             'start':start,'end':end,'bbox':bbox} for start,end,value,bbox in spans]
+             'start':start,'end':end,'bbox':bbox,
+             'extraction_method':next((product_extraction.VERSION for block in page['blocks']
+                 if block.get('text') == value and block.get('metadata',{}).get('visual_transcription')),None)}
+            for start,end,value,bbox in spans]
 
 
 VISIT_RE = re.compile(r"(?:就诊|门诊|开单|开立|申请|检查)(?:时间|日期)\s*[:：]?\s*(" + DATE_TOKEN + r")")
@@ -290,7 +293,7 @@ def parse_pdf(path: Path, ocr: Ocr | None = None, cached=None, checkpoint=None):
             "metadata": {"media_type": "application/pdf", "image_count": image_count,
                          "extracted_code_points": len(text)},
         }
-        if requires_ocr:
+        if requires_ocr or product_extraction.enabled():
             ocr = ocr or create_ocr()
             rendered_pdf = rendered_pdf or pdfium.PdfDocument(str(path))
             bitmap = rendered_pdf[page_index].render(scale=2.0)
@@ -621,7 +624,7 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
                              document["document_version"], page["page_index"], block["type"],
                              block["order"], block["text"], json.dumps(block.get("bbox")),
                              json.dumps(block["metadata"]),
-                             page_ocr_method(page) or
+                             (product_extraction.VERSION if block.get("metadata",{}).get("visual_transcription") else page_ocr_method(page)) or
                              ("pdf_text_layer" if document["media_type"] == "application/pdf" else "controlled_text"),
                              document["source_hash"], page["parser_version"]),
                         )
@@ -788,8 +791,8 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
                     usage_metadata=excluded.usage_metadata, error_code=excluded.error_code,
                     personnel=excluded.personnel""",
                 (uuid4(), run["run_id"], run["case_id"], model_provider, model_id,
-                 product_extraction.PROMPT_VERSION if product_extraction.enabled() else PROMPT_VERSION,
-                 product_extraction.SCHEMA_VERSION if product_extraction.enabled() else MODEL_SCHEMA_VERSION, model_result["status"],
+                 product_extraction.PROMPT_VERSION if model_result.get("usage_metadata",{}).get("strategy") == "C" else PROMPT_VERSION,
+                 product_extraction.SCHEMA_VERSION if model_result.get("usage_metadata",{}).get("strategy") == "C" else MODEL_SCHEMA_VERSION, model_result["status"],
                  json.dumps(model_result.get("raw_output"), ensure_ascii=False),
                  json.dumps(model_result.get("repaired_output"), ensure_ascii=False),
                  json.dumps(model_result["candidates"].get("candidates", []), ensure_ascii=False),
@@ -841,8 +844,8 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
                 "fact_count": len(facts),
                 "observed_count": sum(fact["status"] == "observed" for fact in facts),
                 "model_status": model_result["status"], "model_id": model_id,
-                "prompt_version": product_extraction.PROMPT_VERSION if product_extraction.enabled() else PROMPT_VERSION,
-                "strategy": "C" if product_extraction.enabled() else "legacy",
+                "prompt_version": product_extraction.PROMPT_VERSION if model_result.get("usage_metadata",{}).get("strategy") == "C" else PROMPT_VERSION,
+                "strategy": model_result.get("usage_metadata",{}).get("strategy", "legacy"),
             }, "reconcile": {
                 "status": "completed", "builder_version": BUILDER_VERSION,
                 "encounter_ids": sorted({str(value) for value in encounters.values()}),
@@ -894,6 +897,20 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
             )
 
 
+def renew_run_lease(dsn, run, stopped):
+    while not stopped.wait(30):
+        try:
+            with connect(dsn) as heartbeat:
+                heartbeat.autocommit = True
+                row = heartbeat.execute("""UPDATE analysis_runs SET lease_expires_at=now()+interval '5 minutes'
+                    WHERE run_id=%s AND lease_token=%s AND status='running' RETURNING run_id""",
+                    (run['run_id'], run['lease_token'])).fetchone()
+                if not row:
+                    return
+        except Exception:
+            logging.getLogger(__name__).warning('ANALYSIS_HEARTBEAT_UNAVAILABLE')
+
+
 def main() -> None:
     dsn = os.environ["ZHONGAN_DATABASE_URL"]
     storage_root = Path(os.environ["ZHONGAN_STORAGE_ROOT"]).resolve()
@@ -909,7 +926,13 @@ def main() -> None:
                 conn.autocommit = True
                 run = claim_run(conn)
                 if run is not None:
-                    process_run(conn, run, storage_root)
+                    heartbeat_stop = threading.Event()
+                    threading.Thread(target=renew_run_lease,args=(dsn,run,heartbeat_stop),
+                        name='analysis-lease',daemon=True).start()
+                    try:
+                        process_run(conn, run, storage_root)
+                    finally:
+                        heartbeat_stop.set()
                     continue
         except Exception:
             time.sleep(2)

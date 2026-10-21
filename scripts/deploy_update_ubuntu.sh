@@ -41,7 +41,7 @@ chmod 600 "$backup_dir"/*.tar.gz
 backend_changed=0
 # UI releases keep the API/worker running. Compare all runtime code, schemas,
 # knowledge and service definitions; uncertainty takes the full backup path.
-for relative in services contracts/knowledge contracts/medical-services docs/medical/knowledge; do
+for relative in services skills contracts/knowledge contracts/medical-services docs/medical/knowledge; do
     if ! diff -qr --exclude=__pycache__ "$release_dir/$relative" "$app_dir/$relative" >/dev/null; then
         backend_changed=1
     fi
@@ -107,6 +107,7 @@ sudo install -d -m 700 -o "$(id -u)" -g "$(id -g)" /home/ubuntu/zhongan-data/jud
 cp -a "$release_dir/scripts/." "$app_dir/scripts/"
 if [[ "$backend_changed" == 1 ]]; then
     cp -a "$release_dir/services" "$app_dir/"
+    cp -a "$release_dir/skills" "$app_dir/"
     install -d -m 755 "$app_dir/output_dir/memory-ranker"
     install -m 755 "$release_dir/output_dir/memory-ranker/semantix-ranker" "$app_dir/output_dir/memory-ranker/semantix-ranker"
     cp -a "$release_dir/contracts/knowledge" "$app_dir/contracts/"
