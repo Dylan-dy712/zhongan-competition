@@ -61,6 +61,7 @@ class ServiceSessionTests(unittest.TestCase):
         self.assertTrue(pending_session_command(result['service_session'],'确认模拟预约'))
         self.assertTrue(pending_session_command(result['service_session'],'结束当前模拟服务，回到暖暖继续聊。'))
         self.assertFalse(pending_session_command(result['service_session'],'不确认模拟预约'))
+        self.assertTrue(pending_session_command({'phase':'doctor_active'},'日常作息有什么注意事项？'))
 
     def test_real_model_inline_planner_validates_json(self):
         from services.api.app.conversation_agent import AgentModel
