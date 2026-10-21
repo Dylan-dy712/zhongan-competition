@@ -12,8 +12,12 @@ export default function ServerNotice(){
   useEffect(()=>{
     const node=dialog.current;if(!node||dismissed)return;
     const previous=document.activeElement as HTMLElement|null;
-    node.showModal();
-    return()=>{if(node.open)node.close();if(previous?.isConnected)previous.focus();};
+    if(typeof node.showModal==='function')node.showModal();
+    else node.setAttribute('open','');
+    return()=>{
+      if(node.open){if(typeof node.close==='function')node.close();else node.removeAttribute('open');}
+      if(previous?.isConnected)previous.focus();
+    };
   },[dismissed]);
   const dismiss=()=>{
     try{sessionStorage.setItem(dismissalKey,'1');}catch{/* Keep closing available if storage is unavailable. */}
