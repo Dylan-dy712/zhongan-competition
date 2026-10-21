@@ -40,6 +40,12 @@ try{
   assert.equal(document.querySelector('[aria-label="原文所在区域"]').style.top,'40%');
   assert.ok(revoked.includes(created[0].url),'Replacing evidence releases the old page image');
 
+  await render({...evidence,evidence_id:'synthetic-unresolved-page',extraction_method:'reviewed-sample-page-v1'});
+  assert.equal(document.querySelectorAll('[aria-label="原文所在区域"]').length,0,'A page-level fallback must not mark the whole image as exact evidence');
+  assert.equal(document.querySelector('.source-excerpt'),null);
+  assert.match(document.body.textContent,/尚未定位到具体原文/);
+  assert.equal(document.querySelector('.source-sheet details').open,false);
+
   respond=()=>new Response('page',{headers:{'X-Evidence-Regions':'[[0.1,0.2,0.6,0.3],[-1,0,1,1],[0,0,2,1],[0.7,0.7,0.2,0.2]]'}});
   await render({...evidence,evidence_id:'synthetic-invalid-boxes'});
   assert.equal(document.querySelectorAll('[aria-label="原文所在区域"]').length,1,'Invalid boxes cannot render outside the page');

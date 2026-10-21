@@ -513,7 +513,9 @@ def read_evidence_page_image(evidence_id: UUID, actor_id: UUID = Depends(current
         else:
             if item.page_index!=0:raise IndexError('Image page not found')
             image=render_source_image(path);regions=[list(item.bbox)] if item.bbox else []
-        if not regions:regions=evidence_ocr_regions(conn,evidence_id,quote)
+        from .page_sources import VERSION as PAGE_SOURCE
+        if item.extraction_method==PAGE_SOURCE:regions=[]
+        elif not regions:regions=evidence_ocr_regions(conn,evidence_id,quote)
     except IndexError:
         raise HTTPException(status_code=404, detail='Source page not found') from None
     except Exception:

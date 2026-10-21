@@ -164,11 +164,16 @@ def prepared_answer(tools,run_id):
         variant=select_variant(bundle,run_id);knowledge=resolve_knowledge(variant,rows)
         if knowledge is None:return None
         reply=bind_draft(variant,rows)
-        tools.evidence_ids.update(str(r['evidence_id']) for r in rows)
+        from .citation_spans import bind_prepared
+        refined,excerpts=bind_prepared(tools.conn,run_id,run['case_id'],reply.model_dump(mode='json'),variant)
+        from .conversation_agent import AnalysisWireReply
+        reply=AnalysisWireReply.model_validate(refined)
+        tools.evidence_ids.update(str(r['evidence_id']) for r in excerpts)
         tools.knowledge_sources.update({r['entry_id']:r for r in knowledge})
         tools.validate_reply(reply)
         from .conversation_agent import ANALYSIS_PROMPT_VERSION
         answer={**reply.model_dump(mode='json'),'prompt_version':ANALYSIS_PROMPT_VERSION,
+            'citation_precision':'citation-excerpt-v1',
             'guidance_delivery':{'status':'passed'},'judge_experience':{'mode':'prepared_sample','duration_ms':DURATION_MS},
             'knowledge_sources':knowledge,'performance':{'model_calls':0,'review_calls':0,'draft_reused':True,
                 'prepared_source_review':True,'source_read_complete':True,'partial_delivery':False}}
