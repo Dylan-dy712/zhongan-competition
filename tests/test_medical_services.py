@@ -41,6 +41,44 @@ class MedicalServicesTests(unittest.TestCase):
         self.assertIn('体检',answer['medical_services']['cards'][0]['title'])
         self.assertEqual(events[0]['tool'],'recommend_medical_services')
 
+    def test_short_lookup_promise_uses_recent_service_context(self):
+        for text in ['好的，我帮你查一下。','稍等，我来找找。','我先帮您看看。']:
+            self.assertTrue(pending_service_reply(text,'请推荐一些线下医疗资源'))
+            self.assertFalse(pending_service_reply(text,'上次那张账单是多少？'))
+        for text in ['你可以自己查一下。','我无法查询实时号源。',
+                     '不用我帮你查一下，你可以直接联系医院。','请问希望在哪个城市就医？']:
+            self.assertFalse(pending_service_reply(text,'请推荐一些线下医疗资源'))
+
+    def test_contextual_offline_lookup_executes_before_delivery(self):
+        for history,question,location in [
+            ([], '请推荐一些上海市的线下医疗资源。', '上海市'),
+            ([], '请推荐一些线下医疗资源。', ''),
+            ([{'question':'帮我推荐线下医院','status':'completed','input_kind':'user',
+               'answer':{'text':'你希望在哪个城市就医？'}}], '上海市', '上海市')]:
+            with self.subTest(question=question):
+                class PlanningModel(AgentModel):
+                    def __init__(self):
+                        self.usage=[]
+                        self.complete=MagicMock(side_effect=[
+                            {'content':json.dumps({'text':'好的，我帮你查一下。'})},
+                            {'content':json.dumps({'service_request':{'routes':['offline'],
+                                'needs':['consultation'],'location':location}})},
+                            {'content':json.dumps({'text':'下面是同城就医参考，科室及号源请向医院核对。' if location else '你希望在哪个城市就医？'})}])
+                tools=CareTools(MagicMock(),'actor','conversation');tools.validate_reply=MagicMock()
+                updates=[];model=PlanningModel()
+                with patch('services.api.app.conversation_agent.require_conversation',return_value={'case_id':'case'}):
+                    answer,events=run_agent(history,question,[],tools,model=model,on_event=lambda value:updates.append(list(value)))
+                self.assertEqual(model.complete.call_count,3)
+                self.assertEqual(events,[{'tool':'recommend_medical_services','status':'available' if location else 'needs_location'}])
+                self.assertEqual(updates[-1],events)
+                self.assertNotIn('帮你查一下',answer['text'])
+                if location:
+                    self.assertTrue(answer['medical_services']['cards'])
+                    self.assertTrue(all(card['kind']=='hospital' for card in answer['medical_services']['cards']))
+                else:
+                    self.assertFalse(answer['medical_services']['cards'])
+                    self.assertTrue(answer['medical_services']['location_prompt'])
+
     def test_real_model_service_planner_validates_json_arguments(self):
         model=AgentModel.__new__(AgentModel)
         model.complete=MagicMock(return_value={'content':json.dumps({'service_request':{'routes':['benefits'],'needs':['checkup']}})})

@@ -30,17 +30,24 @@ specialty依据本次用户需求和已经读取的材料选择；未知用gener
 工具status为needs_location/no_local_matches时，如实询问或说明同城名录缺口，不跨城凑数。urgent时只围绕急救承接。所有服务为模拟，不能说已真实预约、问诊、核验保单、支付或向医院发送资料；聊天内模拟预约只有服务工具返回booked后才能说模拟预约完成。
 '''
 
-def pending_service_reply(text):
+def pending_service_reply(text, context=''):
     """Detect an unfulfilled promise or nonexistent cards in the model draft.
 
-    This does not classify user intent or choose recommendation arguments.
+    Context only resolves the omitted object in short lookup promises. Clinical
+    intent and all recommendation arguments still come from the model planner.
     """
     if len(text)>600:return False
+    if re.search(r'(?:不用|不必|不需要)(?:我|帮你|帮您)',text):return False
+    if (len(text)<=240 and re.search(r'医院|医生|线下|医疗|就医|权益|体检|问诊|在线咨询',context)
+            and re.search(r'(?:我(?:先|来|这就|现在|可以|会|再|马上)?|帮你|帮您|为你|为您).{0,12}'
+                          r'(?:查一下|查一查|查查|查询一下|找一下|找找|看看|筛选一下|整理一下|匹配一下)',text)
+            and not re.search(r'查到|找到|查过|找过|查不到|找不到|无法|不能|不(?:用|必|需要)|未(?:查|找)|没有(?:查|找)',text)):
+        return True
     if (re.search(r'(?:下[面方]|以下).{0,16}卡片|卡片.{0,16}(?:候选|机构|模拟入口)',text)
             and re.search(r'权益|中高端|医院|候选机构|公立|私立|在线咨询|体检',text)):
         return True
     if not re.search(r'我|为你|帮你',text):return False
-    if re.search(r'(?:帮你|为你|我).{0,14}(?:查|找|调|整理|筛选|匹配|推荐|安排|核对|看看).{0,45}(?:医院|专科|就医|权益|医疗服务|候选)',text):return True
+    if re.search(r'(?:帮你|帮您|为你|为您|我).{0,14}(?:查|找|调|整理|筛选|匹配|推荐|安排|核对|看看).{0,45}(?:医院|医生|专科|就医|权益|医疗|线下资源|候选)',text):return True
     return bool(re.search(
         r'(?:查一下|查一查|查询|筛选|匹配|推荐|调出|整理).{0,24}(?:权益|医疗服务|体检入口|互联网医院|附近.{0,8}医院|医院(?:名单|资源|选择|入口)|在线(?:咨询|问诊)(?:入口|服务))'
         r'|(?:权益|医疗服务|体检|互联网医院|医院(?:名单|资源|选择|入口)|在线(?:咨询|问诊)).{0,24}(?:入口.{0,6}调出|查一下|查一查|帮你查|调出来|推荐|匹配)',text))

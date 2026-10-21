@@ -74,6 +74,24 @@ class ServiceSessionTests(unittest.TestCase):
         self.assertEqual(nested.condition_name,'慢性咽炎')
         self.assertNotIn('condition_name',nested.clinical.model_dump())
 
+    def test_omitted_object_doctor_promise_starts_intake_in_chat(self):
+        args=ServiceSessionArgs(action='start',mode='doctor',department='gastroenterology',clinical=self.clinical,
+            fields=[{'key':key,'value':value} for key,value in self.doctor_fields.items()])
+        class Model:
+            calls=0
+            def complete(self,messages,**kwargs):
+                self.calls+=1
+                return {'content':json.dumps({'text':'好的，我帮你查一下。' if self.calls==1 else '咨询需求已整理，请在当前聊天确认模拟接入。'})}
+            def plan_service_session(self,messages):return args
+        tools=CareTools(MagicMock(),'actor','conversation');tools.validate_reply=MagicMock()
+        question='想找互联网医院的医生咨询：'+ '；'.join(self.doctor_fields.values())
+        with patch('services.api.app.conversation_agent.require_conversation',return_value={'case_id':'case'}):
+            answer,events=run_agent([],question,[],tools,model=Model())
+        self.assertEqual(events,[{'tool':'manage_service_session','status':'awaiting_confirmation'}])
+        self.assertEqual(answer['service_session']['department'],'gastroenterology')
+        self.assertEqual(answer['service_session']['phase'],'awaiting_confirmation')
+        self.assertFalse(pending_inline_service_reply('好的，我帮你查一下。','想找上海市的线下医院'))
+
     def test_offline_hospital_lookup_does_not_get_trapped_in_booking_planning(self):
         class Model:
             def complete(self,messages,**kwargs):return {'content':json.dumps({'text':'我帮你整理上海肿瘤专科参考，具体预约仍需确认。','evidence_refs':[],'history_refs':[]})}
