@@ -5,6 +5,8 @@ import os
 import secrets
 import json
 import re
+import io
+from functools import lru_cache
 from pathlib import Path
 from uuid import uuid4
 
@@ -145,12 +147,21 @@ def sample_manifest(version=None,sample_id=None):
 
 
 def sample_info():
-    _,manifest=sample_manifest()
+    directory,manifest=sample_manifest()
     return {key:manifest[key] for key in ('sample_id','version','title','summary','notice','data_origin','file_count','page_count','claim_info')} | {
-        'documents':[{key:item[key] for key in ('id','name','page_count','document_type','sha256','media_type')} for item in manifest['documents']]}
+        'documents':[{key:item[key] for key in ('id','name','page_count','document_type','sha256','media_type')} | {'byte_size':(directory/item['file']).stat().st_size} for item in manifest['documents']]}
 
 
-def sample_document(document_id,version=None,sample_id=None):
+@lru_cache(maxsize=32)
+def sample_thumbnail(path,source_hash):
+    from PIL import Image,ImageOps
+    with Image.open(path) as original,ImageOps.exif_transpose(original) as image:
+        image.thumbnail((640,640));output=io.BytesIO()
+        image.convert('RGB').save(output,format='JPEG',quality=72,optimize=True)
+        return output.getvalue()
+
+
+def sample_document(document_id,version=None,sample_id=None,preview=False):
     directory,manifest=sample_manifest(version,sample_id)
     item=next((item for item in manifest['documents'] if item['id']==document_id),None)
     if item is None:raise HTTPException(404,'示例资料不存在。')
@@ -163,8 +174,10 @@ def sample_document(document_id,version=None,sample_id=None):
         handle.seek(0)
         if hashlib.file_digest(handle,'sha256').hexdigest()!=item['sha256']:
             raise HTTPException(503,'示例资料校验未通过。')
-    return FileResponse(path,media_type=item['media_type'],filename=item['name'],headers={
-        'Cache-Control':'no-store','Referrer-Policy':'no-referrer','X-Robots-Tag':'noindex, nofollow','X-Content-Type-Options':'nosniff'})
+    headers={'Cache-Control':'no-store','Referrer-Policy':'no-referrer','X-Robots-Tag':'noindex, nofollow','X-Content-Type-Options':'nosniff'}
+    if preview and item['media_type'].startswith('image/'):
+        return Response(sample_thumbnail(str(path),item['sha256']),media_type='image/jpeg',headers=headers)
+    return FileResponse(path,media_type=item['media_type'],filename=item['name'],headers=headers)
 
 
 def judge_upload_allowed(conn,actor_id,body):
@@ -223,13 +236,13 @@ def judge_sample_info(response: Response, authorization: str | None = Header(def
 
 
 @app.get('/judge/sample/files/{document_id}')
-def judge_sample_file(document_id: str, version: str | None = None, sample_id: str | None = None, authorization: str | None = Header(default=None)):
+def judge_sample_file(document_id: str, version: str | None = None, sample_id: str | None = None, preview: bool = False, authorization: str | None = Header(default=None)):
     try:
         with psycopg.connect(os.environ['ZHONGAN_DATABASE_URL'],row_factory=dict_row,connect_timeout=5) as conn:
             actor=require_judge(conn,authorization)
             if accounts.care_consent(conn,actor)['status']!='active':
                 raise HTTPException(403,'请先确认资料用途授权，再选择示例资料。')
-            return sample_document(document_id,version,sample_id)
+            return sample_document(document_id,version,sample_id,preview)
     except (psycopg.Error,KeyError):
         raise HTTPException(503,'示例资料服务暂时不可用。') from None
 

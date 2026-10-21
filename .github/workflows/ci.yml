@@ -88,6 +88,7 @@ jobs:
       - run: npm run test:auth --prefix apps/web
       - run: node apps/web/scripts/check-judge-entry.mjs
       - run: node apps/web/scripts/check-judge-upload.mjs
+      - run: node apps/web/scripts/check-judge-transfer.mjs
       - run: npm run test:availability --prefix apps/web
       - run: npm run test:reminders --prefix apps/web
       - run: npm run test:followups --prefix apps/web

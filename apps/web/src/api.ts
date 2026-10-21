@@ -7,8 +7,9 @@ import {conversationTitle} from './claimChatPresentation';
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
 
-export type JudgeSample = {sample_id:string;version:string;title:string;summary:string;notice:string;data_origin:'official_deidentified';file_count:number;page_count:number;claim_info:Partial<import('./claimTemplate').ClaimForm>;documents:{id:string;name:string;page_count:number;document_type:string;sha256:string;media_type?:string}[]};
-export type JudgeSampleFile = {file:File;category:'record'|'invoice'};
+export type JudgeSample = {sample_id:string;version:string;title:string;summary:string;notice:string;data_origin:'official_deidentified';file_count:number;page_count:number;claim_info:Partial<import('./claimTemplate').ClaimForm>;documents:{id:string;name:string;page_count:number;document_type:string;sha256:string;media_type?:string;byte_size?:number}[]};
+export type JudgeSampleFile = {file:File;category:'record'|'invoice';documentId:string;originalSize?:number};
+const preparedSampleFiles=new Map<string,JudgeSampleFile>();
 export async function getJudgeSample(token:string):Promise<JudgeSample|null> {
   const response=await apiFetch(`${API_BASE}/judge/sample`,{headers:{Authorization:`Bearer ${token}`}});
   if([403,404].includes(response.status))return null;
@@ -17,21 +18,43 @@ export async function getJudgeSample(token:string):Promise<JudgeSample|null> {
   if(!value||!Array.isArray(value.documents)||typeof value.sample_id!=='string')return null;
   return value;
 }
+export async function getJudgeSampleOriginal(token:string,sample:JudgeSample,id:string,preview=false):Promise<File> {
+  const item=sample.documents.find(d=>d.id===id);if(!item)throw new Error('示例资料不存在。');
+  for(let attempt=0;;attempt++)try{
+    const response=await apiFetch(`${API_BASE}/judge/sample/files/${encodeURIComponent(id)}?version=${encodeURIComponent(sample.version)}&sample_id=${encodeURIComponent(sample.sample_id)}${preview?'&preview=true':''}`,{headers:{Authorization:`Bearer ${token}`}},120000);
+    if(!response.ok){const error=await response.json().catch(()=>null);throw new ApiError(error?.detail || failureMessage(response.status),response.status);}
+    const data=await response.arrayBuffer(),type=response.headers.get('Content-Type')?.split(';')[0]||item.media_type||'application/pdf',bytes=new Uint8Array(data);
+    const valid=type==='application/pdf'?String.fromCharCode(...bytes.slice(0,5))==='%PDF-':type==='image/png'?[137,80,78,71,13,10,26,10].every((v,i)=>bytes[i]===v):type==='image/jpeg'&&bytes[0]===255&&bytes[1]===216&&bytes[2]===255&&bytes.at(-2)===255&&bytes.at(-1)===217;
+    if(!data.byteLength||data.byteLength>10*1024*1024||!valid)throw new Error('示例文件暂时不可用，请重新选择。');
+    return new File([data],item.name,{type});
+  }catch(error){
+    if(error instanceof ApiError||attempt===2)throw error instanceof Error&&['TimeoutError','AbortError'].includes(error.name)?new Error('示例资料载入超时，请重新准备，已完成的资料会保留。'):error;
+    await new Promise(resolve=>setTimeout(resolve,(attempt+1)*500));
+  }
+}
 export async function chooseJudgeSampleFiles(token:string,sample:JudgeSample,onProgress?:(completed:number,total:number)=>void):Promise<JudgeSampleFile[]> {
-  let completed=0;
-  return Promise.all(sample.documents.map(async item=>{
-    const response=await apiFetch(`${API_BASE}/judge/sample/files/${encodeURIComponent(item.id)}?version=${encodeURIComponent(sample.version)}&sample_id=${encodeURIComponent(sample.sample_id)}`,{headers:{Authorization:`Bearer ${token}`}},120000);
-    if(!response.ok){const error=await response.json().catch(()=>null);throw new ApiError(error?.detail || error?.message || failureMessage(response.status),response.status);}
-    const data=await response.arrayBuffer().catch(error=>{
-      if((error instanceof Error||error instanceof DOMException)&&['TimeoutError','AbortError'].includes(error.name))throw new Error('示例资料载入超时，请检查网络后重新选择。');
-      throw error;
-    });
-    const type=item.media_type||'application/pdf',bytes=new Uint8Array(data);
-    const valid=type==='application/pdf'?String.fromCharCode(...bytes.slice(0,5))==='%PDF-':type==='image/png'?[137,80,78,71,13,10,26,10].every((v,i)=>bytes[i]===v):type==='image/jpeg'&&bytes[0]===255&&bytes[1]===216&&bytes[2]===255;
-    if(!data.byteLength || data.byteLength>10*1024*1024 || !valid)throw new Error('示例文件暂时不可用，请重新选择。');
-    onProgress?.(++completed,sample.documents.length);
-    return {file:new File([data],item.name,{type}),category:['费用清单','医保结算单','医疗发票'].includes(item.document_type)?'invoice':'record'};
+  let next=0,completed=0;const results:JudgeSampleFile[]=new Array(sample.documents.length);
+  await Promise.all(Array.from({length:Math.min(3,sample.documents.length)},async()=>{
+    while(next<sample.documents.length){
+      const index=next++,item=sample.documents[index],key=JSON.stringify([token,sample.sample_id,sample.version,item.id,item.sha256]);
+      let value=preparedSampleFiles.get(key);
+      if(!value){
+        const file=await getJudgeSampleOriginal(token,sample,item.id,item.media_type?.startsWith('image/'));
+        value={file,documentId:item.id,originalSize:item.byte_size,category:['费用清单','医保结算单','医疗发票'].includes(item.document_type)?'invoice':'record'};
+        preparedSampleFiles.set(key,value);if(preparedSampleFiles.size>60)preparedSampleFiles.delete(preparedSampleFiles.keys().next().value!);
+      }
+      results[index]=value;onProgress?.(++completed,sample.documents.length);
+    }
   }));
+  return results;
+}
+export async function attachJudgeSampleDocument(token:string,id:string,sample:JudgeSample,documentId:string):Promise<{document_id:string;source_ref:string}> {
+  for(let attempt=0;;attempt++)try{
+    return await chatRequest(`/v1/conversations/${id}/sample-documents`,token,'POST',{sample_id:sample.sample_id,version:sample.version,sample_document_id:documentId});
+  }catch(error){
+    if(attempt===2||(error instanceof ApiError&&![502,503,504].includes(error.status)))throw error;
+    await new Promise(resolve=>setTimeout(resolve,(attempt+1)*500));
+  }
 }
 export async function createJudgeSampleUploadCase(token:string,subjectId:string,sample:JudgeSample,key:string) {
   const consent=await getCareConsent(token,subjectId);

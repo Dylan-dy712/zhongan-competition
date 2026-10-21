@@ -42,6 +42,11 @@ class EntryContractTests(unittest.TestCase):
             response=judge.sample_document
             with patch.object(judge,'sample_manifest',return_value=(directory,manifest)):
                 self.assertEqual(response('page-0').media_type,'image/png')
+                preview=response('page-0',preview=True)
+                self.assertEqual(preview.media_type,'image/jpeg')
+                self.assertEqual(preview.headers['cache-control'],'no-store')
+                self.assertTrue(preview.body.startswith(b'\xff\xd8\xff'))
+                self.assertEqual(hashlib.sha256((directory/'page-0.png').read_bytes()).hexdigest(),documents[0]['sha256'])
             manifest['documents'][0]['media_type']='application/pdf'
             (directory/'manifest.json').write_text(json.dumps(manifest))
             with self.assertRaises(HTTPException):judge.read_sample_manifest(directory)
@@ -255,6 +260,14 @@ class NativeJudgeLibraryTests(unittest.TestCase):
                 for item,data in zip(self.manifest['documents'],selected):
                     uploaded=client.post(f'/v1/conversations/{conversation}/documents',headers=first,files={'file':(item['name'],data,'application/pdf')})
                     self.assertEqual(uploaded.status_code,201,uploaded.text);document_ids.append(uploaded.json()['document_id'])
+                selection={'sample_id':'synthetic-01','version':'test-v1','sample_document_id':self.manifest['documents'][0]['id']}
+                path=f'/v1/conversations/{conversation}/sample-documents'
+                copied=client.post(path,headers=first,json=selection)
+                self.assertEqual(copied.status_code,200,copied.text)
+                self.assertEqual(copied.json()['document_id'],document_ids[0],'Retries reuse existing sample documents')
+                self.assertEqual(client.post(path,headers=second,json=selection).status_code,404)
+                self.assertEqual(client.post(path,headers=first,json={**selection,'version':'test-v2'}).status_code,409)
+                self.assertEqual(client.post(path,headers=first,json={**selection,'sample_document_id':'not-reviewed'}).status_code,404)
                 with self.connection() as conn:
                     self.assertEqual(conn.execute('SELECT count(*) AS n FROM documents').fetchone()['n'],3)
                     self.assertEqual(conn.execute('SELECT count(*) AS n FROM analysis_runs').fetchone()['n'],0,'Upload confirmation must precede analysis')

@@ -18,7 +18,7 @@ const sample={sample_id:'synthetic-01',version:'v1',data_origin:'official_deiden
   claim_info:{kind:'住院医疗',cause:'待确认',diagnosis:'合成肩部损伤样例',start:'2026-09-20',end:'2026-09-25',total:'1200.00',social:'待确认',other:'待确认'},
   documents:[{id:'discharge',name:'合成出院记录.pdf',document_type:'出院记录',page_count:2},{id:'diagnosis',name:'合成诊断证明.png',media_type:'image/png',document_type:'诊断证明',page_count:1},{id:'costs',name:'合成费用清单.pdf',document_type:'费用清单',page_count:5},{id:'outpatient',name:'合成复诊病历.pdf',document_type:'门诊病历',page_count:5}]};
 const legacyTitle='这是一组主办方比赛样例的脱敏体验资料，不代表账号使用者本人病史。'.slice(0,30);
-const calls=[];let uploadCount=0,failSecond=true,failSelection=true,holdPreparation=true,releaseFailed,releaseHeld,conversation,turns=[];
+const calls=[];let uploadCount=0,failSecond=true,failSelection=3,holdPreparation=true,releaseFailed,releaseHeld,conversation,turns=[];
 globalThis.fetch=async(url,options={})=>{
   const p=new URL(url,'http://localhost').pathname;
   const body=typeof options.body==='string'?JSON.parse(options.body):options.body;
@@ -31,7 +31,7 @@ globalThis.fetch=async(url,options={})=>{
   if(p.startsWith('/judge/sample/files/')){
     assert.equal(new URL(url,'http://localhost').searchParams.get('version'),'v1');
     assert.equal(new URL(url,'http://localhost').searchParams.get('sample_id'),'synthetic-01');
-    if(failSelection){failSelection=false;return {ok:true,arrayBuffer:async()=>{await new Promise(resolve=>releaseFailed=resolve);throw new DOMException('The user aborted a request.','AbortError');}};}
+    if(failSelection&&p.endsWith('/discharge')){const initial=failSelection--===3;return {ok:true,arrayBuffer:async()=>{if(initial)await new Promise(resolve=>releaseFailed=resolve);throw new DOMException('The user aborted a request.','AbortError');}};}
     if(holdPreparation&&p.endsWith('/diagnosis'))await new Promise(resolve=>releaseHeld=resolve);
     return p.endsWith('/diagnosis')?new Response(new Uint8Array([137,80,78,71,13,10,26,10,0]),{headers:{'Content-Type':'image/png'}}):new Response('%PDF-1.4\nSynthetic '+p,{headers:{'Content-Type':'application/pdf'}});
   }
@@ -42,7 +42,7 @@ globalThis.fetch=async(url,options={})=>{
     return Response.json(options.method==='POST'?{}:conversation?[conversation]:[]);
   }
   if(conversation&&p==='/v1/conversations/'+conversation.conversation_id)return Response.json({conversation,turns,analysis:{status:'queued',run_id:'synthetic-run'},report:{status:'not_generated',actions:[],sections:[]}});
-  if(p.endsWith('/documents')){
+  if(p.endsWith('/sample-documents')){
     uploadCount++;
     if(uploadCount===2&&failSecond){failSecond=false;return Response.json({message:'合成上传中断'},{status:500});}
     return Response.json({document_id:'synthetic-doc-'+uploadCount});
@@ -76,6 +76,7 @@ try{
   assert.equal(calls.filter(call=>call.path.startsWith('/judge/sample/files/')).length,firstDownloads);
   await act(async()=>releaseHeld());await flush();assert.equal(preparation.querySelector('progress').value,3);
   holdPreparation=false;await act(async()=>releaseFailed());await flush();
+  for(let tries=0;tries<60&&!document.querySelector('[role="alert"]');tries++)await act(async()=>{await new Promise(resolve=>setTimeout(resolve,50));});
   assert.equal(preparation.open,true,'A failed preparation keeps actionable feedback in the modal');
   assert.equal(window.location.hash,'#/claim');
   assert.equal(document.querySelector('dialog.member-dialog'),null,'Judge experience selects the test account automatically');
@@ -115,9 +116,10 @@ try{
   const created=calls.find(call=>call.path==='/v1/cases').body;
   assert.equal(created.data_origin,'official_deidentified');assert.equal(created.user_context.judge_demo,true);
   assert.equal(created.user_context.notice,sample.notice,'Backend source metadata remains intact');
-  const uploads=calls.filter(call=>call.path.endsWith('/documents'));
-  assert.deepEqual(uploads.map(call=>call.body.get('file').name),['合成出院记录.pdf','合成诊断证明.png','合成诊断证明.png','合成费用清单.pdf','合成复诊病历.pdf']);
-  assert.equal(uploads[1].body.get('file').type,'image/png');
+  const uploads=calls.filter(call=>call.path.endsWith('/sample-documents'));
+  assert.deepEqual(uploads.map(call=>call.body.sample_document_id),['discharge','diagnosis','diagnosis','costs','outpatient']);
+  assert.ok(uploads.every(call=>call.body.version==='v1'&&call.body.sample_id==='synthetic-01'),'The server imports the exact selected original, not browser preview bytes');
+  assert.equal(calls.filter(call=>call.path.endsWith('/documents')).length,0,'Fixed samples do not upload file bytes back to the server');
   assert.equal(calls.filter(call=>call.path.endsWith('/analyses')).length,0,'Successful upload must precede analysis');
   await click('查看就医关怀');
   assert.equal(document.querySelectorAll('[aria-label="已上传材料"] li').length,4);

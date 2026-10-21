@@ -5,6 +5,7 @@ umask 077
 release_dir="$(pwd -P)"
 app_dir=/home/ubuntu/zhongan-app
 web_dir=/var/www/zhongan-web
+judge_dir=/home/ubuntu/zhongan-judge-demo/services/judge_demo
 [[ "$release_dir" == /home/ubuntu/zhongan-releases/release-* ]]
 exec 9>/home/ubuntu/zhongan-releases/deploy.lock
 flock -n 9 || { echo 'Another deployment is already running' >&2; exit 1; }
@@ -31,6 +32,13 @@ backup_dir="$(mktemp -d /home/ubuntu/zhongan-backup.XXXXXXXX)"
 chmod 700 "$backup_dir"
 printf 'BACKUP_DIRECTORY=%s\n' "$backup_dir"
 tar --exclude=.venv --exclude=__pycache__ -czf "$backup_dir/app.tar.gz" -C "$app_dir" .
+judge_changed=0
+if [[ -d "$judge_dir" ]]; then
+    tar --exclude=__pycache__ -czf "$backup_dir/judge.tar.gz" -C "$judge_dir" .
+    for file in app.py entry.js index.html prepare.py; do
+        if ! cmp -s "$release_dir/services/judge_demo/$file" "$judge_dir/$file"; then judge_changed=1; fi
+    done
+fi
 tar -czf "$backup_dir/web.tar.gz" -C "$web_dir" .
 sudo tar -czf "$backup_dir/config.tar.gz" -C / \
     etc/systemd/system/zhongan-api.service \
@@ -85,6 +93,10 @@ rollback() {
         if [[ "$stopped" == 1 ]]; then
             sudo systemctl restart zhongan-api zhongan-worker
         fi
+        if [[ "$judge_changed" == 1 ]]; then
+            tar -xzf "$backup_dir/judge.tar.gz" -C "$judge_dir"
+            sudo systemctl restart zhongan-judge-demo
+        fi
         sudo nginx -t && sudo systemctl reload nginx
     fi
     printf 'DEPLOY_FAILED backup=%s exit=%s\n' "$backup_dir" "$result" >&2
@@ -94,6 +106,7 @@ trap rollback ERR
 if [[ "$backend_changed" == 1 ]]; then
 stopped=1
 sudo systemctl stop zhongan-api zhongan-worker
+if [[ "$judge_changed" == 1 ]]; then sudo systemctl stop zhongan-judge-demo; fi
 set -a
 . /home/ubuntu/.config/zhongan/database.env
 set +a
@@ -118,6 +131,7 @@ if [[ "$backend_changed" == 1 ]]; then
     cp -a "$release_dir/docs/medical/knowledge" "$app_dir/docs/medical/"
 fi
 cp "$release_dir/REVISION" "$app_dir/REVISION"
+if [[ "$judge_changed" == 1 ]]; then cp -a "$release_dir/services/judge_demo/." "$judge_dir/"; fi
 cd "$app_dir"
 if [[ "$backend_changed" == 1 ]]; then
     "$app_dir/.venv/bin/python" -m pip install -r services/api/requirements-rag.txt
@@ -150,6 +164,15 @@ sudo nginx -t
 sudo systemctl daemon-reload
 if [[ "$backend_changed" == 1 ]]; then
     sudo systemctl restart zhongan-api zhongan-worker
+fi
+if [[ "$judge_changed" == 1 ]]; then
+    sudo systemctl restart zhongan-judge-demo
+    for attempt in {1..20}; do
+        if curl -fsS http://127.0.0.1:8010/judge/health > /dev/null; then break; fi
+        [[ "$attempt" -lt 20 ]]
+        sleep 1
+    done
+    cmp "$app_dir/services/judge_demo/app.py" "$judge_dir/app.py"
 fi
 for attempt in {1..20}; do
     if curl -fsS http://127.0.0.1:8000/health > /dev/null; then break; fi

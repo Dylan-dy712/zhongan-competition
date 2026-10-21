@@ -1,5 +1,5 @@
 import {useEffect,useLayoutEffect,useRef,useState} from 'react';
-import {createConversation,startChatAnalysis,uploadChatDocument,createJudgeSampleUploadCase,chooseJudgeSampleFiles,getCareConsent,changeCareConsent,type JudgeSample} from './api';
+import {createConversation,startChatAnalysis,uploadChatDocument,createJudgeSampleUploadCase,chooseJudgeSampleFiles,attachJudgeSampleDocument,getJudgeSampleOriginal,getCareConsent,changeCareConsent,type JudgeSample} from './api';
 import AnalysisFlow,{type UploadProgress} from './AnalysisFlow';
 import {claimTemplate,initialClaimForm,validateClaimInfo,type ClaimFile,type ClaimForm} from './claimTemplate';
 import './claim-original.css';
@@ -29,6 +29,17 @@ export default function ClaimIntake({token,subject,visible,onOpen,onAuthorize,on
   const [previewFile,setPreviewFile]=useState<ClaimFile|null>(null);
   const [previewPdf,setPreviewPdf]=useState('');
   const [judgeSample,setJudgeSample]=useState<JudgeSample|null>(null);
+  const [originalPreview,setOriginalPreview]=useState(''),[originalLoading,setOriginalLoading]=useState(false);
+  const [originalError,setOriginalError]=useState(''),[originalRetry,setOriginalRetry]=useState(0);
+  useEffect(()=>{
+    setOriginalPreview('');setOriginalLoading(false);setOriginalError('');
+    if(!previewFile?.sampleDocumentId||!judgeSample||!previewFile.url)return;
+    let active=true,url='';setOriginalLoading(true);
+    void getJudgeSampleOriginal(token,judgeSample,previewFile.sampleDocumentId).then(file=>{
+      url=URL.createObjectURL(file);if(active)setOriginalPreview(url);else URL.revokeObjectURL(url);
+    }).catch(()=>{if(active)setOriginalError('清晰原图载入中断，当前显示预览图。');}).finally(()=>{if(active)setOriginalLoading(false);});
+    return()=>{active=false;if(url)URL.revokeObjectURL(url);};
+  },[previewFile,judgeSample,token,originalRetry]);
   const [sampleLoading,setSampleLoading]=useState(false),[sampleProgress,setSampleProgress]=useState(0);
   const [sampleError,setSampleError]=useState(''),[sampleRetry,setSampleRetry]=useState(0);
   useEffect(()=>{if(!previewFile||previewFile.url){setPreviewPdf('');return;}
@@ -121,7 +132,7 @@ export default function ClaimIntake({token,subject,visible,onOpen,onAuthorize,on
     setPreviewFile(null);preview.current?.close();source.current?.close();setReviewPhotos(false);
     setProgressOpen(false);setProgress(undefined);
     chooseJudgeSampleFiles(token,sample,completed=>{if(active)setSampleProgress(completed);}).then(selected=>{
-      if(active)setFiles(selected.map(entry=>({id:uuid(),name:entry.file.name,size:entry.file.size,category:entry.category,sample:true,url:entry.file.type.startsWith('image/')?URL.createObjectURL(entry.file):null,file:entry.file})));
+      if(active)setFiles(selected.map(entry=>({id:uuid(),name:entry.file.name,size:entry.originalSize??entry.file.size,category:entry.category,sample:true,sampleDocumentId:entry.documentId,url:entry.file.type.startsWith('image/')?URL.createObjectURL(entry.file):null,file:entry.file})));
     }).catch(e=>{if(active)setSampleError(e instanceof Error?e.message:'示例资料准备中断，请重试。');})
       .finally(()=>{if(active)setSampleLoading(false);});
     return()=>{active=false;};
@@ -149,7 +160,10 @@ export default function ClaimIntake({token,subject,visible,onOpen,onAuthorize,on
       setProgress({done:attempt.uploaded.size,total:entries.length});
       for(const entry of entries){
         const file=entry.file;if(attempt.uploaded.has(file))continue;
-        const result=await uploadChatDocument(token,attempt.id,file);attempt.uploaded.set(file,result.document_id);
+        const fixedSample=judgeSample&&entries.every(item=>item.sample)&&entry.sampleDocumentId;
+        const result=fixedSample?await attachJudgeSampleDocument(token,attempt.id,judgeSample,entry.sampleDocumentId!)
+          :await uploadChatDocument(token,attempt.id,entry.sampleDocumentId&&judgeSample?await getJudgeSampleOriginal(token,judgeSample,entry.sampleDocumentId):file);
+        attempt.uploaded.set(file,result.document_id);
         setProgress({done:attempt.uploaded.size,total:entries.length});
         if(!mounted.current)return;
       }
@@ -240,6 +254,6 @@ export default function ClaimIntake({token,subject,visible,onOpen,onAuthorize,on
       </div>
       <div className="claim-source-note"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6l8-3Z"/><path d="m8 12 3 3 5-5"/></svg><p>每份不超过 10 MB，数量不限<br/><span>确认前仅在本机预览</span></p></div>
     </dialog>
-    <dialog ref={preview} className="claim-preview-dialog" aria-label="材料图片预览"><div className="claim-preview-head"><strong>{previewFile?.name}</strong><button aria-label="关闭图片预览" onClick={()=>{preview.current?.close();setPreviewFile(null);}}>×</button></div>{previewFile?.url ? <img src={previewFile.url} alt={previewFile.name}/> : previewPdf&&<iframe className="claim-pdf-preview" src={previewPdf} title={previewFile?.name||'资料预览'}/>}</dialog>
+    <dialog ref={preview} className="claim-preview-dialog" aria-label="材料图片预览"><div className="claim-preview-head"><strong>{previewFile?.name}</strong><button aria-label="关闭图片预览" onClick={()=>{preview.current?.close();setPreviewFile(null);}}>×</button></div>{originalLoading&&<p role="status">正在加载清晰原图，可先查看预览…</p>}{originalError&&<p role="status">{originalError}<button onClick={()=>setOriginalRetry(value=>value+1)}>重试加载原图</button></p>}{previewFile?.url ? <img src={originalPreview||previewFile.url} alt={previewFile.name}/> : previewPdf&&<iframe className="claim-pdf-preview" src={previewPdf} title={previewFile?.name||'资料预览'}/>}</dialog>
   </main>;
 }
