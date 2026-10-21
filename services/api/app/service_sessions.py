@@ -4,7 +4,7 @@ import re
 from typing import Literal
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .medical_services import MedicalServiceArgs, catalog, recommend_services
 from .online_care import online_scope, department_instruction, select_doctor_profile
@@ -84,6 +84,15 @@ class ServiceSessionArgs(BaseModel):
     fields:list[SessionField]=Field(default_factory=list,max_length=10)
     clinical:MedicalServiceArgs|None=None
 
+    @model_validator(mode='before')
+    @classmethod
+    def normalize_condition_location(cls,value):
+        if isinstance(value,dict) and isinstance(value.get('clinical'),dict) and 'condition_name' in value['clinical']:
+            value=deepcopy(value);name=value['clinical'].pop('condition_name')
+            if value.get('condition_name') and value['condition_name']!=name:raise ValueError('CONFLICTING_CONDITION_NAMES')
+            value['condition_name']=name
+        return value
+
 
 LABELS={'participant':'服务使用人（称呼或关系即可）','city':'希望安排的城市',
     'preferred_time':'期望日期和时段','facility_preference':'机构偏好（待核验）','symptoms':'主要症状或咨询问题','duration':'症状持续多久',
@@ -154,6 +163,7 @@ def manage_session(args,previous,user_messages,current_question):
         return state
     if state['phase']=='blocked':
         return {**state,'notice':'上一项服务已暂停，请明确新的就医需求后重新开始。'}
+    state['clinical_context']=clinical.model_dump(mode='json')
     # A previous confirmation cannot authorize changed details or a new booking.
     changed=changed_department
     if changed_department:

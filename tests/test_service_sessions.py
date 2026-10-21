@@ -70,6 +70,9 @@ class ServiceSessionTests(unittest.TestCase):
             'action':'start','mode':'doctor','department':'gynecology','clinical':self.clinical}})})
         args=model.plan_service_session([])
         self.assertEqual(args.department,'gynecology')
+        nested=ServiceSessionArgs(action='reply',clinical={**self.clinical,'condition_name':'慢性咽炎'})
+        self.assertEqual(nested.condition_name,'慢性咽炎')
+        self.assertNotIn('condition_name',nested.clinical.model_dump())
 
     def test_source_alignment_keeps_negation_and_only_recovers_short_conjunctions(self):
         original='和以往一样稳定、没有加重，也没有怀孕或异常出血'

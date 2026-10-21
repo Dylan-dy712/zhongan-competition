@@ -721,6 +721,21 @@ def run_agent(history, question, attachments, tools, model=None, on_event=None, 
         messages.append({'role': 'user', 'content': json.dumps({'message_attachment_text': attachment_materials}, ensure_ascii=False)})
     events = [{'tool': 'read_chat_attachments', 'status': attachment_materials['status']}] if attachment_materials else []
     budget = 6
+    if not analysis_mode and isinstance(tools,CareTools) and tools.service_session:
+        state=tools.service_session;action=None
+        if state.get('phase')=='awaiting_confirmation' and question.strip()==state.get('confirmation_text'):
+            action='confirm'
+        elif state.get('phase') in {'collecting','awaiting_confirmation','doctor_active'} and question.strip()=='结束当前模拟服务，回到暖暖继续聊。':
+            action='end'
+        if action and (state.get('clinical_context') or action=='end'):
+            args=ServiceSessionArgs(action=action,mode=state['mode'],clinical=state.get('clinical_context'))
+            arguments=args.model_dump_json();call_id='explicit-service-'+action
+            messages.append({'role':'assistant','content':None,'tool_calls':[{'id':call_id,'type':'function',
+                'function':{'name':'manage_service_session','arguments':arguments}}]})
+            found=tools.execute('manage_service_session',arguments);budget-=1
+            events.append({'tool':'manage_service_session','status':str(found.get('phase',found.get('status','completed')))})
+            if on_event:on_event(events)
+            messages.append({'role':'tool','tool_call_id':call_id,'content':json.dumps(found,ensure_ascii=False)})
     repaired = False
     completion_repaired = False
     history_completion_repaired = False
