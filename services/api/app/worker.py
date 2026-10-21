@@ -555,6 +555,10 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
         performance['recognition_cache']={'reused_pages':reused_pages,'processed_pages':recognized_pages}
         performance['patient_analysis_mode']=report_model_result.get('usage_metadata',{}).get('patient_analysis_mode','shared')
 
+        field_provider, field_model_id = model_provider, model_id
+        if model_result.get('usage_metadata',{}).get('strategy') == 'C':
+            field_record = model_result['usage_metadata']['document_extractions'][0]
+            field_provider, field_model_id = field_record['provider'], field_record['model_id']
         advance('validate')
         evidence_ids = [str(row['evidence_id']) for row in fact_inputs]
         evidence_ids.extend(str(row['evidence_id']) for rows in narrative_sources.values() for row in rows)
@@ -799,7 +803,7 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
                     repaired_output=excluded.repaired_output, candidates=excluded.candidates,
                     usage_metadata=excluded.usage_metadata, error_code=excluded.error_code,
                     personnel=excluded.personnel""",
-                (uuid4(), run["run_id"], run["case_id"], model_provider, model_id,
+                (uuid4(), run["run_id"], run["case_id"], field_provider, field_model_id,
                  product_extraction.PROMPT_VERSION if model_result.get("usage_metadata",{}).get("strategy") == "C" else PROMPT_VERSION,
                  product_extraction.SCHEMA_VERSION if model_result.get("usage_metadata",{}).get("strategy") == "C" else MODEL_SCHEMA_VERSION, model_result["status"],
                  json.dumps(model_result.get("raw_output"), ensure_ascii=False),
@@ -852,7 +856,7 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
                 "status": "completed", "extractor_version": EXTRACTOR_VERSION,
                 "fact_count": len(facts),
                 "observed_count": sum(fact["status"] == "observed" for fact in facts),
-                "model_status": model_result["status"], "model_id": model_id,
+                "model_status": model_result["status"], "model_id": field_model_id,
                 "prompt_version": product_extraction.PROMPT_VERSION if model_result.get("usage_metadata",{}).get("strategy") == "C" else PROMPT_VERSION,
                 "strategy": model_result.get("usage_metadata",{}).get("strategy", "legacy"),
             }, "reconcile": {
