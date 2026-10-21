@@ -31,7 +31,7 @@ from .model_workloads import is_qianfan
 from .contracts.knowledge import DiseaseCode
 from .patient_followup import FollowupPayload, FOLLOWUP_INSTRUCTION, source_patient_updates
 from .medical_services import MedicalServiceArgs, SERVICE_INSTRUCTION, SERVICE_INVITATION, recommend_services, pending_service_reply, separate_service_citations
-from .service_sessions import ServiceSessionArgs, SESSION_INSTRUCTION, manage_session, restore_session
+from .service_sessions import ServiceSessionArgs, SESSION_INSTRUCTION, manage_session, restore_session, pending_inline_service_reply
 from .chat_reply import CHAT_REPLY_INSTRUCTION, decode_chat_reply
 from .web_knowledge import WebKnowledge, chat_concepts, CONCEPTS, COST_TOPICS
 
@@ -260,6 +260,27 @@ class AgentModel:
         data=json.loads(content)
         if not isinstance(data,dict) or 'service_request' not in data:raise ValueError('INVALID_SERVICE_PLAN')
         return None if data['service_request'] is None else MedicalServiceArgs.model_validate(data['service_request'])
+
+    def plan_service_session(self,messages):
+        from .medical_services import catalog
+        choices=[{key:item[key] for key in ('id','title','need','eligibility')} for item in catalog()['benefits']]
+        instruction=('上一条承诺在当前聊天预约或接入医生，但尚未执行服务工具。只返回JSON对象'
+            '{"session_request":参数对象或null}，不能返回段落、计划或口头承诺。'
+            '按当前用户意图和已整理信息选择start/update/confirm/reply/end。已有状态延续；信息不足也可start并保留缺项，工具返回后补问。'
+            '只有用户并未要求开始/继续服务或需先判断急症时才返回null。临床信息仍需如实填写，未知不猜。'
+            '已查询的服务或以下公开目录均可用于选择service_id，不代表真实保单已核验：'+json.dumps(choices,ensure_ascii=False)+
+            '参数JSON Schema：'+json.dumps(ServiceSessionArgs.model_json_schema(),ensure_ascii=False))
+        message=self.complete([*messages,{'role':'system','content':instruction}],allow_tools=False)
+        calls=message.get('tool_calls') or []
+        if calls:
+            if len(calls)!=1 or calls[0].get('function',{}).get('name')!='manage_service_session':
+                raise ValueError('INVALID_INLINE_SERVICE_PLAN_TOOL')
+            return ServiceSessionArgs.model_validate_json(calls[0]['function'].get('arguments','{}'))
+        content=(message.get('content') or '').strip()
+        if content.startswith('```'):content=content.split('\n',1)[-1].rsplit('```',1)[0].strip()
+        data=json.loads(content)
+        if not isinstance(data,dict) or 'session_request' not in data:raise ValueError('INVALID_INLINE_SERVICE_PLAN')
+        return None if data['session_request'] is None else ServiceSessionArgs.model_validate(data['session_request'])
 
 
     def review_analysis(self, packed, text, citations=None):
@@ -689,6 +710,7 @@ def run_agent(history, question, attachments, tools, model=None, on_event=None, 
     completion_repaired = False
     history_completion_repaired = False
     service_completion_repaired = False
+    inline_service_repaired = False
     service_planning_calls = 0
     analysis_has_evidence = False
     aliases = {}
@@ -913,6 +935,27 @@ def run_agent(history, question, attachments, tools, model=None, on_event=None, 
                  ('材料中S1等短编号' if analysis_mode else '实际来源UUID字符串') +
                  '）、history_refs（最多12个历史UUID字符串）、knowledge_refs（最多8个真实检索条目ID）、citations（逐条quote原句与source_refs数组，quote在正文中须唯一且不跨行）。只选择支持正文关键事实的少量直接来源，绝对不要复制整个材料编号集合；没有引用时用空数组。另保留clarification_questions（最多2项，field、question和options，每个选项含label和message）、suggested_questions（最多3条，每条最多200字符）和patient_updates（最多5项，field与逐字等于用户本条消息全文的statement）；无需补问或更新时用空数组。text可保留编号与**加粗**，保留citations中的逐条来源绑定，不要输出其他字段。'},
             ])
+            continue
+        if (not analysis_mode and isinstance(tools,CareTools) and not tools.service_session_called
+                and pending_inline_service_reply(reply.text) and getattr(type(model),'plan_service_session',None) is not None):
+            if inline_service_repaired or round_index>=3 or not budget:
+                raise ValueError('AGENT_INCOMPLETE_INLINE_SERVICE_REPLY')
+            inline_service_repaired=True
+            messages.append({'role':'assistant','content':content})
+            if getattr(tools,'memory_snapshot',None) is not None:
+                tools.validate_runtime();tools.conn.commit()
+            args=model.plan_service_session(messages)
+            service_planning_calls+=1
+            if args is not None:
+                call_id='inline-service-completion-repair';arguments=args.model_dump_json()
+                messages.append({'role':'assistant','content':None,'tool_calls':[{'id':call_id,'type':'function',
+                    'function':{'name':'manage_service_session','arguments':arguments}}]})
+                found=tools.execute('manage_service_session',arguments);budget-=1
+                events.append({'tool':'manage_service_session','status':str(found.get('phase',found.get('status','completed')))})
+                if on_event:on_event(events)
+                messages.append({'role':'tool','tool_call_id':call_id,'content':json.dumps(found,ensure_ascii=False)})
+            else:
+                messages.append({'role':'user','content':'当前需要先澄清情况或仅解释服务。直接回答必要信息，不声称已预约、已接入或将替用户安排。'})
             continue
         if (not analysis_mode and isinstance(tools,CareTools) and tools.medical_services is None and not tools.service_session_called
                 and pending_service_reply(reply.text)):

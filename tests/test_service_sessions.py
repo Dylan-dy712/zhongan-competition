@@ -3,7 +3,7 @@ import unittest
 from unittest.mock import MagicMock,patch
 
 from services.api.app.medical_services import MedicalServiceArgs,catalog
-from services.api.app.service_sessions import ServiceSessionArgs,manage_session,restore_session
+from services.api.app.service_sessions import ServiceSessionArgs,manage_session,restore_session,pending_inline_service_reply
 from services.api.app.conversation_agent import CareTools,run_agent,history_answer
 
 
@@ -36,6 +36,34 @@ class ServiceSessionTests(unittest.TestCase):
         self.assertTrue(state['booking_reference'].startswith('DEMO-'))
         self.assertIn('未占用真实',state['notice'])
         self.assertEqual(self.call(state,'confirm',question='确认模拟预约')['booking_reference'],state['booking_reference'])
+
+    def test_unexecuted_inline_promise_requires_structured_tool_execution(self):
+        args=ServiceSessionArgs(action='start',service_id=self.benefit,clinical=self.clinical,
+            fields=[{'key':k,'value':v} for k,v in self.benefit_fields.items()])
+        class Model:
+            calls=0
+            def complete(self,messages):
+                self.calls+=1
+                text=('好的，我先按你这次的需求看一下权益，然后帮你完成模拟预约。' if self.calls==1 else
+                    '需求已整理，请核对使用人、城市和时间后确认模拟预约。')
+                return {'content':json.dumps({'text':text,'evidence_refs':[],'history_refs':[]})}
+            def plan_service_session(self,messages):return args
+        tools=CareTools(MagicMock(),'actor','conversation');tools.validate_reply=MagicMock();tools.validate_runtime=MagicMock()
+        question='我本人在上海市，下周六上午想预约体检。'
+        with patch('services.api.app.conversation_agent.require_conversation',return_value={'case_id':'case'}):
+            result,events=run_agent([],question,[],tools,model=Model())
+        self.assertEqual(result['service_session']['phase'],'awaiting_confirmation')
+        self.assertEqual(events[0]['tool'],'manage_service_session')
+        self.assertTrue(pending_inline_service_reply('我已经帮你完成模拟预约。'))
+        self.assertFalse(pending_inline_service_reply('这种情况不适合在线预约，应先急诊。'))
+
+    def test_real_model_inline_planner_validates_json(self):
+        from services.api.app.conversation_agent import AgentModel
+        model=AgentModel.__new__(AgentModel)
+        model.complete=MagicMock(return_value={'content':json.dumps({'session_request':{
+            'action':'start','mode':'doctor','department':'gynecology','clinical':self.clinical}})})
+        args=model.plan_service_session([])
+        self.assertEqual(args.department,'gynecology')
 
     def test_cannot_confirm_missing_fields_or_invented_assent(self):
         state=self.call()
