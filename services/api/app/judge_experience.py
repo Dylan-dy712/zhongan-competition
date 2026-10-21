@@ -63,10 +63,19 @@ def check_scope(conn,run,bundle,rows):
     from .worker import recognition_profile
     from services.judge_demo.app import sample_manifest
     case=conn.execute('SELECT created_by,user_context FROM cases WHERE case_id=%s',(run['case_id'],)).fetchone()
-    conversation=conn.execute('''SELECT v.conversation_id FROM conversations v JOIN conversation_turns t ON t.conversation_id=v.conversation_id
-        WHERE v.case_id=%s AND v.actor_id=%s AND t.status='completed' AND t.tool_events @> %s::jsonb
-        ORDER BY t.created_at DESC LIMIT 1''',
-        (run['case_id'],case['created_by'],json.dumps([{'tool':'start_analysis','run_id':str(run['run_id'])}]))).fetchone()
+    chat=(run.get('context_snapshot') or {}).get('chat')
+    if chat:
+        # The worker can claim the queued run before its initiating turn finishes.
+        # Bind to the run's frozen anchor rather than racing the tool-event write.
+        conversation=conn.execute('''SELECT v.conversation_id FROM conversations v JOIN conversation_turns t ON t.conversation_id=v.conversation_id
+            WHERE v.case_id=%s AND v.actor_id=%s AND v.conversation_id=%s AND t.turn_id=%s
+            AND t.input_kind='user' AND t.status IN ('running','completed')''',
+            (run['case_id'],case['created_by'],chat['conversation_id'],chat['anchor_turn_id'])).fetchone()
+    else:
+        conversation=conn.execute('''SELECT v.conversation_id FROM conversations v JOIN conversation_turns t ON t.conversation_id=v.conversation_id
+            WHERE v.case_id=%s AND v.actor_id=%s AND t.status='completed' AND t.tool_events @> %s::jsonb
+            ORDER BY t.created_at DESC LIMIT 1''',
+            (run['case_id'],case['created_by'],json.dumps([{'tool':'start_analysis','run_id':str(run['run_id'])}]))).fetchone()
     if not conversation:return None
     cid=conversation['conversation_id'];require_conversation(conn,case['created_by'],cid)
     turns=conn.execute("SELECT question,attachments FROM conversation_turns WHERE conversation_id=%s AND input_kind='user' ORDER BY created_at LIMIT 21",(cid,)).fetchall()
