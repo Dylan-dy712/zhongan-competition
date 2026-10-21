@@ -130,6 +130,11 @@ class ServiceSessionTests(unittest.TestCase):
         self.assertEqual(manage_session(args,None,['上海市'],'上海市')['status'],'ungrounded_field')
         args=ServiceSessionArgs(action='start',mode='doctor')
         self.assertEqual(manage_session(args,None,[],'')['status'],'needs_clinical_context')
+        tools=CareTools(MagicMock(),'actor','conversation');tools.service_user_messages=['我在上海市']
+        with patch('services.api.app.conversation_agent.require_conversation',return_value={'case_id':'case'}):
+            tools.execute('manage_service_session',json.dumps({'action':'start','service_id':'invented','clinical':self.clinical}))
+        self.assertFalse(tools.service_session_called)
+        self.assertIsNone(tools.service_session)
 
     def test_doctor_cannot_become_real_appointment_or_overwrite_active_service(self):
         state=self.ready_doctor()

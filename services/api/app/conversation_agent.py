@@ -445,8 +445,8 @@ class CareTools:
             if self.medical_services and self.medical_services['status']=='urgent' and args.action!='end':
                 args=args.model_copy(update={'clinical':MedicalServiceArgs(routes=['online'],needs=['consultation'],clinical_priority='urgent')})
             state=manage_session(args,self.service_session,self.service_user_messages,self.service_current_question)
-            self.service_session_called=True
             if state.get('session_id'):
+                self.service_session_called=True
                 self.service_session=state
                 self.service_speaker=state.get('speaker','assistant')
                 if state.get('routing_status')=='urgent':

@@ -131,7 +131,8 @@ def manage_session(args,previous,user_messages,current_question):
         state.pop('age_years',None)
     for field in args.fields:
         if not any(field.value in message for message in user_messages):
-            return {'status':'ungrounded_field','notice':'服务信息需来自用户在本对话提供的原话，请重新核对。'}
+            return {'status':'ungrounded_field','rejected_field':field.key,'rejected_value':field.value,
+                'notice':'该字段不是用户逐字原话。请直接从用户消息摘录连续文字后重新调用工具，不拼接、不总结；确实未知才留空补问。'}
         if field.key not in [*REQUIRED[state['mode']],*(['facility_preference'] if state['mode']=='benefit' else [])]:continue
         if state['fields'].get(field.key)!=field.value:
             state['fields'][field.key]=field.value;changed=True
