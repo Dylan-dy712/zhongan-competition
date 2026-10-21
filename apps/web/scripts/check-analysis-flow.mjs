@@ -97,7 +97,7 @@ try{
  const simulated=document.querySelector('.analysis-dialog progress').value;
  assert.ok(simulated>60&&simulated<80,'The percentage simulates progress inside the current stage');
  assert.equal(document.querySelectorAll('.analysis-steps .done').length,3,'Simulation never completes a step');
- assert.match(document.querySelector('.analysis-reuse-note').textContent,/已直接使用 2 页已识别内容/);
+ assert.doesNotMatch(document.querySelector('.analysis-dialog').textContent,/已直接使用|页已识别内容/);
  assert.match(document.querySelector('.analysis-progress-note').textContent,/模拟预估/);
  estimateTime+=86400000;
  for(let attempt=0;attempt<12&&document.querySelector('.analysis-dialog progress').value<79;attempt++)await flush();
