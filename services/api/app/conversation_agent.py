@@ -749,6 +749,7 @@ def run_agent(history, question, attachments, tools, model=None, on_event=None, 
     history_completion_repaired = False
     service_completion_repaired = False
     inline_service_repaired = False
+    offline_boundary_repaired = False
     service_planning_calls = 0
     analysis_has_evidence = False
     aliases = {}
@@ -976,6 +977,14 @@ def run_agent(history, question, attachments, tools, model=None, on_event=None, 
             continue
         offline_service_cards=(getattr(tools,'medical_services',None) or {}).get('cards',[]) if not analysis_mode and isinstance(tools,CareTools) else []
         offline_service_complete=bool(offline_service_cards) and all(card.get('kind')=='hospital' for card in offline_service_cards)
+        if (offline_service_complete and not tools.service_session_called
+                and re.search(r'我.{0,12}(?:可以|能|帮你|帮您|为你|为您).{0,12}(?:接入|对接|安排|联系).{0,12}(?:医生|咨询)',reply.text)):
+            if offline_boundary_repaired or round_index>=4:raise ValueError('AGENT_UNSUPPORTED_DOCTOR_OFFER')
+            offline_boundary_repaired=True
+            messages.extend([{'role':'assistant','content':content},{'role':'user','content':
+                '本轮工具仅返回线下医院候选，尚未确认可接入任何线上医生。请依据本轮实际结果解释线下路径，'
+                '删除声称可以接入或对接线上/模拟医生的承诺，不以普通在线咨询绕过就医分流。'}])
+            continue
         if (not analysis_mode and isinstance(tools,CareTools) and not tools.service_session_called and not offline_service_complete
                 and (pending_inline_service_reply(reply.text,'\n'.join([question,*service_reply_context[-4:]])) or pending_session_command(tools.service_session,question))
                 and getattr(type(model),'plan_service_session',None) is not None):

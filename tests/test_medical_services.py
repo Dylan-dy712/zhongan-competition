@@ -153,6 +153,21 @@ class MedicalServicesTests(unittest.TestCase):
         self.assertTrue(any(x['kind']=='hospital' for x in result['cards']))
         self.assertFalse(any(x['kind']=='online' for x in result['cards']))
 
+    def test_offline_only_results_cannot_offer_unavailable_online_doctor(self):
+        tools=CareTools(MagicMock(),'actor','conversation');tools.validate_reply=MagicMock()
+        model=MagicMock();model.complete.side_effect=[
+            {'content':None,'tool_calls':[{'id':'offline','type':'function','function':{
+                'name':'recommend_medical_services','arguments':json.dumps({'routes':['online'],
+                    'needs':['consultation'],'condition':'oncology','location':'上海市'})}}]},
+            {'content':json.dumps({'text':'本次优先线下肿瘤专科。如果想先问问题，我可以帮你接入模拟医生咨询。'})},
+            {'content':json.dumps({'text':'本次优先线下肿瘤专科，以下候选的资格与号源还需核实。'})}]
+        with patch('services.api.app.conversation_agent.require_conversation',return_value={'case_id':'case'}):
+            answer,events=run_agent([],'我确诊肿瘤，想在上海市找专科治疗。',[],tools,model=model)
+        self.assertEqual(model.complete.call_count,3)
+        self.assertNotIn('接入模拟医生',answer['text'])
+        self.assertTrue(all(c['kind']=='hospital' for c in answer['medical_services']['cards']))
+        self.assertEqual(len(events),1)
+
     def test_oncology_does_not_turn_unknown_location_into_online_treatment(self):
         result=self.recommend(routes=['online'],condition='oncology',location='',needs=['consultation'],question='已确诊肿瘤，想通过线上完成治疗。')
         self.assertEqual(result['status'],'needs_location')
