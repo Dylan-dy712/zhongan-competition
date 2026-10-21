@@ -42,7 +42,7 @@ class ServiceSessionTests(unittest.TestCase):
             fields=[{'key':k,'value':v} for k,v in self.benefit_fields.items()])
         class Model:
             calls=0
-            def complete(self,messages):
+            def complete(self,messages,**kwargs):
                 self.calls+=1
                 text=('好的，我先按你这次的需求看一下权益，然后帮你完成模拟预约。' if self.calls==1 else
                     '需求已整理，请核对使用人、城市和时间后确认模拟预约。')
