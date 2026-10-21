@@ -1,5 +1,8 @@
 """Connect evidence-bearing C page extraction to the existing case pipeline."""
 import os
+from decimal import Decimal
+
+from .cost_breakdown import cost_pairs, LABEL_ROLES
 
 from .document_fields import extract_document, DocumentExtractionFailure, PROMPT_VERSION, SCHEMA_VERSION
 from .fact_extractor import assertion_for
@@ -73,7 +76,7 @@ def extract_page(page, image_bytes, plan):
 
 
 def case_extraction(parsed_documents):
-    candidates, documents = [], []
+    candidates, documents, cost_lines = [], [], []
     for document, pages in parsed_documents:
         for page in pages:
             record = page['metadata'].get('document_extraction')
@@ -91,7 +94,7 @@ def case_extraction(parsed_documents):
                 if value is None or not quote or prediction.get('field_status', {}).get(field) == 'derived':
                     continue
                 for item in value if isinstance(value, list) else [value]:
-                    raw = str(item)
+                    raw = str(int(item)) if kind == 'stay_days' else str(item)
                     if raw not in ''.join(quote.split()) and ''.join(raw.split()) not in ''.join(quote.split()):
                         continue
                     try:
@@ -101,11 +104,23 @@ def case_extraction(parsed_documents):
                         candidates.append(candidate.model_dump(mode='json', exclude_none=True))
                     except ValueError:
                         continue  # full source field is retained above, not truncated into a new fact
+            quotes = list(prediction.get('evidence', {}).values())
+            quotes += [r.get('evidence_quote', '') for b in fields.get('blocks', []) for r in b.get('costDetailList', [])]
+            for quote in dict.fromkeys(q for q in quotes if q and len(q) <= 1000):
+                for pair in cost_pairs(quote):
+                    cost_lines.append({'label': pair['label'], 'amount_minor': pair['amount_minor'],
+                        'currency': 'CNY', 'evidence_quote': quote, 'confidence_score': None})
+                    if ('totalMedicalExpense' in fields and LABEL_ROLES[pair['label']] == 'total'
+                            and pair['amount_minor'] == int(Decimal(str(fields['totalMedicalExpense'])) * 100)):
+                        candidates.append(ModelCandidate(fact_type='total_cost', raw_value=quote,
+                            normalized_value={'amount_minor': pair['amount_minor'], 'currency': 'CNY'},
+                            assertion='present', evidence_quote=quote,
+                            confidence_score=prediction.get('confidence', {}).get('totalMedicalExpense')).model_dump(mode='json'))
     if not documents:
         return None
     failed = sum(d['status'] == 'failed' for d in documents)
     return {'status': 'partial' if any(d['status'] != 'completed' for d in documents) else 'completed', 'raw_output': None,
-            'repaired_output': None, 'candidates': {'candidates': candidates, 'cost_lines': []},
+            'repaired_output': None, 'candidates': {'candidates': candidates, 'cost_lines': cost_lines},
             'personnel': [], 'usage_metadata': {'extraction_pipeline': VERSION, 'strategy': 'C',
                 'document_extractions': documents, 'failed_pages': failed}, 'error_code': None,
             'structured_documents': documents}
