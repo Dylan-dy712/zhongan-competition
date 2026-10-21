@@ -339,7 +339,7 @@ def route_document(document: dict, path: Path, pipeline_version: str, ocr: Ocr |
 
 
 def analyze_models(material, knowledge_entries, user_context, source_refs, fact_inputs,
-                   encounter_dates, advance, knowledge_excluded=False, memory_context=None, defer_patient_analysis=False, preloaded_models=None, document_models=None):
+                   encounter_dates, advance, knowledge_excluded=False, memory_context=None, defer_patient_analysis=False, preloaded_models=None, document_models=None, prepared_experience=None):
     """Overlap independent network calls; SQL and release checks stay on the caller."""
     started = time.monotonic()
     timings = {}
@@ -358,6 +358,15 @@ def analyze_models(material, knowledge_entries, user_context, source_refs, fact_
     report = {"status":"not_configured","draft":{"sections":[],"actions":[]},"raw_output":None,
               "repaired_output":None,"usage_metadata":{},"error_code":"LLM_NOT_CONFIGURED"}
     provider, model_id = os.environ.get("LLM_PROVIDER","openai_compatible"), os.environ.get("LLM_MODEL_ID","unconfigured")
+    if prepared_experience and document_models:
+        fields=validate_evidence_quotes(document_models,material)
+        fields['candidates']['documents']=[{'document_id':d['document_id'],'page_index':d['page_index'],'status':d['status'],
+            'fields':d['prediction'].get('fields',{}),'confidence':d['prediction'].get('confidence',{}),
+            'evidence':d['prediction'].get('evidence',{}),'requires_review':True} for d in document_models['structured_documents']]
+        for stage in ['insights','guidance']:advance(stage)
+        return fields,prepared_experience['insights'],prepared_experience['report'],provider,model_id,{
+            'model_schedule':'prepared_sample','model_seconds':{},'model_wall_seconds':0,
+            'judge_experience':{'mode':'prepared_sample','duration_ms':8000,'variant':prepared_experience['variant']}}
     configured = bool(material and os.environ.get("LLM_API_KEY"))
     with ThreadPoolExecutor(max_workers=2, thread_name_prefix='analysis-model') as pool:
         fields_future = insights_future = None
@@ -542,6 +551,10 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
             from .judge_model_cache import read_models
             preloaded_models=read_models(parsed_documents,knowledge_entries,fingerprint)
         parse_seconds = time.monotonic()-run_started
+        prepared_experience=None
+        if fully_prepared and not knowledge_excluded and product_extraction.enabled():
+            from .judge_experience import read_worker_models
+            prepared_experience=read_worker_models(conn,run,parsed_documents,narrative_sources)
         model_result, insight_model_result, report_model_result, model_provider, model_id, performance = analyze_models(
             material, knowledge_entries,
             run['context_snapshot']['case_user_context'] if run.get('context_snapshot') else
@@ -550,6 +563,7 @@ def process_run(conn, run: dict, storage_root: Path) -> None:
             memory_context=(run.get('context_snapshot') or {}).get('memory'),
             **({'defer_patient_analysis':True} if fully_prepared else {}),
             **({'preloaded_models':preloaded_models} if preloaded_models else {}),
+            **({'prepared_experience':prepared_experience} if prepared_experience else {}),
             document_models=product_extraction.case_extraction(parsed_documents) if product_extraction.enabled() else None)
         performance['parse_prepare_seconds'] = round(parse_seconds,3)
         performance['recognition_cache']={'reused_pages':reused_pages,'processed_pages':recognized_pages}

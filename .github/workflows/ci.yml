@@ -96,6 +96,7 @@ jobs:
       - run: npm run test:services --prefix apps/web
       - run: npm run test:medical-records --prefix apps/web
       - run: node apps/web/scripts/check-analysis-flow.mjs
+      - run: node apps/web/scripts/check-judge-experience.mjs
       - run: node apps/web/scripts/check-chat-attachments.mjs
       - run: node apps/web/scripts/check-overview-content.mjs
       - run: node apps/web/scripts/check-claim-submission.mjs

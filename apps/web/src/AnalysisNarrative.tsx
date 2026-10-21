@@ -18,7 +18,7 @@ export default function AnalysisNarrative({turn,onEvidence,onServiceAsk,disabled
   const cited=(text:string)=><CitedText text={text} citations={turn.answer!.citations} sources={turn.answer!.knowledge_sources} onEvidence={onEvidence}/>;
   let number=0;
   return <article className="analysis-narrative" aria-label="暖暖的材料解读">
-    {turn.answer.sample_preload && <p className="muted" role="note">本次复用预加载的评委样例草稿，已核对本次提交的材料。</p>}
+    {(turn.answer.judge_experience || turn.answer.sample_preload) && <p className="muted" role="note">示例报告体验，可查看材料来源并继续追问。</p>}
     <div className="analysis-narrative-copy">
       {blocks.map((block,i)=>block.kind==='point'
         ? <section className="analysis-narrative-point" key={i}>
