@@ -180,7 +180,7 @@ def manage_session(args,previous,user_messages,current_question):
     if routing['status']=='urgent' or not allowed:
         state.update(phase='blocked',speaker='assistant',notice=routing.get('notice') or routing.get('clinical_prompt') or
             '当前需求需先确认适用条件或安排线下就医，暂不继续此项模拟服务。',
-            missing_fields=[],confirmation_text='',routing_status=routing['status'])
+            missing_fields=[],confirmation_text='',routing_status=routing['status'],routing_result=routing)
         return state
     if state['phase']=='blocked':
         return {**state,'notice':'上一项服务已暂停，请明确新的就医需求后重新开始。'}

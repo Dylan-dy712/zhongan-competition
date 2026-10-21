@@ -220,6 +220,22 @@ class ServiceSessionTests(unittest.TestCase):
         self.assertFalse(tools.service_session_called)
         self.assertEqual(tools.service_session['mode'],'benefit')
 
+    def test_blocked_doctor_switch_shows_actual_offline_routing(self):
+        class Model:
+            def plan_service_session(self,messages):return ServiceSessionArgs(action='switch',mode='doctor',
+                clinical=MedicalServiceArgs(routes=['online'],needs=['consultation'],visit_stage='first_visit'))
+            def complete(self,messages,**kwargs):return {'content':json.dumps({'text':'告诉我城市，我就帮你安排线上医生。'})}
+        tools=CareTools(MagicMock(),'actor','conversation');tools.validate_reply=MagicMock()
+        history=[{'question':'先约体检','status':'completed','answer':{'text':'请补充信息。','service_session':self.call()}}]
+        with patch('services.api.app.conversation_agent.require_conversation',return_value={'case_id':'case'}):
+            answer,events=run_agent(history,'现在先处理新出现的头痛，找医生咨询',[],tools,model=Model())
+        self.assertEqual(answer['service_session']['phase'],'blocked')
+        self.assertEqual(answer['service_speaker'],'assistant')
+        self.assertIn('线下评估',answer['text'])
+        self.assertNotIn('安排线上医生',answer['text'])
+        self.assertEqual(answer['medical_services']['status'],'needs_location')
+        self.assertNotIn('routing_result',answer['service_session'])
+
     def test_collecting_turns_advance_even_when_narrative_has_no_promise_phrase(self):
         class Model:
             def __init__(self,args,text):self.args=args;self.text=text

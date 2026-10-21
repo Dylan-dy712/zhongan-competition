@@ -467,13 +467,15 @@ class CareTools:
             if self.medical_services and self.medical_services['status']=='urgent' and args.action!='end':
                 args=args.model_copy(update={'clinical':MedicalServiceArgs(routes=['online'],needs=['consultation'],clinical_priority='urgent')})
             state=manage_session(args,self.service_session,self.service_user_messages,self.service_current_question)
+            routing=state.pop('routing_result',None)
+            if routing is not None:self.medical_services=routing
             if state.get('session_id') and state.get('status')!='active_service_conflict':
                 self.service_session_called=True
                 self.service_session=state
                 self.service_speaker=state.get('speaker','assistant')
                 if state.get('routing_status')=='urgent':
                     self.medical_services=recommend_services(MedicalServiceArgs(routes=['online'],needs=['consultation'],clinical_priority='urgent'),[])
-            return state
+            return {**state,'routing_result':routing} if routing is not None else state
         if name == 'recommend_medical_services':
             if self.medical_services and self.medical_services['status']=='urgent':
                 return self.medical_services
@@ -1000,6 +1002,12 @@ def run_agent(history, question, attachments, tools, model=None, on_event=None, 
                  '）、history_refs（最多12个历史UUID字符串）、knowledge_refs（最多8个真实检索条目ID）、citations（逐条quote原句与source_refs数组，quote在正文中须唯一且不跨行）。只选择支持正文关键事实的少量直接来源，绝对不要复制整个材料编号集合；没有引用时用空数组。另保留clarification_questions（最多2项，field、question和options，每个选项含label和message）、suggested_questions（最多3条，每条最多200字符）和patient_updates（最多5项，field与逐字等于用户本条消息全文的statement）；无需补问或更新时用空数组。text可保留编号与**加粗**，保留citations中的逐条来源绑定，不要输出其他字段。'},
             ])
             continue
+        if (not analysis_mode and isinstance(tools,CareTools) and tools.service_session_called
+                and (tools.service_session or {}).get('phase')=='blocked'):
+            # A blocked consultation cannot be narrated as an opening or handoff.
+            notice=tools.service_session['notice']
+            location_prompt=(tools.medical_services or {}).get('location_prompt')
+            reply=AgentReply(text=notice+('\n\n'+location_prompt if location_prompt else ''))
         offline_service_cards=(getattr(tools,'medical_services',None) or {}).get('cards',[]) if not analysis_mode and isinstance(tools,CareTools) else []
         offline_service_complete=bool(offline_service_cards) and all(card.get('kind')=='hospital' for card in offline_service_cards)
         if (offline_service_complete and not tools.service_session_called
