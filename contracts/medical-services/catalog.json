@@ -1,5 +1,5 @@
 {
-  "version": "2026-10-16",
+  "version": "2026-10-21",
   "default_policy": "demo_assumed_midhigh",
   "benefits": [
     {
@@ -5036,6 +5036,23 @@
       "source_url": "https://www.fahcqmu.cn/gw_yygk?id=1",
       "source_pages": "",
       "coverage_note": "官网位置资料不等于保险合作、绿通或直付证明",
+      "rehabilitation": false
+    },
+    {
+      "id": "green2021-fudan-oncology",
+      "name": "复旦大学附属肿瘤医院",
+      "city": "上海市",
+      "province": "上海市",
+      "ownership": "public",
+      "kind": "肿瘤专科医院",
+      "level": "",
+      "address": "",
+      "network": "重疾绿通医院名单（2021-09-09历史版，当前资格待核验）",
+      "network_type": "green_channel",
+      "product_scope": "仅为众安公开重疾绿通历史网络参考，不证明适用当前PLUS2026或本人保单",
+      "source_url": "https://cdn-open.zhongan.com/product/market/B2-ymlNnRs1qtw2qoWMDaeuY.pdf",
+      "source_pages": "22",
+      "coverage_note": "绿通协调资格不等于保险赔付资格；合作现状、癌种科室和可安排情况以服务方确认结果为准",
       "rehabilitation": false
     }
   ],

@@ -94,6 +94,107 @@ class MedicalServicesTests(unittest.TestCase):
         self.assertTrue(any('公立' in x['tags'] for x in hospitals))
         self.assertTrue(any('私立' in x['tags'] for x in hospitals))
 
+    def test_oncology_overrides_online_and_prioritizes_specialists(self):
+        result=self.recommend(routes=['online'],needs=['consultation'],condition='oncology',visit_stage='established')
+        self.assertFalse(any(x['kind']=='online' for x in result['cards']))
+        hospitals=[x for x in result['cards'] if x['kind']=='hospital']
+        self.assertGreaterEqual(len(hospitals),2)
+        self.assertTrue(all('肿瘤' in x['title'] for x in hospitals[:2]))
+        self.assertTrue(any('绿通' in x['title'] for x in result['cards'] if x['kind']=='benefit'))
+        self.assertFalse(any(x['title']=='三甲图文咨询' for x in result['cards']))
+        public=next(x for x in hospitals if x['title']=='复旦大学附属肿瘤医院')
+        self.assertIn('历史',public['source']['title'])
+        self.assertIn('重新确认',public['notice'])
+
+    def test_legacy_oncology_specialty_also_blocks_generic_online(self):
+        result=self.recommend(routes=['online'],specialty='oncology',needs=['consultation'])
+        self.assertTrue(any(x['kind']=='hospital' for x in result['cards']))
+        self.assertFalse(any(x['kind']=='online' for x in result['cards']))
+
+    def test_oncology_does_not_turn_unknown_location_into_online_treatment(self):
+        result=self.recommend(routes=['online'],condition='oncology',location='',needs=['consultation'])
+        self.assertEqual(result['status'],'needs_location')
+        self.assertEqual(result['cards'],[])
+
+    def test_lung_and_colorectal_support_keep_offline_route_and_own_eligibility(self):
+        for cancer in ['lung','colorectal']:
+            result=self.recommend(routes=['online'],condition='oncology',cancer_type=cancer,
+                online_purpose='cancer_support',visit_stage='established',symptom_status='stable')
+            online=[x for x in result['cards'] if x['kind']=='online']
+            self.assertEqual([x['id'] for x in online],['online-cancer-support'])
+            self.assertTrue(any(x['kind']=='hospital' for x in result['cards']))
+            self.assertIn('专项',online[0]['notice'])
+            self.assertIn('初筛',str(online[0]['details']))
+        for cancer in ['other','unknown']:
+            result=self.recommend(condition='oncology',cancer_type=cancer,online_purpose='cancer_support')
+            self.assertFalse(any(x['kind']=='online' for x in result['cards']))
+
+    def test_new_symptoms_procedure_and_first_visit_block_all_online_support(self):
+        for context in [{'symptom_status':'new_or_worsening'},{'visit_stage':'first_visit'},
+                        {'online_purpose':'procedure'},{'clinical_priority':'offline_assessment'}]:
+            values={'condition':'oncology','cancer_type':'lung','online_purpose':'cancer_support',**context}
+            result=self.recommend(**values)
+            self.assertTrue(result['cards'])
+            self.assertTrue(all(x['kind']=='hospital' for x in result['cards']))
+
+    def test_followup_and_prescription_require_stable_established_common_disease(self):
+        for context in [{},{'condition':'common_chronic'},
+                        {'condition':'common_chronic','visit_stage':'established'}]:
+            result=self.recommend(routes=['online','benefits'],needs=['consultation','medicine'],online_purpose='followup',**context)
+            self.assertEqual(result['cards'],[])
+            self.assertIn('明确诊断',result['clinical_prompt'])
+        result=self.recommend(routes=['online'],condition='common_chronic',visit_stage='established',
+            symptom_status='stable',online_purpose='followup')
+        self.assertEqual([x['kind'] for x in result['cards']],['online'])
+        self.assertIn('常见病',result['cards'][0]['description'])
+
+    def test_prescription_age_limit_is_not_a_ban_on_all_child_consultation(self):
+        base={'routes':['online'],'condition':'common_chronic','visit_stage':'established','symptom_status':'stable'}
+        for age in [None,6,3]:
+            result=self.recommend(**base,age_years=age,online_purpose='prescription',needs=['medicine'])
+            self.assertFalse(any(x['kind']=='online' for x in result['cards']))
+        adult=self.recommend(**base,age_years=7,online_purpose='prescription')
+        self.assertEqual([x['kind'] for x in adult['cards']],['online'])
+        child=self.recommend(routes=['online'],age_years=6,online_purpose='health_guidance')
+        self.assertEqual([x['kind'] for x in child['cards']],['online'])
+
+    def test_mental_and_unverified_diseases_do_not_use_generic_online_benefits(self):
+        for condition in ['mental_health','other']:
+            result=self.recommend(routes=['online','benefits'],needs=['consultation','medicine'],condition=condition)
+            self.assertFalse(any(x['kind'] in {'online','benefit'} for x in result['cards']))
+            self.assertTrue(result['notice'])
+        mental=self.recommend(condition='mental_health')
+        self.assertFalse(any(x['kind']=='hospital' for x in mental['cards']))
+        self.assertEqual(mental['status'],'no_local_matches')
+
+    def test_general_health_guidance_does_not_claim_diagnosis_or_prescribing(self):
+        result=self.recommend(routes=['online'])
+        self.assertIn('不代表可以线上确诊或开药',result['cards'][0]['description'])
+
+    def test_oncology_respects_private_preference_and_missing_specialty(self):
+        result=self.recommend(condition='oncology',institution_types=['private'])
+        hospitals=[x for x in result['cards'] if x['kind']=='hospital']
+        self.assertTrue(all('私立' in x['tags'] for x in hospitals))
+        self.assertIn('肿瘤',hospitals[0]['title'])
+        self.assertIn('不等于绿通',str(hospitals[0]['details']))
+        result=self.recommend(condition='oncology',routes=['offline'],location='拉萨市',question='我在拉萨市，需要肿瘤专科')
+        self.assertFalse(result['cards'])
+        self.assertEqual(result['status'],'no_local_matches')
+
+    def test_agent_passes_clinical_context_and_persists_specialist_cards(self):
+        tools=CareTools(MagicMock(),'actor','conversation');tools.validate_reply=MagicMock();tools.validate_runtime=MagicMock()
+        args={'routes':['online'],'needs':['consultation'],'condition':'oncology','cancer_type':'other',
+              'visit_stage':'established','symptom_status':'stable','location':'上海市'}
+        model=MagicMock();model.complete.side_effect=[{'content':None,'tool_calls':[{'id':'oncology-route','type':'function',
+            'function':{'name':'recommend_medical_services','arguments':json.dumps(args)}}]},
+            {'content':json.dumps({'text':'这次优先肿瘤专科，绿通资格还要按保单核验。','evidence_refs':[],'history_refs':[]})}]
+        with patch('services.api.app.conversation_agent.require_conversation',return_value={'case_id':'case'}):
+            reply,_=run_agent([],'我乳腺癌已经确诊，目前稳定，想在上海市找合适的医生。',[],tools,model=model)
+        cards=reply['medical_services']['cards']
+        self.assertTrue(any(x['title']=='复旦大学附属肿瘤医院' for x in cards))
+        self.assertFalse(any(x['kind']=='online' for x in cards))
+        self.assertIn('肿瘤',reply['medical_services']['notice'])
+
     def test_missing_or_fabricated_location_never_returns_hospitals(self):
         for location in ['', '北京市']:
             result=self.recommend(location=location,question='我需要复查，想了解附近的医院。')
